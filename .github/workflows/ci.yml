@@ -5,13 +5,25 @@ on:
     branches: [main]
   pull_request:
 
-# Pas de service Postgres pour l'instant : le test d'intégration de concurrence
-# (invoice-numbering.service.integration.spec.ts) reste "skipped" tant que
-# DATABASE_URL n'est pas fourni. Ajouter un service postgres:16 + DATABASE_URL
-# quand la Tâche 5 (migration initiale) sera débloquée.
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: facture_gn_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/facture_gn_dev?schema=public
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +40,9 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm --filter @facture-gn/db db:generate
+
+      - name: Apply migrations
+        run: pnpm --filter @facture-gn/db db:migrate:deploy
 
       - run: pnpm turbo lint
 
