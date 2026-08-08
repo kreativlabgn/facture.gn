@@ -52,6 +52,18 @@ pour la cible Vault Transit) :
 node -e "const{generateKeyPairSync}=require('crypto');const{privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});console.log('JWT_PRIVATE_KEY=\"'+privateKey.replace(/\n/g,'\\\\n')+'\"');console.log('JWT_PUBLIC_KEY=\"'+publicKey.replace(/\n/g,'\\\\n')+'\"');"
 ```
 
+### Certification (Ed25519, ADR-021/022)
+
+`CERTIFICATION_PRIVATE_KEY` doit aussi être une vraie variable d'environnement (même
+raison que `JWT_PRIVATE_KEY` ci-dessus). Sans elle, `CertificationModule` échoue au
+démarrage plutôt que de générer silencieusement une clé aléatoire à chaque
+redémarrage — un stub sans clé fixe rendrait `GET /verify` incapable de confirmer
+l'intégrité de toute facture émise avant le redémarrage du process.
+
+```bash
+node -e "const{randomBytes}=require('crypto');console.log('CERTIFICATION_PRIVATE_KEY=\"'+randomBytes(32).toString('hex')+'\"');"
+```
+
 ## Documentation de référence
 
 Voir `../V/` (PRD, DAT, ERD, Registre ADR) pour les invariants métier — toute divergence du schéma avec l'ERD doit être documentée.
