@@ -361,3 +361,43 @@ model InvoiceEvent {
 
   @@map("invoice_event")
 }
+
+// ===== Money Context (Squad Money) — orchestrateur de paiement =====
+// Périmètre C2 Phase 1 (docs/plans/2026-08-08-money-context-payment-orchestrator.md) :
+// traçabilité par tentative de paiement (ADR-076) uniquement. PAYMENT_WEBHOOKS
+// (ADR-075) et le câblage sur invoices.service.ts.issue() sont une Phase 2 séparée.
+
+enum PaymentProviderName {
+  djomy
+  moneroo
+  orange_direct
+  mtn_direct
+}
+
+enum PaymentProviderAttemptStatus {
+  pending
+  success
+  failed
+  timeout
+}
+
+// Propriété d'écriture exclusive de money-api (Trust Context ne modifie jamais
+// cette table) — même base Postgres partagée via packages/db, bounded contexts
+// séparés au niveau applicatif, pas au niveau base de données pour ce MVP.
+model PaymentProviderAttempt {
+  id        String @id @default(uuid())
+  invoiceId String @map("invoice_id")
+
+  provider PaymentProviderName
+  status   PaymentProviderAttemptStatus @default(pending)
+
+  providerRef String? @map("provider_ref")
+  amountGnf   BigInt  @map("amount_gnf")
+  feeGateway  BigInt  @default(0) @map("fee_gateway")
+  feePlatform BigInt  @default(0) @map("fee_platform")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  settledAt DateTime? @map("settled_at")
+
+  @@map("payment_provider_attempt")
+}
