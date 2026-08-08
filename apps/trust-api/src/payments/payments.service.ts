@@ -50,14 +50,22 @@ export class PaymentsService {
           },
         });
 
-        const amountDue = invoice.amountDue - dto.amount;
-        await tx.invoice.update({
+        // Incréments atomiques, jamais une valeur absolue recalculée depuis une
+        // lecture faite hors transaction : sous deux paiements concurrents sur la
+        // même facture avec des idempotency_key différentes, Postgres sérialise les
+        // deux écritures au niveau ligne — aucun des deux ne peut silencieusement
+        // écraser l'effet de l'autre sur amountPaid/amountDue.
+        const updatedInvoice = await tx.invoice.update({
           where: { id: invoiceId },
           data: {
-            amountPaid: invoice.amountPaid + dto.amount,
-            amountDue,
-            status: amountDue === 0n ? "paid" : "partially_paid",
+            amountPaid: { increment: dto.amount },
+            amountDue: { decrement: dto.amount },
           },
+        });
+
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { status: updatedInvoice.amountDue <= 0n ? "paid" : "partially_paid" },
         });
 
         return payment;
