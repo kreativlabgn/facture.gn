@@ -160,4 +160,24 @@ describe("WebhooksService", () => {
       expect.objectContaining({ data: expect.objectContaining({ normalizedStatus: "pending" }) }),
     );
   });
+
+  it("une course concurrente sur l'insertion PaymentWebhook (deux livraisons quasi simultanées) est ignorée gracieusement, jamais un 500 brut", async () => {
+    // Forme exacte confirmée par un vrai P2002 déclenché contre Postgres sur
+    // @@unique([provider, providerRef]) : meta.target = ["provider", "provider_ref"].
+    const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { modelName: "PaymentWebhook", target: ["provider", "provider_ref"] },
+    });
+    const provider = createFakeProvider(paidResult);
+    const resolver = createFakeResolver(provider);
+    const confirmationClient = createFakeConfirmationClient("success");
+    const prisma = createFakePrisma({
+      paymentWebhook: { create: vi.fn().mockRejectedValue(uniqueViolation) },
+    });
+    const service = new WebhooksService(prisma as any, resolver as any, confirmationClient as any);
+
+    await expect(
+      service.handleIncomingWebhook("djomy", { provider_ref: "djomy-stub-inv-1" }),
+    ).resolves.toBeUndefined();
+  });
 });
