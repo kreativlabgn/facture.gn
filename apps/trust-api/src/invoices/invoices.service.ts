@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -10,6 +10,8 @@ import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
 
 @Injectable()
 export class InvoicesService {
+  private readonly logger = new Logger(InvoicesService.name);
+
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly numbering: InvoiceNumberingService,
@@ -120,14 +122,24 @@ export class InvoicesService {
       return issuedInvoice;
     }
 
-    return this.prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        paymentLinkUrl: paymentLink.paymentLinkUrl,
-        paymentLinkId: paymentLink.providerRef,
-        paymentLinkExpiresAt: paymentLink.expiresAt,
-      },
-    });
+    // Même garantie que l'appel HTTP lui-même : un corps de réponse money-api
+    // inattendu (ex. paymentLinkExpiresAt invalide) ne doit jamais faire échouer
+    // une émission déjà certifiée et committée.
+    try {
+      return await this.prisma.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          paymentLinkUrl: paymentLink.paymentLinkUrl,
+          paymentLinkId: paymentLink.providerRef,
+          paymentLinkExpiresAt: paymentLink.expiresAt,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Facture ${invoiceId} certifiée mais l'enregistrement du lien de paiement a échoué : ${(error as Error).message}`,
+      );
+      return issuedInvoice;
+    }
   }
 
   // voided réservé aux factures sans aucun paiement (PRD §4.2).

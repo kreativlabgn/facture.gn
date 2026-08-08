@@ -240,6 +240,36 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
     expect(result.paymentLinkExpiresAt).toBe(resolvedLink.expiresAt);
   });
 
+  it("réussit normalement (émission jamais bloquée) quand le second update() échoue — money-api a répondu un corps inattendu", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+    });
+    // Simule un écrit refusé par Prisma (ex. paymentLinkExpiresAt invalide suite à un
+    // corps de réponse money-api malformé) — le premier update() (certification)
+    // réussit normalement, seul le second (lien) échoue.
+    let callCount = 0;
+    prisma.invoice.update = vi.fn().mockImplementation(({ data }: any) => {
+      callCount += 1;
+      if (callCount === 2) {
+        return Promise.reject(new Error("Invalid `DateTime` provided"));
+      }
+      return Promise.resolve({ ...draftInvoice, ...data });
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(resolvedLink);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect(result.status).toBe("issued");
+    expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
+    expect(result.paymentLinkUrl).toBeUndefined();
+  });
+
   it("réussit normalement (émission jamais bloquée) quand la génération de lien échoue — Money Context en panne", async () => {
     const prisma = createFakePrisma({
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
