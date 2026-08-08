@@ -401,3 +401,30 @@ model PaymentProviderAttempt {
 
   @@map("payment_provider_attempt")
 }
+
+enum WebhookNormalizedStatus {
+  paid
+  failed
+  pending
+}
+
+// ADR-075 — un webhook n'est inséré qu'APRÈS traitement complet réussi (jamais un
+// état à moitié traité) : @@unique([provider, providerRef]) sert de garde de
+// dédoublonnage ET de preuve d'auditabilité complète. Propriété exclusive de
+// money-api, même raisonnement que PaymentProviderAttempt.
+model PaymentWebhook {
+  id String @id @default(uuid())
+
+  provider    PaymentProviderName
+  providerRef String              @map("provider_ref")
+
+  payload          Json
+  normalizedStatus WebhookNormalizedStatus @map("normalized_status")
+  signatureValid   Boolean                 @map("signature_valid")
+
+  processedAt DateTime @default(now()) @map("processed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, providerRef])
+  @@map("payment_webhook")
+}

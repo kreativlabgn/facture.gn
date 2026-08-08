@@ -1,8 +1,14 @@
-import { BadRequestException, Body, Controller, Headers, Param, Post } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { BadRequestException, Body, Controller, Headers, Param, Post, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { Public } from "../auth/public.decorator";
+import { InternalAuthGuard } from "../common/internal-auth.guard";
 import { createPaymentSchema, type CreatePaymentDto } from "./dto/create-payment.dto";
+import {
+  confirmProviderPaymentSchema,
+  type ConfirmProviderPaymentDto,
+} from "./dto/confirm-provider-payment.dto";
 import { PaymentsService } from "./payments.service";
 
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
@@ -29,5 +35,19 @@ export class PaymentsController {
       );
     }
     return this.paymentsService.recordCashPayment(invoiceId, dto, idempotencyKey);
+  }
+
+  // Appel machine-à-machine exclusif (money-api, après confirmation webhook,
+  // C2 Phase 2b) — jamais un rôle humain : @Public() court-circuite JwtAuthGuard,
+  // RolesGuard est un no-op sans @Roles(), InternalAuthGuard est le seul vrai garde.
+  @Post("provider-confirmation")
+  @Public()
+  @ApiSecurity("internal-api-key")
+  @UseGuards(InternalAuthGuard)
+  confirmProviderPayment(
+    @Param("id") invoiceId: string,
+    @Body(new ZodValidationPipe(confirmProviderPaymentSchema)) dto: ConfirmProviderPaymentDto,
+  ) {
+    return this.paymentsService.recordProviderPayment(invoiceId, dto);
   }
 }

@@ -1,8 +1,9 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import type { CreatePaymentDto } from "./dto/create-payment.dto";
+import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
 
 const PAYABLE_STATUSES = new Set(["issued", "partially_paid"]);
 
@@ -16,6 +17,43 @@ export class PaymentsService {
       return existing;
     }
 
+    await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
+
+    return this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
+      amount: dto.amount,
+      amountCollected: dto.amount,
+      platformFeeAmount: 0n,
+      gatewayFeeAmount: 0n,
+      method: "cash",
+      proofPhotoUrl: dto.proofPhotoUrl,
+      proofGpsLat: dto.proofGpsLat,
+      proofGpsLng: dto.proofGpsLng,
+      proofSignature: dto.proofSignature,
+    });
+  }
+
+  // Appelé exclusivement par money-api après confirmation webhook (ADR-075) —
+  // providerRef sert déjà de clé d'idempotence naturelle, pas de header client.
+  async recordProviderPayment(invoiceId: string, dto: ConfirmProviderPaymentDto) {
+    const idempotencyKey = dto.providerRef;
+    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+    if (existing) {
+      return existing;
+    }
+
+    await this.getPayableInvoiceOrThrow(invoiceId, dto.amountGnf);
+
+    return this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amountGnf, {
+      amount: dto.amountGnf,
+      amountCollected: dto.amountGnf,
+      platformFeeAmount: 0n, // grille 5 paliers ADR-074 simplifiée à ce stade, cf. Phase 1
+      gatewayFeeAmount: dto.feeGatewayGnf,
+      method: "payment_link",
+      providerRef: dto.providerRef,
+    });
+  }
+
+  private async getPayableInvoiceOrThrow(invoiceId: string, amount: bigint) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) {
       throw new NotFoundException(`Facture ${invoiceId} introuvable`);
@@ -25,48 +63,32 @@ export class PaymentsService {
         `Facture ${invoiceId} ne peut recevoir de paiement depuis le statut ${invoice.status}`,
       );
     }
-    if (dto.amount > invoice.amountDue) {
+    if (amount > invoice.amountDue) {
       throw new ConflictException(
-        `Montant ${dto.amount} supérieur au solde dû ${invoice.amountDue} — trop-perçu non géré ici`,
+        `Montant ${amount} supérieur au solde dû ${invoice.amountDue} — trop-perçu non géré ici`,
       );
     }
+    return invoice;
+  }
 
+  private async createPaymentAndApply(
+    invoiceId: string,
+    idempotencyKey: string,
+    amount: bigint,
+    paymentData: Omit<Prisma.PaymentUncheckedCreateInput, "invoiceId" | "status" | "idempotencyKey">,
+  ) {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const payment = await tx.payment.create({
           data: {
             invoiceId,
-            amount: dto.amount,
-            amountCollected: dto.amount,
-            platformFeeAmount: 0n,
-            gatewayFeeAmount: 0n,
-            method: "cash",
             status: "completed",
             idempotencyKey,
-            proofPhotoUrl: dto.proofPhotoUrl,
-            proofGpsLat: dto.proofGpsLat,
-            proofGpsLng: dto.proofGpsLng,
-            proofSignature: dto.proofSignature,
+            ...paymentData,
           },
         });
 
-        // Incréments atomiques, jamais une valeur absolue recalculée depuis une
-        // lecture faite hors transaction : sous deux paiements concurrents sur la
-        // même facture avec des idempotency_key différentes, Postgres sérialise les
-        // deux écritures au niveau ligne — aucun des deux ne peut silencieusement
-        // écraser l'effet de l'autre sur amountPaid/amountDue.
-        const updatedInvoice = await tx.invoice.update({
-          where: { id: invoiceId },
-          data: {
-            amountPaid: { increment: dto.amount },
-            amountDue: { decrement: dto.amount },
-          },
-        });
-
-        await tx.invoice.update({
-          where: { id: invoiceId },
-          data: { status: updatedInvoice.amountDue <= 0n ? "paid" : "partially_paid" },
-        });
+        await this.applyPaymentToInvoice(tx, invoiceId, amount);
 
         return payment;
       });
@@ -83,5 +105,27 @@ export class PaymentsService {
       }
       throw error;
     }
+  }
+
+  // Incréments atomiques, jamais une valeur absolue recalculée depuis une lecture
+  // faite hors transaction : sous deux paiements concurrents sur la même facture
+  // (idempotency_key différentes, cash et/ou payment_link mixés — ADR-062), Postgres
+  // sérialise les deux écritures au niveau ligne — aucun des deux ne peut
+  // silencieusement écraser l'effet de l'autre sur amountPaid/amountDue. Partagée
+  // entre recordCashPayment() et recordProviderPayment() — un seul endroit à
+  // maintenir pour ce comportement (bug corrigé une fois, C1).
+  private async applyPaymentToInvoice(tx: Prisma.TransactionClient, invoiceId: string, amount: bigint) {
+    const updatedInvoice = await tx.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        amountPaid: { increment: amount },
+        amountDue: { decrement: amount },
+      },
+    });
+
+    await tx.invoice.update({
+      where: { id: invoiceId },
+      data: { status: updatedInvoice.amountDue <= 0n ? "paid" : "partially_paid" },
+    });
   }
 }
