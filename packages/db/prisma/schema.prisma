@@ -88,6 +88,22 @@ enum DisputeStatus {
 // 22 types confirmés au périmètre MVP/V1 (DAT §4.1 / ERD note de lecture).
 // Les types V2 (liquidation_validated, service_fait_confirmed, financing_disbursed)
 // sont volontairement exclus tant que le B2G Context n'est pas scaffoldé.
+// cash pour C1 (ce plan) ; payment_link (C2, orchestrateur Djomy/Moneroo) et
+// bank_transfer (C3) sont des stories séparées — l'enum couvre les 3 valeurs de
+// l'ERD par cohérence long terme, mais seul "cash" est accepté par le DTO/service
+// actuel (docs/plans/2026-08-08-cash-payment-with-proof.md).
+enum PaymentMethod {
+  cash
+  payment_link
+  bank_transfer
+}
+
+enum PaymentStatus {
+  pending
+  completed
+  failed
+}
+
 enum InvoiceEventType {
   cancellation_indemnity
   no_show_forfeited
@@ -274,9 +290,44 @@ model Invoice {
   convertedInto     Invoice[]      @relation("InvoiceConversion")
   lines             InvoiceLine[]
   events            InvoiceEvent[]
+  payments          Payment[]
 
   @@unique([organizationId, number])
   @@map("invoice")
+}
+
+model Payment {
+  id        String @id @default(uuid())
+  invoiceId String @map("invoice_id")
+
+  amount            BigInt @map("amount") // centimes GNF — ce que le marchand reçoit
+  amountCollected   BigInt @map("amount_collected") // centimes GNF — ce que le payeur a payé
+  platformFeeAmount BigInt @default(0) @map("platform_fee_amount")
+  gatewayFeeAmount  BigInt @default(0) @map("gateway_fee_amount")
+
+  method             PaymentMethod  @default(cash)
+  providerSubMethod  String?        @map("provider_sub_method")
+  depositType        String?        @map("deposit_type")
+  providerRef        String?        @map("provider_ref")
+  status             PaymentStatus  @default(pending)
+
+  // Contrainte unique = mécanisme d'idempotence (header Idempotency-Key, ADR-016) —
+  // pas de Redis dans ce repo, un replay renvoie ce paiement plutôt que d'en recréer un.
+  idempotencyKey String @unique @map("idempotency_key")
+
+  // Preuve obligatoire au-delà de cash_proof_threshold_gnf (DAT §config, 1M GNF) —
+  // référence à un objet déjà uploadé côté client (MinIO WORM hors scope de ce plan,
+  // pas encore scaffoldé dans ce repo), jamais de gestion d'upload ici.
+  proofPhotoUrl   String? @map("proof_photo_url")
+  proofGpsLat     Float?  @map("proof_gps_lat")
+  proofGpsLng     Float?  @map("proof_gps_lng")
+  proofSignature  String? @map("proof_signature")
+
+  collectedAt DateTime @default(now()) @map("collected_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("payment")
 }
 
 model InvoiceLine {
