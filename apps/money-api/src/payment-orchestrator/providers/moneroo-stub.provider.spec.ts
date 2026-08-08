@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { CreatePaymentLinkRequest } from "../provider.interface";
 import { MonerooStubProvider } from "./moneroo-stub.provider";
 
@@ -27,5 +27,39 @@ describe("MonerooStubProvider", () => {
     await provider.createPaymentLink(request);
 
     expect(Date.now() - start).toBeGreaterThanOrEqual(30);
+  });
+});
+
+describe("MonerooStubProvider — handleWebhook (garde contre la forgerie, C2 Phase 2b)", () => {
+  afterEach(() => {
+    delete process.env.MONEROO_WEBHOOK_STUB_SECRET;
+  });
+
+  it("rejette un webhook sans stub_secret", () => {
+    process.env.MONEROO_WEBHOOK_STUB_SECRET = "secret-dev-moneroo";
+    const provider = new MonerooStubProvider();
+
+    expect(provider.handleWebhook({ provider_ref: "moneroo-stub-inv-1" }).signatureValid).toBe(false);
+  });
+
+  it("accepte le stub_secret exact", () => {
+    process.env.MONEROO_WEBHOOK_STUB_SECRET = "secret-dev-moneroo";
+    const provider = new MonerooStubProvider();
+
+    const result = provider.handleWebhook({
+      provider_ref: "moneroo-stub-inv-1",
+      stub_secret: "secret-dev-moneroo",
+    });
+
+    expect(result.signatureValid).toBe(true);
+  });
+
+  it("rejette par défaut (fail-closed) si MONEROO_WEBHOOK_STUB_SECRET n'est pas configuré", () => {
+    delete process.env.MONEROO_WEBHOOK_STUB_SECRET;
+    const provider = new MonerooStubProvider();
+
+    const result = provider.handleWebhook({ provider_ref: "moneroo-stub-inv-1", stub_secret: "peu-importe" });
+
+    expect(result.signatureValid).toBe(false);
   });
 });
