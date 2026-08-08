@@ -1,17 +1,8 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
-
-function isUniqueConstraintViolation(error: unknown, field: string): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "P2002" &&
-    Array.isArray((error as { meta?: { target?: unknown } }).meta?.target) &&
-    ((error as { meta: { target: string[] } }).meta.target.includes(field))
-  );
-}
 
 @Injectable()
 export class OrganizationsService {
