@@ -4,6 +4,7 @@ import { DjomyStubProvider } from "./providers/djomy-stub.provider";
 import { MonerooStubProvider } from "./providers/moneroo-stub.provider";
 import { DJOMY_PROVIDER, MONEROO_PROVIDER } from "./payment-orchestrator.tokens";
 import { PaymentProviderRegistryService } from "./provider-registry.service";
+import { ProviderResolverService } from "./provider-resolver.service";
 import type { PaymentProvider } from "./provider.interface";
 
 // Réservé aux vérifications manuelles de la bascule primary→fallback (jamais en
@@ -39,7 +40,8 @@ export function resolveDjomyStubDelayMs(): number {
       useFactory: (): PaymentProvider => new MonerooStubProvider(),
     },
     PaymentProviderRegistryService,
+    ProviderResolverService,
   ],
-  exports: [PaymentProviderRegistryService],
+  exports: [PaymentProviderRegistryService, ProviderResolverService],
 })
 export class PaymentOrchestratorModule {}

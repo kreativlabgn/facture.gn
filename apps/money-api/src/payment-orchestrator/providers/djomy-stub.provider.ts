@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { timingSafeEqual } from "node:crypto";
+import { Injectable, Logger } from "@nestjs/common";
 import type { PaymentProviderName } from "@facture-gn/db";
 import type {
   CreatePaymentLinkRequest,
@@ -14,6 +15,7 @@ const DJOMY_GATEWAY_FEE_BPS = 100n; // 1% annoncé, ADR-072 (à confirmer)
 @Injectable()
 export class DjomyStubProvider implements PaymentProvider {
   readonly name: PaymentProviderName = "djomy";
+  private readonly logger = new Logger(DjomyStubProvider.name);
 
   // Non branché sur la DI Nest par défaut (délai 0 en usage réel, voir
   // payment-orchestrator.module.ts) — construit avec un délai explicite dans les
@@ -42,12 +44,39 @@ export class DjomyStubProvider implements PaymentProvider {
     return { status: "success", providerRef, settledAt: new Date() };
   }
 
-  // ATTENTION — signatureValid: true est un placeholder de stub, jamais une vraie
-  // vérification. Ne jamais câbler cette méthode telle quelle sur un vrai endpoint
-  // webhook sans implémenter la vérification HMAC/signature réelle de Djomy (ADR-075,
-  // PAYMENT_WEBHOOKS, Phase 2) — sinon n'importe qui peut forger un webhook "payé".
+  // TODO(Djomy réel, ADR-075) : remplacer par la vraie vérification HMAC de Djomy
+  // quand des credentials existeront — même contrat (retourne signatureValid),
+  // aucun appelant à changer. En attendant, garde par secret partagé stub : le
+  // provider_ref n'est PAS un secret (visible dans l'URL du lien envoyée au client
+  // par WhatsApp/SMS) — sans cette garde, n'importe qui recevant un lien de paiement
+  // pourrait forger un webhook "payé" et faire créditer une facture jamais payée
+  // (trouvé par dev-security-reviewer, C2 Phase 2b).
   handleWebhook(rawPayload: unknown): NormalizedWebhookResult {
-    const payload = rawPayload as { provider_ref: string };
-    return { providerRef: payload.provider_ref, status: "paid", signatureValid: true };
+    const payload = rawPayload as { provider_ref: string; stub_secret?: string };
+    return {
+      providerRef: payload.provider_ref,
+      status: "paid",
+      signatureValid: this.isValidStubSecret(payload.stub_secret),
+    };
+  }
+
+  // Fail-closed : secret non configuré → jamais un accès ouvert par oubli (contraste
+  // avec InternalAuthGuard qui fail-fast au constructeur — ici un throw bloquerait
+  // aussi createPaymentLink()/verifyTransaction(), sans rapport avec le webhook).
+  private isValidStubSecret(provided: unknown): boolean {
+    const expected = process.env.DJOMY_WEBHOOK_STUB_SECRET;
+    if (!expected) {
+      this.logger.warn("DJOMY_WEBHOOK_STUB_SECRET non configuré — tout webhook Djomy est rejeté");
+      return false;
+    }
+    if (typeof provided !== "string") {
+      return false;
+    }
+    const providedBuf = Buffer.from(provided);
+    const expectedBuf = Buffer.from(expected);
+    if (providedBuf.length !== expectedBuf.length) {
+      return false;
+    }
+    return timingSafeEqual(providedBuf, expectedBuf);
   }
 }

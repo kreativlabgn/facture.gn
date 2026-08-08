@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { timingSafeEqual } from "node:crypto";
+import { Injectable, Logger } from "@nestjs/common";
 import type { PaymentProviderName } from "@facture-gn/db";
 import type {
   CreatePaymentLinkRequest,
@@ -13,6 +14,7 @@ const PAYMENT_LINK_TTL_DAYS = 30;
 @Injectable()
 export class MonerooStubProvider implements PaymentProvider {
   readonly name: PaymentProviderName = "moneroo";
+  private readonly logger = new Logger(MonerooStubProvider.name);
 
   constructor(private readonly simulatedDelayMs = 0) {}
 
@@ -37,12 +39,32 @@ export class MonerooStubProvider implements PaymentProvider {
     return { status: "success", providerRef, settledAt: new Date() };
   }
 
-  // ATTENTION — signatureValid: true est un placeholder de stub, jamais une vraie
-  // vérification. Ne jamais câbler cette méthode telle quelle sur un vrai endpoint
-  // webhook sans implémenter la vérification de signature réelle de Moneroo (ADR-075,
-  // PAYMENT_WEBHOOKS, Phase 2) — sinon n'importe qui peut forger un webhook "payé".
+  // TODO(Moneroo réel, ADR-075) : remplacer par la vraie vérification de signature
+  // Moneroo quand des credentials existeront — voir le même correctif sur
+  // DjomyStubProvider pour le raisonnement complet (dev-security-reviewer, C2 Phase 2b).
   handleWebhook(rawPayload: unknown): NormalizedWebhookResult {
-    const payload = rawPayload as { provider_ref: string };
-    return { providerRef: payload.provider_ref, status: "paid", signatureValid: true };
+    const payload = rawPayload as { provider_ref: string; stub_secret?: string };
+    return {
+      providerRef: payload.provider_ref,
+      status: "paid",
+      signatureValid: this.isValidStubSecret(payload.stub_secret),
+    };
+  }
+
+  private isValidStubSecret(provided: unknown): boolean {
+    const expected = process.env.MONEROO_WEBHOOK_STUB_SECRET;
+    if (!expected) {
+      this.logger.warn("MONEROO_WEBHOOK_STUB_SECRET non configuré — tout webhook Moneroo est rejeté");
+      return false;
+    }
+    if (typeof provided !== "string") {
+      return false;
+    }
+    const providedBuf = Buffer.from(provided);
+    const expectedBuf = Buffer.from(expected);
+    if (providedBuf.length !== expectedBuf.length) {
+      return false;
+    }
+    return timingSafeEqual(providedBuf, expectedBuf);
   }
 }

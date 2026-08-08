@@ -166,3 +166,62 @@ describe("PaymentsService — encaissement cash", () => {
     );
   });
 });
+
+describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, appelé par money-api)", () => {
+  const providerDto = {
+    amountGnf: 1_500_000n,
+    provider: "djomy" as const,
+    providerRef: "djomy-stub-inv-1",
+    feeGatewayGnf: 15_000n,
+  };
+
+  it("fait passer la facture à paid et réutilise le même incrément atomique que le cash (C1)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordProviderPayment("inv-1", providerDto);
+
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(0n);
+    expect(invoice.amountPaid).toBe(1_500_000n);
+    expect(invoice.status).toBe("paid");
+  });
+
+  it("enregistre le paiement avec method payment_link, providerRef et la commission gateway réelle", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordProviderPayment("inv-1", providerDto);
+
+    expect(prisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          method: "payment_link",
+          providerRef: "djomy-stub-inv-1",
+          gatewayFeeAmount: 15_000n,
+          idempotencyKey: "djomy-stub-inv-1",
+        }),
+      }),
+    );
+  });
+
+  it("est idempotent par providerRef — un replay renvoie le paiement déjà créé, ne double-crédite jamais", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any);
+
+    const first = await service.recordProviderPayment("inv-1", providerDto);
+    const second = await service.recordProviderPayment("inv-1", providerDto);
+
+    expect(second).toEqual(first);
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountPaid).toBe(1_500_000n);
+  });
+
+  it("refuse un paiement sur une facture introuvable", async () => {
+    const prisma = createFakePrisma();
+    prisma.invoice.findUnique = vi.fn().mockResolvedValue(null);
+    const service = new PaymentsService(prisma as any);
+
+    await expect(service.recordProviderPayment("inv-1", providerDto)).rejects.toThrow(NotFoundException);
+  });
+});
