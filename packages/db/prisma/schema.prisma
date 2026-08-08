@@ -1,0 +1,274 @@
+// Schéma Prisma — Trust Context (bootstrap)
+//
+// Périmètre volontairement réduit aux 6 entités MVP nécessaires au cycle de vie
+// facture minimal : user, user_phone, organization, invoice, invoice_line, invoice_event.
+// Référence : Desktop/facture.gn/V/ERD-facture-gn.md (26/07/2026).
+//
+// Divergences assumées vis-à-vis de l'ERD complet (27 entités) :
+// - branch_id, customer_id, product_id, recurring_template_id, financed_by_partner_id
+//   sur INVOICE / INVOICE_LINE sont des colonnes scalaires SANS relation FK tant que
+//   BRANCH, CUSTOMER, PRODUCT, RECURRING_INVOICE_TEMPLATE, FINANCIAL_PARTNER n'existent pas.
+// - InvoiceSequence est un ajout (absent de l'ERD) pour garantir number sans trou
+//   par organisation/année sous concurrence (voir Registre-ADR, Article 23 OHADA).
+// - Colonnes en snake_case en base (@map), camelCase côté client Prisma.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PreferredLanguage {
+  fr
+  pular
+  malinke
+  soussou
+}
+
+enum RegimeFiscal {
+  normal_tva
+  tpu
+  normal_sans_tva
+  non_assujetti_association
+}
+
+enum LegalForm {
+  commercial
+  association
+}
+
+enum RegistrationSource {
+  organic
+  apip
+  cga_referral
+  fodip
+  partner_3ae
+}
+
+enum DgiVerificationStatus {
+  unverified
+  pending
+  verified
+}
+
+enum CommercialTier {
+  freemium
+  starter
+  pro
+  enterprise
+  custom
+}
+
+enum InvoiceDocumentType {
+  invoice
+  proforma
+  quote
+}
+
+// 7 valeurs — DAT §4 : invoice.status
+enum InvoiceStatus {
+  draft
+  issued
+  partially_paid
+  paid
+  voided
+  converted
+  expired
+}
+
+enum DisputeStatus {
+  none
+  disputed
+  resolved
+}
+
+// 22 types confirmés au périmètre MVP/V1 (DAT §4.1 / ERD note de lecture).
+// Les types V2 (liquidation_validated, service_fait_confirmed, financing_disbursed)
+// sont volontairement exclus tant que le B2G Context n'est pas scaffoldé.
+enum InvoiceEventType {
+  cancellation_indemnity
+  no_show_forfeited
+  dispute_raised
+  dispute_resolved
+  payment_reminder_sent
+  payment_link_generated
+  payment_link_expired
+  payment_link_regenerated
+  invoice_voided
+  invoice_converted
+  overpayment_recorded
+  refund_issued
+  suspicious_cash_pattern_detected
+  stale_invoice_detected
+  mandate_requested
+  mandate_granted
+  mandate_revoked
+  mandate_expired
+  revenue_share_credited
+  regime_change
+  delegated_key_tier_changed
+  validation_revoked
+}
+
+model User {
+  id                 String            @id @default(uuid())
+  name               String
+  passwordHash       String?           @map("password_hash")
+  preferredLanguage  PreferredLanguage @default(fr) @map("preferred_language")
+  createdAt          DateTime          @default(now()) @map("created_at")
+
+  phones        UserPhone[]
+  invoiceEvents InvoiceEvent[]
+
+  @@map("user")
+}
+
+model UserPhone {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  msisdn     String    @unique
+  isPrimary  Boolean   @default(false) @map("is_primary")
+  verifiedAt DateTime? @map("verified_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_phone")
+}
+
+model Organization {
+  id                          String                 @id @default(uuid())
+  name                        String
+  regimeFiscal                RegimeFiscal           @map("regime_fiscal")
+  legalForm                   LegalForm              @map("legal_form")
+  nif                         String                 @unique
+  etaxNumber                  String?                @map("etax_number")
+  rccm                        String?
+  registrationSource          RegistrationSource     @default(organic) @map("registration_source")
+  dgiVerificationStatus       DgiVerificationStatus  @default(unverified) @map("dgi_verification_status")
+  bankAccountDetails          Json?                  @map("bank_account_details")
+  preferredLanguage           PreferredLanguage      @default(fr) @map("preferred_language")
+  chiffreAffairesBrutDeclare  BigInt                 @default(0) @map("chiffre_affaires_brut_declare")
+  paymentLinkAutoSend         Boolean                @default(true) @map("payment_link_auto_send")
+  commercialTier              CommercialTier         @default(freemium) @map("commercial_tier")
+  createdAt                   DateTime               @default(now()) @map("created_at")
+
+  invoices  Invoice[]
+  sequences InvoiceSequence[]
+
+  @@map("organization")
+}
+
+// Compteur atomique par organisation/année — support de la numérotation
+// séquentielle sans trou (OHADA Article 23). Absent de l'ERD de référence,
+// ajouté pour rendre l'invariant applicable sous concurrence (cf. PLAN Tâche 10).
+model InvoiceSequence {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+  year           Int
+  lastNumber     Int    @default(0) @map("last_number")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, year])
+  @@map("invoice_sequence")
+}
+
+model Invoice {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  branchId       String? @map("branch_id")
+  customerId     String? @map("customer_id")
+
+  // FG-YYYY-NNNNNN — séquentiel légal OHADA Article 23, unique par organisation.
+  // Nullable tant que draft : le numéro n'est consommé qu'à l'émission (issue),
+  // jamais à la création du brouillon — sinon un brouillon abandonné créerait un trou.
+  number String? @unique
+
+  // GN-{NIF8}-{YYYY}-{HASH6} — vérification publique, non-séquentiel.
+  // Nullable tant que la facture n'est pas issued (pas de draft certifié).
+  certificationId String? @unique @map("certification_id")
+
+  documentType InvoiceDocumentType @default(invoice) @map("document_type")
+  status       InvoiceStatus       @default(draft)
+  disputeStatus DisputeStatus      @default(none) @map("dispute_status")
+
+  validatedByAdministration Boolean @default(false) @map("validated_by_administration")
+
+  totalHt  BigInt @default(0) @map("total_ht")
+  totalTva BigInt @default(0) @map("total_tva")
+  totalTtc BigInt @default(0) @map("total_ttc")
+
+  discountPct Int @default(0) @map("discount_pct")
+
+  amountPaid        BigInt @default(0) @map("amount_paid")
+  amountDue         BigInt @default(0) @map("amount_due")
+  overpaymentAmount BigInt @default(0) @map("overpayment_amount")
+
+  paymentLinkUrl       String?   @map("payment_link_url")
+  paymentLinkId        String?   @map("payment_link_id")
+  paymentLinkExpiresAt DateTime? @map("payment_link_expires_at")
+
+  referenceCurrency String?   @map("reference_currency")
+  referenceAmount   BigInt?   @map("reference_amount")
+  fxRate            Decimal?  @map("fx_rate")
+  fxRateDate        DateTime? @map("fx_rate_date")
+
+  recurringTemplateId  String? @map("recurring_template_id")
+  convertedToInvoiceId String? @unique @map("converted_to_invoice_id")
+
+  quoteValidUntil DateTime? @map("quote_valid_until")
+  referenceMarche String?   @map("reference_marche")
+
+  financedByPartnerId String?   @map("financed_by_partner_id")
+  financedAt          DateTime? @map("financed_at")
+
+  hash         String?
+  previousHash String? @map("previous_hash")
+  signature    Bytes?
+
+  issuedAt  DateTime? @map("issued_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  organization      Organization   @relation(fields: [organizationId], references: [id])
+  convertedFrom     Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
+  convertedInto     Invoice[]      @relation("InvoiceConversion")
+  lines             InvoiceLine[]
+  events            InvoiceEvent[]
+
+  @@map("invoice")
+}
+
+model InvoiceLine {
+  id        String  @id @default(uuid())
+  invoiceId String  @map("invoice_id")
+  productId String? @map("product_id")
+
+  description String
+  quantity    Int
+  unitPrice   BigInt @map("unit_price")
+  taxRateBps  Int    @default(0) @map("tax_rate_bps")
+
+  costPriceAtTime BigInt? @map("cost_price_at_time")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("invoice_line")
+}
+
+model InvoiceEvent {
+  id        String           @id @default(uuid())
+  invoiceId String           @map("invoice_id")
+  type      InvoiceEventType
+  actorId   String?          @map("actor_id")
+  amount    BigInt?
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  actor   User?   @relation(fields: [actorId], references: [id])
+
+  @@map("invoice_event")
+}

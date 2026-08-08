@@ -1,0 +1,110 @@
+import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import type { Prisma, PrismaClient } from "@facture-gn/db";
+import { PRISMA_CLIENT } from "../common/prisma.module";
+import { CERTIFICATION_SERVICE } from "../certification/certification.module";
+import type { CertificationService } from "../certification/certification.service";
+import { InvoiceNumberingService } from "./invoice-numbering.service";
+import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
+
+@Injectable()
+export class InvoicesService {
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
+    private readonly numbering: InvoiceNumberingService,
+    @Inject(CERTIFICATION_SERVICE) private readonly certification: CertificationService,
+  ) {}
+
+  async createDraft(dto: CreateInvoiceDto) {
+    const totalTtc = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
+
+    return this.prisma.invoice.create({
+      data: {
+        organizationId: dto.organizationId,
+        documentType: dto.documentType,
+        status: "draft",
+        totalTtc,
+        amountDue: totalTtc,
+        lines: {
+          create: dto.lines.map((line) => ({
+            description: line.description,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            taxRateBps: line.taxRateBps ?? 0,
+          })),
+        },
+      },
+    });
+  }
+
+  // Une facture issued est immuable — toute correction passe par un avoir (DAT §5.4).
+  async updateDraft(invoiceId: string, patch: Prisma.InvoiceUpdateInput) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    if (invoice.status !== "draft") {
+      throw new ConflictException(
+        "Une facture issued est immuable — toute correction passe par un avoir (credit_note)",
+      );
+    }
+    return this.prisma.invoice.update({ where: { id: invoiceId }, data: patch });
+  }
+
+  async issue(invoiceId: string) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    if (invoice.status !== "draft") {
+      throw new ConflictException(
+        `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,
+      );
+    }
+
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: invoice.organizationId },
+    });
+
+    const issuedAt = new Date();
+    const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear());
+
+    const previousInvoice = await this.prisma.invoice.findFirst({
+      where: { organizationId: invoice.organizationId, status: { not: "draft" } },
+      orderBy: { issuedAt: "desc" },
+    });
+
+    const certification = this.certification.certify({
+      invoiceId: invoice.id,
+      organizationNif: organization.nif,
+      number,
+      totalTtc: invoice.totalTtc,
+      issuedAt: issuedAt.toISOString(),
+      previousHash: previousInvoice?.hash ?? "GENESIS",
+    });
+
+    return this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        number,
+        certificationId: certification.certificationId,
+        hash: certification.hash,
+        previousHash: certification.previousHash,
+        signature: Buffer.from(certification.signature, "hex"),
+        status: "issued",
+        issuedAt,
+        amountDue: invoice.totalTtc,
+      },
+    });
+  }
+
+  // voided réservé aux factures sans aucun paiement (PRD §4.2).
+  async void(invoiceId: string) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+
+    if (invoice.amountPaid > 0n) {
+      throw new ConflictException(
+        "Une facture avec un paiement enregistré ne peut être annulée — utiliser un avoir",
+      );
+    }
+
+    if (invoice.status !== "draft" && invoice.status !== "issued") {
+      throw new ConflictException(`Facture ${invoiceId} ne peut être annulée depuis le statut ${invoice.status}`);
+    }
+
+    return this.prisma.invoice.update({ where: { id: invoiceId }, data: { status: "voided" } });
+  }
+}
