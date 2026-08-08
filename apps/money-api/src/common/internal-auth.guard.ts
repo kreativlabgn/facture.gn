@@ -7,6 +7,10 @@ const INTERNAL_API_KEY_HEADER = "x-internal-api-key";
 // simple : réseau privé contrôlé, pas un webhook tiers non fiable (contrairement à
 // ADR-082 où HMAC est justifié). Fail-fast au démarrage si non configurée, même
 // posture que JWT_PRIVATE_KEY/CERTIFICATION_PRIVATE_KEY côté trust-api.
+// TODO(ADR-008) : HashiCorp Vault Transit en prod (secret actuellement en clair via
+// .env, comme JWT_PRIVATE_KEY/CERTIFICATION_PRIVATE_KEY) ; le trafic inter-service
+// doit transiter sur le réseau privé du cluster (K8s OVH Gravelines, DAT §1),
+// jamais exposé publiquement — TLS interne au cluster à valider avant la prod.
 @Injectable()
 export class InternalAuthGuard implements CanActivate {
   private readonly expectedKey: string;
