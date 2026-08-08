@@ -122,4 +122,25 @@ describe("InvoicesService — machine à états", () => {
 
     await expect(service.void("inv-1")).rejects.toThrow(/avoir/);
   });
+
+  it("traduit une violation de contrainte unique sur (organization_id, number) en erreur explicite, jamais un 500 brut", async () => {
+    const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["organization_id", "number"] },
+    });
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+        update: vi.fn().mockRejectedValue(uniqueViolation),
+      },
+    });
+    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+
+    await expect(service.issue("inv-1")).rejects.toThrow(/numéro/);
+  });
 });

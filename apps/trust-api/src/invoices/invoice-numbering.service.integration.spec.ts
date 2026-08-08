@@ -49,6 +49,62 @@ describe.runIf(hasDatabase)("InvoiceNumberingService — concurrence réelle (Po
   });
 });
 
+describe.runIf(hasDatabase)("Invoice.number — unicité par organisation, pas globale (ERD ligne 208)", () => {
+  let prisma: PrismaClient;
+  let numbering: InvoiceNumberingService;
+  let orgAId: string;
+  let orgBId: string;
+
+  beforeAll(async () => {
+    prisma = getPrismaClient();
+    numbering = new InvoiceNumberingService(prisma);
+
+    const orgA = await prisma.organization.create({
+      data: { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: `NIF-A-${randomUUID()}` },
+    });
+    const orgB = await prisma.organization.create({
+      data: { name: "Garage Mamadou", regimeFiscal: "tpu", legalForm: "commercial", nif: `NIF-B-${randomUUID()}` },
+    });
+    orgAId = orgA.id;
+    orgBId = orgB.id;
+  });
+
+  afterAll(async () => {
+    await prisma.invoice.deleteMany({ where: { organizationId: { in: [orgAId, orgBId] } } });
+    await prisma.invoiceSequence.deleteMany({ where: { organizationId: { in: [orgAId, orgBId] } } });
+    await prisma.organization.deleteMany({ where: { id: { in: [orgAId, orgBId] } } });
+  });
+
+  it("deux organisations différentes peuvent chacune émettre FG-2026-000001 sans collision", async () => {
+    const numberA = await numbering.nextNumber(orgAId, 2026);
+    const numberB = await numbering.nextNumber(orgBId, 2026);
+    expect(numberA).toBe("FG-2026-000001");
+    expect(numberB).toBe("FG-2026-000001");
+
+    const invoiceA = await prisma.invoice.create({
+      data: { organizationId: orgAId, number: numberA, status: "issued", totalTtc: 700_000n, amountDue: 700_000n },
+    });
+    const invoiceB = await prisma.invoice.create({
+      data: { organizationId: orgBId, number: numberB, status: "issued", totalTtc: 250_000n, amountDue: 250_000n },
+    });
+
+    expect(invoiceA.number).toBe(invoiceB.number);
+    expect(invoiceA.organizationId).not.toBe(invoiceB.organizationId);
+  });
+
+  it("une même organisation ne peut pas avoir deux factures portant le même number", async () => {
+    await prisma.invoice.create({
+      data: { organizationId: orgAId, number: "FG-2026-000099", status: "issued", totalTtc: 100_000n, amountDue: 100_000n },
+    });
+
+    await expect(
+      prisma.invoice.create({
+        data: { organizationId: orgAId, number: "FG-2026-000099", status: "issued", totalTtc: 200_000n, amountDue: 200_000n },
+      }),
+    ).rejects.toThrow(/Unique constraint/);
+  });
+});
+
 if (!hasDatabase) {
   describe("InvoiceNumberingService — concurrence réelle (Postgres)", () => {
     it.fails("nécessite DATABASE_URL — Postgres indisponible, test non exécutable", () => {

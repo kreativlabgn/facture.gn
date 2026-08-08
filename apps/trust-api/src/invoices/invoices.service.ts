@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import type { CertificationService } from "../certification/certification.service";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
@@ -76,19 +77,31 @@ export class InvoicesService {
       previousHash: previousInvoice?.hash ?? "GENESIS",
     });
 
-    return this.prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        number,
-        certificationId: certification.certificationId,
-        hash: certification.hash,
-        previousHash: certification.previousHash,
-        signature: Buffer.from(certification.signature, "hex"),
-        status: "issued",
-        issuedAt,
-        amountDue: invoice.totalTtc,
-      },
-    });
+    try {
+      return await this.prisma.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          number,
+          certificationId: certification.certificationId,
+          hash: certification.hash,
+          previousHash: certification.previousHash,
+          signature: Buffer.from(certification.signature, "hex"),
+          status: "issued",
+          issuedAt,
+          amountDue: invoice.totalTtc,
+        },
+      });
+    } catch (error) {
+      // Filet de sécurité : InvoiceNumberingService (upsert atomique par organisation/
+      // année) ne devrait jamais produire ce conflit, mais un 409 explicite vaut mieux
+      // qu'un 500 brut si la séquence dérivait un jour sous concurrence extrême.
+      if (isUniqueConstraintViolation(error, "number")) {
+        throw new ConflictException(
+          `Le numéro ${number} existe déjà pour cette organisation — réémission impossible`,
+        );
+      }
+      throw error;
+    }
   }
 
   // voided réservé aux factures sans aucun paiement (PRD §4.2).

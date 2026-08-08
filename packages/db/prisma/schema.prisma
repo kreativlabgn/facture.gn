@@ -216,10 +216,13 @@ model Invoice {
   branchId       String? @map("branch_id")
   customerId     String? @map("customer_id")
 
-  // FG-YYYY-NNNNNN — séquentiel légal OHADA Article 23, unique par organisation.
+  // FG-YYYY-NNNNNN — séquentiel légal OHADA Article 23, unique par organisation
+  // (ERD ligne 208), pas globalement : deux organisations différentes émettent
+  // chacune leur propre séquence à partir de 1 (voir @@unique([organizationId,
+  // number]) plus bas — jamais un @unique seul sur ce champ).
   // Nullable tant que draft : le numéro n'est consommé qu'à l'émission (issue),
   // jamais à la création du brouillon — sinon un brouillon abandonné créerait un trou.
-  number String? @unique
+  number String?
 
   // GN-{NIF8}-{YYYY}-{HASH6} — vérification publique, non-séquentiel.
   // Nullable tant que la facture n'est pas issued (pas de draft certifié).
@@ -272,6 +275,7 @@ model Invoice {
   lines             InvoiceLine[]
   events            InvoiceEvent[]
 
+  @@unique([organizationId, number])
   @@map("invoice")
 }
 
