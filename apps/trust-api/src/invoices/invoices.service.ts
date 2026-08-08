@@ -1,18 +1,22 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import type { CertificationService } from "../certification/certification.service";
+import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
 
 @Injectable()
 export class InvoicesService {
+  private readonly logger = new Logger(InvoicesService.name);
+
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly numbering: InvoiceNumberingService,
     @Inject(CERTIFICATION_SERVICE) private readonly certification: CertificationService,
+    private readonly paymentLinkClient: PaymentLinkClient,
   ) {}
 
   async createDraft(dto: CreateInvoiceDto) {
@@ -77,8 +81,9 @@ export class InvoicesService {
       previousHash: previousInvoice?.hash ?? "GENESIS",
     });
 
+    let issuedInvoice;
     try {
-      return await this.prisma.invoice.update({
+      issuedInvoice = await this.prisma.invoice.update({
         where: { id: invoiceId },
         data: {
           number,
@@ -101,6 +106,39 @@ export class InvoicesService {
         );
       }
       throw error;
+    }
+
+    // Meilleur effort, jamais couplé à la certification (déjà committée ci-dessus) :
+    // DAT §12 fixe deux SLA distinctes ("Émission facture < 2s" / "Génération lien
+    // de paiement < 3s") — une panne Money Context ne doit jamais faire échouer
+    // l'émission (Parcours Fanta : cash et lien ne s'excluent jamais l'un l'autre ;
+    // C18 permet de régénérer un lien absent plus tard).
+    const paymentLink = await this.paymentLinkClient.tryGenerate({
+      invoiceId: issuedInvoice.id,
+      organizationId: issuedInvoice.organizationId,
+      amountGnf: issuedInvoice.totalTtc,
+    });
+    if (!paymentLink) {
+      return issuedInvoice;
+    }
+
+    // Même garantie que l'appel HTTP lui-même : un corps de réponse money-api
+    // inattendu (ex. paymentLinkExpiresAt invalide) ne doit jamais faire échouer
+    // une émission déjà certifiée et committée.
+    try {
+      return await this.prisma.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          paymentLinkUrl: paymentLink.paymentLinkUrl,
+          paymentLinkId: paymentLink.providerRef,
+          paymentLinkExpiresAt: paymentLink.expiresAt,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Facture ${invoiceId} certifiée mais l'enregistrement du lien de paiement a échoué : ${(error as Error).message}`,
+      );
+      return issuedInvoice;
     }
   }
 
