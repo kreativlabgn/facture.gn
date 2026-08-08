@@ -37,6 +37,10 @@ export class MonerooStubProvider implements PaymentProvider {
     return { status: "success", providerRef, settledAt: new Date() };
   }
 
+  // ATTENTION — signatureValid: true est un placeholder de stub, jamais une vraie
+  // vérification. Ne jamais câbler cette méthode telle quelle sur un vrai endpoint
+  // webhook sans implémenter la vérification de signature réelle de Moneroo (ADR-075,
+  // PAYMENT_WEBHOOKS, Phase 2) — sinon n'importe qui peut forger un webhook "payé".
   handleWebhook(rawPayload: unknown): NormalizedWebhookResult {
     const payload = rawPayload as { provider_ref: string };
     return { providerRef: payload.provider_ref, status: "paid", signatureValid: true };
