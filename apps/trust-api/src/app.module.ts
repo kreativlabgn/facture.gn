@@ -4,6 +4,7 @@ import { PrismaModule } from "./common/prisma.module";
 import { CertificationModule } from "./certification/certification.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
 import { InvoicesModule } from "./invoices/invoices.module";
+import { PaymentsModule } from "./payments/payments.module";
 import { VerificationModule } from "./verification/verification.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
@@ -16,6 +17,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     CertificationModule,
     OrganizationsModule,
     InvoicesModule,
+    PaymentsModule,
     VerificationModule,
   ],
   providers: [
