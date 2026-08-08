@@ -1,14 +1,17 @@
-import { Body, Controller, Post } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { ApiSecurity, ApiTags } from "@nestjs/swagger";
+import { InternalAuthGuard } from "../common/internal-auth.guard";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { createPaymentLinkSchema, type CreatePaymentLinkDto } from "./dto/create-payment-link.dto";
 import { PaymentLinksService } from "./payment-links.service";
 
-// Pas d'authentification à cette phase (C2 Phase 1, docs/plans/2026-08-08-money-context-
-// payment-orchestrator.md, Risque 2) : aucun appelant légitime tant que non branché sur
-// trust-api. Authentification inter-service à trancher en Phase 2, jamais exposé
-// publiquement avant cette étape.
+// Authentification inter-service (C2 Phase 2a) — appelant légitime : trust-api
+// uniquement, jamais un client final. Clé partagée, jamais mTLS (pas d'infra de
+// certificats), jamais HMAC (pas un webhook tiers non fiable, ADR-082 ne s'applique
+// pas ici).
 @ApiTags("payment-links")
+@ApiSecurity("internal-api-key")
+@UseGuards(InternalAuthGuard)
 @Controller("payment-links")
 export class PaymentLinksController {
   constructor(private readonly paymentLinksService: PaymentLinksService) {}

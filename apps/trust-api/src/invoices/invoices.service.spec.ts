@@ -2,13 +2,29 @@ import { describe, expect, it, vi } from "vitest";
 import { InvoicesService } from "./invoices.service";
 
 function createFakePrisma(overrides: { invoice?: any; organization?: any } = {}) {
+  // update() cumulatif (comme le vrai Prisma, qui renvoie toujours la ligne complète,
+  // pas seulement les champs patchés) — nécessaire car issue() peut faire deux
+  // update() successifs (certification, puis lien de paiement en meilleur effort).
+  let invoiceState: any = { id: "inv-1" };
+  const seedFindUniqueOrThrow = overrides.invoice?.findUniqueOrThrow;
+
   return {
     invoice: {
       create: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft" }),
-      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
-      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
+      update: vi.fn().mockImplementation(({ data }: any) => {
+        invoiceState = { ...invoiceState, ...data };
+        return Promise.resolve(invoiceState);
+      }),
       ...overrides.invoice,
+      // Toujours la version enveloppée, même si overrides en fournit une — sinon
+      // invoiceState ne serait jamais initialisé et les update() suivants perdraient
+      // les champs de la facture chargée au départ.
+      findUniqueOrThrow: vi.fn().mockImplementation(async (...args: any[]) => {
+        const result = seedFindUniqueOrThrow ? await seedFindUniqueOrThrow(...args) : invoiceState;
+        invoiceState = { ...invoiceState, ...result };
+        return result;
+      }),
     },
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: "GN12345678" }),
@@ -33,6 +49,13 @@ function createFakeCertification() {
   };
 }
 
+// null par défaut = comportement des tests préexistants (aucun lien de paiement
+// généré) — reflète le cas le plus courant en test unitaire, la panne Money Context
+// étant précisément ce que Test "réussit normalement" exerce explicitement.
+function createFakePaymentLinkClient(result: any = null) {
+  return { tryGenerate: vi.fn().mockResolvedValue(result) };
+}
+
 describe("InvoicesService — immutabilité post-émission", () => {
   it("refuse toute mutation directe d'une facture issued — seul un avoir peut corriger", async () => {
     const prisma = createFakePrisma({
@@ -40,7 +63,12 @@ describe("InvoicesService — immutabilité post-émission", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "issued", amountPaid: 0n }),
       },
     });
-    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     await expect(service.updateDraft("inv-1", { totalTtc: 999n })).rejects.toThrow(/immuable/);
   });
@@ -51,7 +79,12 @@ describe("InvoicesService — immutabilité post-émission", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", amountPaid: 0n }),
       },
     });
-    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     await service.updateDraft("inv-1", { totalTtc: 999n });
 
@@ -76,7 +109,12 @@ describe("InvoicesService — machine à états", () => {
     });
     const numbering = createFakeNumbering();
     const certification = createFakeCertification();
-    const service = new InvoicesService(prisma as any, numbering as any, certification as any);
+    const service = new InvoicesService(
+      prisma as any,
+      numbering as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     const result = await service.issue("inv-1");
 
@@ -94,7 +132,12 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "issued" }),
       },
     });
-    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     await expect(service.issue("inv-1")).rejects.toThrow(/statut/);
   });
@@ -105,7 +148,12 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", amountPaid: 0n }),
       },
     });
-    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     const result = await service.void("inv-1");
 
@@ -118,7 +166,12 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "issued", amountPaid: 500_000n }),
       },
     });
-    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     await expect(service.void("inv-1")).rejects.toThrow(/avoir/);
   });
@@ -139,8 +192,101 @@ describe("InvoicesService — machine à états", () => {
         update: vi.fn().mockRejectedValue(uniqueViolation),
       },
     });
-    const service = new InvoicesService(prisma as any, createFakeNumbering() as any, createFakeCertification() as any);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
 
     await expect(service.issue("inv-1")).rejects.toThrow(/numéro/);
+  });
+});
+
+describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", () => {
+  const draftInvoice = {
+    id: "inv-1",
+    status: "draft",
+    organizationId: "org-1",
+    totalTtc: 1_500_000n,
+  };
+  const resolvedLink = {
+    paymentLinkUrl: "https://stub.djomy.africa/pay/djomy-stub-inv-1",
+    providerRef: "djomy-stub-inv-1",
+    expiresAt: new Date("2026-09-07T00:00:00.000Z"),
+  };
+
+  it("peuple paymentLinkUrl/paymentLinkId/paymentLinkExpiresAt quand la génération de lien réussit", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(resolvedLink);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith({
+      invoiceId: "inv-1",
+      organizationId: "org-1",
+      amountGnf: 1_500_000n,
+    });
+    expect(result.paymentLinkUrl).toBe(resolvedLink.paymentLinkUrl);
+    expect(result.paymentLinkId).toBe(resolvedLink.providerRef);
+    expect(result.paymentLinkExpiresAt).toBe(resolvedLink.expiresAt);
+  });
+
+  it("réussit normalement (émission jamais bloquée) quand la génération de lien échoue — Money Context en panne", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(null);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect(result.status).toBe("issued");
+    expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
+    expect(result.paymentLinkUrl).toBeUndefined();
+  });
+
+  it("certifie la facture strictement à l'identique, que le lien de paiement réussisse ou échoue", async () => {
+    const certification = createFakeCertification();
+
+    const prismaSucces = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+    });
+    const serviceSucces = new InvoicesService(
+      prismaSucces as any,
+      createFakeNumbering() as any,
+      certification as any,
+      createFakePaymentLinkClient(resolvedLink) as any,
+    );
+    const resultSucces = await serviceSucces.issue("inv-1");
+
+    const prismaEchec = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+    });
+    const serviceEchec = new InvoicesService(
+      prismaEchec as any,
+      createFakeNumbering() as any,
+      certification as any,
+      createFakePaymentLinkClient(null) as any,
+    );
+    const resultEchec = await serviceEchec.issue("inv-1");
+
+    expect(resultSucces.number).toBe(resultEchec.number);
+    expect(resultSucces.certificationId).toBe(resultEchec.certificationId);
+    expect(resultSucces.hash).toBe(resultEchec.hash);
+    expect(resultSucces.signature).toEqual(resultEchec.signature);
   });
 });
