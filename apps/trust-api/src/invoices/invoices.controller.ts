@@ -1,26 +1,31 @@
 import { Body, Controller, Param, Post, UsePipes } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { Roles } from "../common/rbac/roles.decorator";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { InvoicesService } from "./invoices.service";
 
 @ApiTags("invoices")
+@ApiBearerAuth()
 @Controller("invoices")
 export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}
 
   @Post()
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
   @UsePipes(new ZodValidationPipe(createInvoiceSchema))
   create(@Body() dto: CreateInvoiceDto) {
     return this.invoicesService.createDraft(dto);
   }
 
   @Post(":id/issue")
+  @Roles("owner", "admin", "cashier")
   issue(@Param("id") id: string) {
     return this.invoicesService.issue(id);
   }
 
   @Post(":id/void")
+  @Roles("owner", "admin")
   void(@Param("id") id: string) {
     return this.invoicesService.void(id);
   }

@@ -122,8 +122,41 @@ model User {
 
   phones        UserPhone[]
   invoiceEvents InvoiceEvent[]
+  memberships   OrganizationMember[]
 
   @@map("user")
+}
+
+// 7 rôles organisationnels de base (ADR-027, MVP initial). accountant_external et
+// practice_admin (portant le MVP à 9, ADR-070) ne sont volontairement pas inclus ici :
+// ils dépendent du mécanisme de mandat cabinet/CGA (PROFESSIONAL_PRACTICE/MANDATE)
+// non scaffoldé — voir docs/plans/2026-08-08-auth-rbac-org-roles.md.
+enum OrganizationRole {
+  owner
+  admin
+  accountant_internal
+  cashier
+  field_agent
+  delivery_driver
+  client_portal
+}
+
+// Le rôle n'est jamais mis en cache dans le JWT (voir AuthTokenService) : toujours
+// résolu ici à la requête, pour qu'une révocation (revokedAt) soit effective
+// immédiatement plutôt qu'à l'expiration du token.
+model OrganizationMember {
+  id             String            @id @default(uuid())
+  organizationId String            @map("organization_id")
+  userId         String            @map("user_id")
+  role           OrganizationRole
+  createdAt      DateTime          @default(now()) @map("created_at")
+  revokedAt      DateTime?         @map("revoked_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@map("organization_member")
 }
 
 model UserPhone {
@@ -157,6 +190,7 @@ model Organization {
 
   invoices  Invoice[]
   sequences InvoiceSequence[]
+  members   OrganizationMember[]
 
   @@map("organization")
 }

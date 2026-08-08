@@ -17,17 +17,25 @@ function isUniqueConstraintViolation(error: unknown, field: string): boolean {
 export class OrganizationsService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
-  async create(dto: CreateOrganizationDto) {
+  // Le créateur devient owner dans la même transaction — aucune organisation ne
+  // doit exister sans au moins un membre pouvant en gérer les accès.
+  async create(dto: CreateOrganizationDto, creatorUserId: string) {
     try {
-      return await this.prisma.organization.create({
-        data: {
-          name: dto.name,
-          regimeFiscal: dto.regimeFiscal,
-          legalForm: dto.legalForm,
-          nif: dto.nif,
-          etaxNumber: dto.etaxNumber,
-          rccm: dto.rccm,
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const organization = await tx.organization.create({
+          data: {
+            name: dto.name,
+            regimeFiscal: dto.regimeFiscal,
+            legalForm: dto.legalForm,
+            nif: dto.nif,
+            etaxNumber: dto.etaxNumber,
+            rccm: dto.rccm,
+          },
+        });
+        await tx.organizationMember.create({
+          data: { organizationId: organization.id, userId: creatorUserId, role: "owner" },
+        });
+        return organization;
       });
     } catch (error) {
       if (isUniqueConstraintViolation(error, "nif")) {

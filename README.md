@@ -37,6 +37,21 @@ pgtools/pgsql/bin/createdb.exe -U postgres -h localhost -p 5432 facture_gn_dev
 Actions, elle, utilise un vrai service `postgres:16` conteneurisé et n'est pas
 affectée par ce contournement.
 
+### Authentification (JWT RS256, ADR-011)
+
+`apps/trust-api` a besoin de `DATABASE_URL`, `JWT_PRIVATE_KEY` et `JWT_PUBLIC_KEY`
+comme vraies variables d'environnement au démarrage (aucun chargement automatique
+de `.env` côté NestJS — copier `apps/trust-api/.env.example` en `.env` documente le
+format mais ne suffit pas à lui seul ; exporter les variables ou passer par un
+gestionnaire de process qui charge le `.env`, ex. `dotenv -e .env -- pnpm dev`).
+
+Générer une paire de clés RS256 de dev (jamais la même qu'en prod — voir ADR-008
+pour la cible Vault Transit) :
+
+```bash
+node -e "const{generateKeyPairSync}=require('crypto');const{privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});console.log('JWT_PRIVATE_KEY=\"'+privateKey.replace(/\n/g,'\\\\n')+'\"');console.log('JWT_PUBLIC_KEY=\"'+publicKey.replace(/\n/g,'\\\\n')+'\"');"
+```
+
 ## Documentation de référence
 
 Voir `../V/` (PRD, DAT, ERD, Registre ADR) pour les invariants métier — toute divergence du schéma avec l'ERD doit être documentée.
