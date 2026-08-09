@@ -26,6 +26,21 @@ export interface CertificationService {
   verify(result: CertificationResult): boolean;
 }
 
+// 8 caractères — même largeur que la tranche NIF utilisée par buildCertificationId
+// (NIF8). Jamais un préfixe numérique valide (NIF guinéen), donc jamais de collision
+// structurelle possible avec un vrai NIF.
+export const UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER = "UNVERIFI";
+
+// Organisation sans NIF (ADR-035, story B4 — inscription self-service jamais
+// bloquée) : la construction du certification_id (GN-{NIF8}-{YYYY}-{HASH6}) a
+// toujours besoin d'un segment de 8 caractères. Ce placeholder est UNIQUEMENT
+// interne au calcul du hash/certification_id — jamais présenté comme un vrai NIF
+// côté vérification publique (VerificationService retourne le NIF réel, y compris
+// null, jamais ce placeholder — honnêteté envers un vérificateur externe, PRD §1.2).
+export function resolveNifForCertification(nif: string | null): string {
+  return nif ?? UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER;
+}
+
 function canonicalizePayload(payload: CertifiablePayload): string {
   if (!Number.isSafeInteger(Number(payload.totalTtc))) {
     throw new RangeError(

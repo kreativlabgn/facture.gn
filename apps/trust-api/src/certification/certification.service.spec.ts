@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { StubEd25519CertificationService } from "./certification.service";
+import {
+  resolveNifForCertification,
+  StubEd25519CertificationService,
+  UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER,
+} from "./certification.service";
 
 describe("StubEd25519CertificationService", () => {
   it("certifie la première facture d'une organisation avec chain.prev = GENESIS", () => {
@@ -91,5 +95,16 @@ describe("StubEd25519CertificationService", () => {
         previousHash: "GENESIS",
       }),
     ).toThrow(RangeError);
+  });
+});
+
+describe("resolveNifForCertification — organisation sans NIF (B1/B4, ADR-035)", () => {
+  it("retourne un placeholder fixe de 8 caractères quand le NIF est null", () => {
+    expect(resolveNifForCertification(null)).toBe(UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER);
+    expect(UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER).toHaveLength(8);
+  });
+
+  it("retourne le NIF inchangé quand il est renseigné — jamais un placeholder pour une organisation vérifiée", () => {
+    expect(resolveNifForCertification("GN12345678")).toBe("GN12345678");
   });
 });

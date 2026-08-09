@@ -192,7 +192,11 @@ model Organization {
   name                        String
   regimeFiscal                RegimeFiscal           @map("regime_fiscal")
   legalForm                   LegalForm              @map("legal_form")
-  nif                         String                 @unique
+  // Nullable : NIF optionnel à l'inscription (ADR-035, story B4 — self-service
+  // jamais bloqué par une information que la PME n'a pas encore). Plusieurs
+  // organisations sans NIF n'entrent jamais en conflit : Postgres autorise
+  // plusieurs NULL sur une colonne @unique (même pattern qu'Invoice.number).
+  nif                         String?                @unique
   etaxNumber                  String?                @map("etax_number")
   rccm                        String?
   registrationSource          RegistrationSource     @default(organic) @map("registration_source")

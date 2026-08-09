@@ -2,13 +2,17 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
+import { resolveNifForCertification } from "../certification/certification.service";
 import type { CertificationService } from "../certification/certification.service";
 
 export interface PublicInvoiceVerification {
   certificationId: string;
   number: string;
   organizationName: string;
-  organizationNif: string;
+  // null pour une organisation sans NIF (B1/B4) — jamais le placeholder interne
+  // (UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER) : honnêteté envers un vérificateur
+  // externe (PRD §1.2, tiers de confiance).
+  organizationNif: string | null;
   totalTtc: string;
   issuedAt: string;
   status: string;
@@ -43,7 +47,7 @@ export class VerificationService {
     // détecter une altération en base après signature, pas seulement une ligne absente.
     const recomputed = this.certification.certify({
       invoiceId: invoice.id,
-      organizationNif: invoice.organization.nif,
+      organizationNif: resolveNifForCertification(invoice.organization.nif),
       number: invoice.number,
       totalTtc: invoice.totalTtc,
       issuedAt: invoice.issuedAt.toISOString(),

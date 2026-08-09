@@ -126,6 +126,35 @@ describe("InvoicesService — machine à états", () => {
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
   });
 
+  it("émet une facture pour une organisation sans NIF avec le placeholder de certification (B1/B4)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: null }),
+      },
+    });
+    const certification = createFakeCertification();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.issue("inv-1");
+
+    expect(certification.certify).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationNif: "UNVERIFI" }),
+    );
+  });
+
   it("refuse d'émettre (issued) une facture qui n'est pas draft", async () => {
     const prisma = createFakePrisma({
       invoice: {

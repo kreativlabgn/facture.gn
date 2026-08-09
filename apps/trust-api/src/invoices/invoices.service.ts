@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
+import { resolveNifForCertification } from "../certification/certification.service";
 import type { CertificationService } from "../certification/certification.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
@@ -74,7 +75,7 @@ export class InvoicesService {
 
     const certification = this.certification.certify({
       invoiceId: invoice.id,
-      organizationNif: organization.nif,
+      organizationNif: resolveNifForCertification(organization.nif),
       number,
       totalTtc: invoice.totalTtc,
       issuedAt: issuedAt.toISOString(),
