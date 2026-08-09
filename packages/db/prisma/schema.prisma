@@ -158,6 +158,7 @@ model User {
   recoveryRequestsMade     AccountRecoveryRequest[] @relation("RecoveryRequester")
   recoveryRequestsResolved AccountRecoveryRequest[] @relation("RecoveryResolver")
   assistedSessions         AssistedSession[]
+  practiceMemberships      PracticeMember[]
 
   @@map("user")
 }
@@ -586,4 +587,73 @@ model PaymentWebhook {
 
   @@unique([provider, providerRef])
   @@map("payment_webhook")
+}
+
+// ===== Écosystème cabinet (F4, ADR-068/078) =====
+
+enum ProfessionalPracticeType {
+  cabinet_comptable
+  gestionnaire
+  fiduciaire
+  cga
+}
+
+enum ProfessionalPracticeTier {
+  partner_free
+  partner_starter
+  partner_pro
+  partner_institutional
+}
+
+// practice_admin/accountant_external/business_manager — jamais un OrganizationRole
+// (les 7 valeurs existantes sont toutes scopées à une organisation) : ADR-068 est
+// explicite, une practice est une "entité de premier niveau PARALLÈLE à
+// organization", jamais rattachée à une Organization existante. MANDATE (practice →
+// organization, ADR-069) est le mécanisme d'accès multi-org, pas cet enum — hors
+// scope de F4 (stories F1/F5/F6 séparées).
+enum PracticeMemberRole {
+  practice_admin
+  accountant_external
+  business_manager
+}
+
+// Aucun @Roles() sur la route de création (voir practices.controller.ts) — même
+// principe que organizations.controller.ts:create() : n'importe quel utilisateur
+// authentifié peut créer une practice, il en devient automatiquement practice_admin.
+// ordreVerified reste à son défaut false ici — même pattern que
+// Organization.dgiVerificationStatus (B1/B4 scaffoldent, B2 construit la
+// vérification plus tard comme story séparée). tier jamais accepté du client,
+// défaut système partner_free (même principe que Organization.commercialTier).
+model ProfessionalPractice {
+  id                 String                   @id @default(uuid())
+  type               ProfessionalPracticeType
+  name               String
+  registrationNumber String?                  @map("registration_number")
+  ordreVerified      Boolean                  @default(false) @map("ordre_verified")
+  tier               ProfessionalPracticeTier @default(partner_free)
+  phone              String
+  email              String?
+  createdAt          DateTime                 @default(now()) @map("created_at")
+
+  members PracticeMember[]
+
+  @@map("professional_practice")
+}
+
+model PracticeMember {
+  id                  String    @id @default(uuid())
+  practiceId          String    @map("practice_id")
+  userId              String    @map("user_id")
+  role                PracticeMemberRole
+  permissionsOverride Json?     @map("permissions_override")
+  joinedAt            DateTime  @default(now()) @map("joined_at")
+  // Nullable — peuplé quand le membre quitte (ERD) ; aucun mécanisme de départ
+  // construit dans cette story (F4 se limite à la création), le champ existe pour
+  // une story future.
+  leftAt              DateTime? @map("left_at")
+
+  practice ProfessionalPractice @relation(fields: [practiceId], references: [id])
+  user     User                 @relation(fields: [userId], references: [id])
+
+  @@map("practice_member")
 }
