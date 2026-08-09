@@ -308,8 +308,11 @@ model InvoiceSequence {
 // c'est une valeur dérivée (SUM(Invoice.amountDue) sur les factures actives du
 // client), calculée à la demande par CustomersService — jamais une source de
 // vérité dupliquée. is_public_entity/public_buyer_account_id (ERD) marqués V2,
-// jamais scaffoldés ici. possible_duplicate_of (dédup) hors scope, aucun signal
-// backlog pour cette story précise.
+// jamais scaffoldés ici.
+// E4, ADR-038 — "jamais de fusion automatique, résolution manuelle" :
+// possibleDuplicateOf reste un pointeur informatif, jamais un déclencheur
+// automatique — la fusion (CustomersService.merge()) accepte n'importe quelle
+// paire de clients de la même organisation, que ce champ soit renseigné ou non.
 model Customer {
   id             String  @id @default(uuid())
   organizationId String  @map("organization_id")
@@ -317,12 +320,15 @@ model Customer {
   phone          String?
   nif            String?
 
-  creditLimit BigInt? @map("credit_limit")
+  creditLimit         BigInt? @map("credit_limit")
+  possibleDuplicateOf String? @map("possible_duplicate_of")
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  invoices     Invoice[]
+  organization  Organization @relation(fields: [organizationId], references: [id])
+  invoices      Invoice[]
+  duplicateOf   Customer?    @relation("CustomerDuplicate", fields: [possibleDuplicateOf], references: [id])
+  possibleDupes Customer[]   @relation("CustomerDuplicate")
 
   @@map("customer")
 }
