@@ -6,6 +6,7 @@ import { detectCashAnomalyPatterns } from "./cash-anomaly-detection";
 import type { CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
 import type { RecordDepositDto } from "./dto/record-deposit.dto";
+import type { CreateBankTransferPaymentDto } from "./dto/create-bank-transfer-payment.dto";
 
 const PAYABLE_STATUSES = new Set(["issued", "partially_paid"]);
 
@@ -67,6 +68,30 @@ export class PaymentsService {
       gatewayFeeAmount: dto.feeGatewayGnf,
       method: "payment_link",
       providerRef: dto.providerRef,
+    });
+  }
+
+  // ADR-052, C3 — "rapprochement asynchrone" : enregistrement manuel par le staff
+  // après constat sur son propre relevé bancaire, aucune confirmation automatique.
+  // Contrairement au cash (C14), le trop-perçu n'est pas géré ici : un virement
+  // arrive à un montant convenu à l'avance, pas de rendu-monnaie physique qui
+  // justifierait cette gestion. Aucune preuve requise (contrairement au cash,
+  // C1) : le relevé bancaire de l'organisation est déjà la preuve. Aucune
+  // détection d'anomalie (G1) : ce moteur reste strictement cash-only.
+  async recordBankTransferPayment(invoiceId: string, dto: CreateBankTransferPaymentDto, idempotencyKey: string) {
+    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+    if (existing) {
+      return existing;
+    }
+
+    await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
+
+    return this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
+      amount: dto.amount,
+      amountCollected: dto.amount,
+      platformFeeAmount: 0n,
+      gatewayFeeAmount: 0n,
+      method: "bank_transfer",
     });
   }
 

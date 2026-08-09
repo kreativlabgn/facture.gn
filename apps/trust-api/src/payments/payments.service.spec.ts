@@ -464,3 +464,52 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
     await expect(service.recordProviderPayment("inv-1", providerDto)).rejects.toThrow(NotFoundException);
   });
 });
+
+describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)", () => {
+  it("enregistre le virement avec method bank_transfer et une commission nulle", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-1");
+
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(0n);
+    expect(invoice.amountPaid).toBe(1_500_000n);
+    expect(invoice.status).toBe("paid");
+    expect(prisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ method: "bank_transfer", platformFeeAmount: 0n, gatewayFeeAmount: 0n }),
+      }),
+    );
+  });
+
+  it("refuse un virement dont le montant dépasse le solde dû — contrairement au cash (C14 non étendu ici)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordBankTransferPayment("inv-1", { amount: 1_300_000n }, "idem-bt-2"),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it("un replay avec le même idempotencyKey renvoie le paiement déjà créé, ne recrée rien", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any);
+
+    const first = await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-replay");
+    const second = await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-replay");
+
+    expect(second).toEqual(first);
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountPaid).toBe(1_500_000n);
+  });
+
+  it("n'écrit aucun InvoiceEvent de détection d'anomalie — G1 reste strictement cash-only", async () => {
+    const prisma = createFakePrisma({ amountDue: 150_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordBankTransferPayment("inv-1", { amount: 150_000_000n }, "idem-bt-3");
+
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+});
