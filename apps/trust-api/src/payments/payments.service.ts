@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import type { CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
+import type { RecordDepositDto } from "./dto/record-deposit.dto";
 
 const PAYABLE_STATUSES = new Set(["issued", "partially_paid"]);
 
@@ -53,6 +54,60 @@ export class PaymentsService {
     });
   }
 
+  // ADR-064 : un proforma n'accepte QUE des arrhes, jamais un paiement normal —
+  // jamais appliqué à Invoice.amountPaid/amountDue (l'arrhes est un dépôt de
+  // sécurité indépendant du solde de la facture, pas un règlement partiel).
+  async recordDepositPayment(proformaId: string, dto: RecordDepositDto, idempotencyKey: string) {
+    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+    if (existing) {
+      return existing;
+    }
+
+    const proforma = await this.prisma.invoice.findUnique({ where: { id: proformaId } });
+    if (!proforma) {
+      throw new NotFoundException(`Facture ${proformaId} introuvable`);
+    }
+    if (proforma.documentType !== "proforma") {
+      throw new ConflictException(
+        `Seul un proforma peut recevoir une arrhes (actuel : ${proforma.documentType})`,
+      );
+    }
+    if (proforma.status !== "draft") {
+      throw new ConflictException(
+        `Proforma ${proformaId} ne peut recevoir d'arrhes depuis le statut ${proforma.status}`,
+      );
+    }
+
+    const existingDeposit = await this.prisma.payment.findFirst({
+      where: { invoiceId: proformaId, depositType: "arrhes" },
+    });
+    if (existingDeposit) {
+      throw new ConflictException(`Proforma ${proformaId} a déjà une arrhes enregistrée`);
+    }
+
+    try {
+      return await this.prisma.payment.create({
+        data: {
+          invoiceId: proformaId,
+          status: "completed",
+          idempotencyKey,
+          amount: dto.amount,
+          amountCollected: dto.amount,
+          platformFeeAmount: 0n,
+          gatewayFeeAmount: 0n,
+          method: "cash",
+          depositType: "arrhes",
+          proofPhotoUrl: dto.proofPhotoUrl,
+          proofGpsLat: dto.proofGpsLat,
+          proofGpsLng: dto.proofGpsLng,
+          proofSignature: dto.proofSignature,
+        },
+      });
+    } catch (error) {
+      return this.resolveIdempotencyRace(error, idempotencyKey);
+    }
+  }
+
   private async getPayableInvoiceOrThrow(invoiceId: string, amount: bigint) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) {
@@ -93,18 +148,23 @@ export class PaymentsService {
         return payment;
       });
     } catch (error) {
-      // Course concurrente : deux requêtes avec le même Idempotency-Key arrivent en
-      // parallèle, toutes deux passent le lookup initial avant que l'une des deux ne
-      // committe — la contrainte unique DB tranche, on renvoie le paiement gagnant
-      // plutôt qu'un 500 brut sur la requête perdante.
-      if (isUniqueConstraintViolation(error, "idempotency_key")) {
-        const winner = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
-        if (winner) {
-          return winner;
-        }
-      }
-      throw error;
+      return this.resolveIdempotencyRace(error, idempotencyKey);
     }
+  }
+
+  // Course concurrente : deux requêtes avec le même Idempotency-Key arrivent en
+  // parallèle, toutes deux passent le lookup initial avant que l'une des deux ne
+  // committe — la contrainte unique DB tranche, on renvoie le paiement gagnant
+  // plutôt qu'un 500 brut sur la requête perdante. Partagé entre createPaymentAndApply()
+  // et recordDepositPayment() — un seul endroit à maintenir pour ce comportement.
+  private async resolveIdempotencyRace(error: unknown, idempotencyKey: string) {
+    if (isUniqueConstraintViolation(error, "idempotency_key")) {
+      const winner = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+      if (winner) {
+        return winner;
+      }
+    }
+    throw error;
   }
 
   // Incréments atomiques, jamais une valeur absolue recalculée depuis une lecture

@@ -167,6 +167,74 @@ describe("PaymentsService — encaissement cash", () => {
   });
 });
 
+function createFakePrismaForDeposit(invoiceOverrides: Record<string, unknown> = {}, existingDeposit: any = null) {
+  const invoiceState: any = {
+    id: "proforma-1",
+    documentType: "proforma",
+    status: "draft",
+    ...invoiceOverrides,
+  };
+  let nextPaymentId = 1;
+
+  const prisma: any = {
+    payment: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(existingDeposit),
+      create: vi.fn().mockImplementation(({ data }: any) =>
+        Promise.resolve({ id: `payment-${nextPaymentId++}`, ...data }),
+      ),
+    },
+    invoice: {
+      findUnique: vi.fn().mockResolvedValue(invoiceState),
+      update: vi.fn(),
+    },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
+const depositDto = { amount: 300_000n };
+
+describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
+  it("refuse un dépôt sur un document qui n'est pas un proforma", async () => {
+    const prisma = createFakePrismaForDeposit({ documentType: "invoice" });
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-1"),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it("refuse un dépôt sur un proforma qui n'est plus draft", async () => {
+    const prisma = createFakePrismaForDeposit({ status: "converted" });
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-2"),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it("enregistre l'arrhes sans jamais toucher amountPaid/amountDue de la facture", async () => {
+    const prisma = createFakePrismaForDeposit();
+    const service = new PaymentsService(prisma as any);
+
+    const payment = await service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-3");
+
+    expect(payment.depositType).toBe("arrhes");
+    expect(payment.method).toBe("cash");
+    expect(prisma.invoice.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse un second dépôt sur un proforma qui en a déjà un", async () => {
+    const prisma = createFakePrismaForDeposit({}, { id: "payment-existing", depositType: "arrhes" });
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-4"),
+    ).rejects.toThrow(ConflictException);
+  });
+});
+
 describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, appelé par money-api)", () => {
   const providerDto = {
     amountGnf: 1_500_000n,

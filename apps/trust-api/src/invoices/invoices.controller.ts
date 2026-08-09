@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
+import { forfeitDepositSchema, type ForfeitDepositDto } from "./dto/forfeit-deposit.dto";
 import { InvoicesService } from "./invoices.service";
 
 @ApiTags("invoices")
@@ -36,5 +37,16 @@ export class InvoicesController {
   @Roles("owner", "admin", "cashier")
   convertToInvoice(@Param("id") id: string) {
     return this.invoicesService.convertToInvoice(id);
+  }
+
+  // Même trio que /issue et /convert-to-invoice — action conséquente déclenchée par
+  // le staff (C5, ADR-034).
+  @Post(":id/forfeit-deposit")
+  @Roles("owner", "admin", "cashier")
+  forfeitDeposit(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(forfeitDepositSchema)) dto: ForfeitDepositDto,
+  ) {
+    return this.invoicesService.forfeitDeposit(id, dto.reason);
   }
 }

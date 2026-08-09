@@ -243,6 +243,45 @@ export class InvoicesService {
     });
   }
 
+  // ADR-034 : forfait d'arrhes (no-show ou dédit exercé) — reason est fourni par le
+  // staff (Djénabou), jamais détecté automatiquement (aucun scheduler, aucune date de
+  // réservation stockée dans ce schéma). L'arrhes (Payment) n'est jamais effacée ;
+  // l'InvoiceEvent est la trace d'audit permanente de ce qui lui est arrivé
+  // (ADR-015, "source de vérité audit") — jamais recalculé, jamais mutable.
+  async forfeitDeposit(proformaId: string, reason: "cancellation_indemnity" | "no_show_forfeited") {
+    const proforma = await this.prisma.invoice.findUniqueOrThrow({ where: { id: proformaId } });
+
+    if (proforma.documentType !== "proforma") {
+      throw new ConflictException(
+        `Seul un proforma peut avoir une arrhes forfaitée (actuel : ${proforma.documentType})`,
+      );
+    }
+
+    const deposit = await this.prisma.payment.findFirst({
+      where: { invoiceId: proformaId, depositType: "arrhes" },
+    });
+    if (!deposit) {
+      throw new ConflictException(`Proforma ${proformaId} n'a aucune arrhes enregistrée à forfaiter`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Même garde atomique que convertToInvoice() (C15) : sous deux forfaits
+      // concurrents, seule la transaction qui voit encore status="draft" au moment
+      // de l'écriture peut committer.
+      const claimed = await tx.invoice.updateMany({
+        where: { id: proformaId, status: "draft" },
+        data: { status: "voided" },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException(`Proforma ${proformaId} a déjà été clôturé par une autre requête`);
+      }
+
+      return tx.invoiceEvent.create({
+        data: { invoiceId: proformaId, type: reason, amount: deposit.amount },
+      });
+    });
+  }
+
   // voided réservé aux factures sans aucun paiement (PRD §4.2).
   async void(invoiceId: string) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
