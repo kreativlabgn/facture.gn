@@ -61,6 +61,13 @@ export class AuthService {
   // ADR-042, B3 — "backup admin obligatoire" est un nudge, jamais un blocage
   // (cohérent avec B1/B4) : aucune désignation explicite, n'importe quel membre
   // owner/admin non révoqué de l'organisation peut résoudre la demande.
+  //
+  // Cible restreinte à role="owner" (revue sécurité) : le backlog B3 porte
+  // explicitement sur "récupérer l'accès à un compte owner", pas n'importe quel
+  // membre. Sans cette restriction, un admin déjà légitimement dans l'organisation
+  // pouvait initier ET approuver seul une récupération pour un AUTRE admin/cashier
+  // (voire l'owner) sans son consentement — mouvement latéral interne, la victime
+  // n'étant jamais impliquée (aucun canal de notification n'existe pour l'alerter).
   async requestRecovery(dto: RequestRecoveryDto): Promise<{ message: string }> {
     const phone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
     const organization = await this.prisma.organization.findUnique({ where: { nif: dto.organizationNif } });
@@ -70,7 +77,7 @@ export class AuthService {
         where: { organizationId_userId: { organizationId: organization.id, userId: phone.userId } },
       });
 
-      if (membership && !membership.revokedAt) {
+      if (membership && !membership.revokedAt && membership.role === "owner") {
         const existingPending = await this.prisma.accountRecoveryRequest.findFirst({
           where: { userId: phone.userId, organizationId: organization.id, status: "pending" },
         });

@@ -174,6 +174,20 @@ describe("AuthService", () => {
         expect(prisma.accountRecoveryRequest.create).not.toHaveBeenCalled();
         expect(result.message).toMatch(GENERIC_MESSAGE_MATCHER);
       });
+
+      it("ne crée aucune demande pour un membre non-owner — B3 est scopé au owner (ferme le mouvement latéral admin→admin, revue sécurité)", async () => {
+        const prisma = createFakePrismaForRecovery({
+          phone: { userId: "user-1" },
+          organization: { id: "org-1" },
+          membership: { role: "admin", revokedAt: null },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        const result = await service.requestRecovery({ msisdn: "+224622334455", organizationNif: "GN12345678" });
+
+        expect(prisma.accountRecoveryRequest.create).not.toHaveBeenCalled();
+        expect(result.message).toMatch(GENERIC_MESSAGE_MATCHER);
+      });
     });
 
     describe("resolveRecovery", () => {
