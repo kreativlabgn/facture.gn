@@ -149,7 +149,7 @@ export class PaymentsService {
     // autres (statut, existence).
     if (!allowOverpayment && amount > invoice.amountDue) {
       throw new ConflictException(
-        `Montant ${amount} supérieur au solde dû ${invoice.amountDue} — trop-perçu non géré ici`,
+        `Montant ${amount} supérieur au solde dû ${invoice.amountDue} — trop-perçu non géré pour ce mode de paiement`,
       );
     }
     return invoice;
