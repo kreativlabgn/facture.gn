@@ -138,4 +138,29 @@ export class OrganizationsService {
     // Inatteignable : la boucle retourne ou lève à chaque itération.
     throw new ConflictException("Impossible de générer un code-compte unique après plusieurs tentatives");
   }
+
+  // E8, ADR-093 — "aucune valeur contractuelle", strictement informatif, dérivé de
+  // payment.method sur des données déjà captées. Arrhes (depositType="arrhes")
+  // toujours exclues des deux totaux : bucket financier distinct (C5), jamais un
+  // "encaissement" de facture au sens de cet indicateur. ratio:null (jamais un faux
+  // 0%) pour une organisation sans historique — 0% laisserait croire à un mauvais
+  // historique plutôt qu'à une absence de données.
+  async getVerifiedPaymentRatio(organizationId: string) {
+    const [total, verified] = await Promise.all([
+      this.prisma.payment.aggregate({
+        _sum: { amount: true },
+        where: { invoice: { organizationId }, depositType: null },
+      }),
+      this.prisma.payment.aggregate({
+        _sum: { amount: true },
+        where: { invoice: { organizationId }, depositType: null, method: "payment_link" },
+      }),
+    ]);
+
+    const totalAmount = total._sum.amount ?? 0n;
+    const verifiedAmount = verified._sum.amount ?? 0n;
+    const ratio = totalAmount > 0n ? Number(verifiedAmount) / Number(totalAmount) : null;
+
+    return { totalAmount, verifiedAmount, ratio };
+  }
 }

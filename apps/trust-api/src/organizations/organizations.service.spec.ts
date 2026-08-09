@@ -219,3 +219,55 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
     expect(prisma.organization.create).toHaveBeenCalledTimes(3);
   });
 });
+
+function createFakePrismaForVerifiedPaymentRatio(totalSum: bigint | null, verifiedSum: bigint | null) {
+  return {
+    payment: {
+      // aggregate() appelé deux fois : une fois sans filtre method (total), une fois
+      // avec method:"payment_link" (vérifié) — on distingue via la présence du filtre.
+      aggregate: vi.fn(({ where }: any) =>
+        Promise.resolve({ _sum: { amount: where.method ? verifiedSum : totalSum } }),
+      ),
+    },
+  };
+}
+
+describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
+  it("calcule le ratio paiements vérifiés / total des encaissements", async () => {
+    const prisma = createFakePrismaForVerifiedPaymentRatio(500_000n, 300_000n);
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.getVerifiedPaymentRatio("org-1");
+
+    expect(result).toEqual({ totalAmount: 500_000n, verifiedAmount: 300_000n, ratio: 0.6 });
+  });
+
+  it("renvoie ratio:null pour une organisation sans aucun paiement — jamais un faux 0%", async () => {
+    const prisma = createFakePrismaForVerifiedPaymentRatio(null, null);
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.getVerifiedPaymentRatio("org-1");
+
+    expect(result).toEqual({ totalAmount: 0n, verifiedAmount: 0n, ratio: null });
+  });
+
+  it("renvoie ratio:1 quand 100% des encaissements sont réglés par lien de paiement", async () => {
+    const prisma = createFakePrismaForVerifiedPaymentRatio(400_000n, 400_000n);
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.getVerifiedPaymentRatio("org-1");
+
+    expect(result.ratio).toBe(1);
+  });
+
+  it("exclut toujours les arrhes des deux totaux — bucket financier distinct (C5)", async () => {
+    const prisma = createFakePrismaForVerifiedPaymentRatio(500_000n, 300_000n);
+    const service = new OrganizationsService(prisma as any);
+
+    await service.getVerifiedPaymentRatio("org-1");
+
+    expect(prisma.payment.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ depositType: null }) }),
+    );
+  });
+});

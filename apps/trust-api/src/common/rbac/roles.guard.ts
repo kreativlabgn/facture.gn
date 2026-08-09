@@ -10,6 +10,7 @@ import { Reflector } from "@nestjs/core";
 import type { OrganizationRole, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../prisma.module";
 import { ROLES_KEY } from "./roles.decorator";
+import { ORGANIZATION_ID_SOURCE_KEY } from "./organization-id-source.decorator";
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -28,8 +29,16 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
+    // Défaut "invoice" : rétrocompatible avec toutes les routes existantes qui ne
+    // déclarent pas @OrganizationIdSource() (issue/void/...).
+    const idSource =
+      this.reflector.getAllAndOverride<"invoice" | "organization" | undefined>(ORGANIZATION_ID_SOURCE_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? "invoice";
+
     const request = context.switchToHttp().getRequest();
-    const organizationId = await this.resolveOrganizationId(request);
+    const organizationId = await this.resolveOrganizationId(request, idSource);
 
     const membership = await this.prisma.organizationMember.findUnique({
       where: { organizationId_userId: { organizationId, userId: request.user.id } },
@@ -42,17 +51,23 @@ export class RolesGuard implements CanActivate {
     return true;
   }
 
-  // MVP : deux sources suffisent au périmètre actuel (organizations/invoices) —
-  // organizationId direct dans le body à la création, ou résolu depuis la facture
-  // pointée par :id pour issue/void. À généraliser si Money/Capital Context
-  // introduisent d'autres formes de routes protégées par rôle.
-  private async resolveOrganizationId(request: any): Promise<string> {
+  // organizationId direct dans le body à la création, ou résolu depuis params.id —
+  // soit une facture (issue/void/...), soit directement une organisation (E8,
+  // trust-score) selon @OrganizationIdSource() (défaut "invoice", rétrocompatible).
+  private async resolveOrganizationId(request: any, idSource: "invoice" | "organization"): Promise<string> {
     if (request.body?.organizationId) {
       return request.body.organizationId;
     }
     if (request.params?.id) {
       // findUnique + 404 explicite plutôt que findUniqueOrThrow : une NotFoundError
       // Prisma non interceptée fuiterait en 500 brut plutôt qu'une réponse propre.
+      if (idSource === "organization") {
+        const organization = await this.prisma.organization.findUnique({ where: { id: request.params.id } });
+        if (!organization) {
+          throw new NotFoundException(`Organisation ${request.params.id} introuvable`);
+        }
+        return organization.id;
+      }
       const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
       if (!invoice) {
         throw new NotFoundException(`Facture ${request.params.id} introuvable`);

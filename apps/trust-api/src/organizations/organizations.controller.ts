@@ -1,9 +1,11 @@
-import { Body, Controller, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { Public } from "../auth/public.decorator";
 import { DgiVerificationAuthGuard } from "../common/dgi-verification-auth.guard";
+import { Roles } from "../common/rbac/roles.decorator";
+import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { createOrganizationSchema, type CreateOrganizationDto } from "./dto/create-organization.dto";
 import {
   createAssistedOrganizationSchema,
@@ -52,5 +54,17 @@ export class OrganizationsController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.organizationsService.createAssisted(user.id, dto);
+  }
+
+  // E8, ADR-093 — strictement informatif, interne à l'organisation (owner/admin
+  // uniquement, backlog explicite) : jamais un gate de fonctionnalité, jamais
+  // exposé à un tiers externe au MVP. @OrganizationIdSource("organization") :
+  // :id est ici directement l'organisation, pas une facture qui lui appartient
+  // (RolesGuard résout "invoice" par défaut pour toutes les autres routes).
+  @Get(":id/trust-score")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  getTrustScore(@Param("id") organizationId: string) {
+    return this.organizationsService.getVerifiedPaymentRatio(organizationId);
   }
 }
