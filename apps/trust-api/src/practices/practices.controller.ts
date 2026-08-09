@@ -1,7 +1,8 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
+import { MandatesService } from "../mandates/mandates.service";
 import { createPracticeSchema, type CreatePracticeDto } from "./dto/create-practice.dto";
 import { PracticesService } from "./practices.service";
 
@@ -9,7 +10,10 @@ import { PracticesService } from "./practices.service";
 @ApiBearerAuth()
 @Controller("practices")
 export class PracticesController {
-  constructor(private readonly practicesService: PracticesService) {}
+  constructor(
+    private readonly practicesService: PracticesService,
+    private readonly mandatesService: MandatesService,
+  ) {}
 
   // Aucun rôle requis : une practice n'est PAS scopée à une organisation existante
   // (ADR-068, entité de premier niveau parallèle) — n'importe quel utilisateur
@@ -21,5 +25,15 @@ export class PracticesController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.practicesService.create(dto, user.id);
+  }
+
+  // F7, ADR-070 — donnée source d'un sélecteur "switch organisation" côté client
+  // (PWA/dashboard) : le switch lui-même reste un problème client, aucun état
+  // "organisation courante" n'est maintenu côté serveur (cohérent avec le modèle
+  // stateless déjà utilisé partout dans ce repo). Tout membre actif de la
+  // practice (pas seulement practice_admin) peut consulter cette liste.
+  @Get(":id/organizations")
+  listAccessibleOrganizations(@Param("id") practiceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.mandatesService.listAccessibleOrganizations(practiceId, user.id);
   }
 }

@@ -243,3 +243,56 @@ describe("MandatesService — révocation (F6, ADR-069)", () => {
     await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(/active/);
   });
 });
+
+function createFakePrismaForListAccessibleOrganizations(
+  overrides: { member?: any; mandates?: any[] } = {},
+) {
+  const prisma: any = {
+    practiceMember: {
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.member !== undefined ? overrides.member : { id: "member-1", role: "accountant_external" },
+      ),
+    },
+    mandate: {
+      findMany: vi.fn().mockResolvedValue(
+        overrides.mandates ?? [
+          { id: MANDATE_ID, status: "active", organization: { id: ORG_ID, name: "Boutique Aissatou" } },
+        ],
+      ),
+    },
+  };
+  return prisma;
+}
+
+describe("MandatesService — organisations accessibles (F7, ADR-070)", () => {
+  it("retourne les organisations dont le mandat est active pour cette practice", async () => {
+    const prisma = createFakePrismaForListAccessibleOrganizations();
+    const service = new MandatesService(prisma as any);
+
+    const result = await service.listAccessibleOrganizations(PRACTICE_ID, REQUESTER_ID);
+
+    expect(prisma.mandate.findMany).toHaveBeenCalledWith({
+      where: { practiceId: PRACTICE_ID, status: "active" },
+      include: { organization: { select: { id: true, name: true } } },
+    });
+    expect(result).toEqual([
+      { id: MANDATE_ID, status: "active", organization: { id: ORG_ID, name: "Boutique Aissatou" } },
+    ]);
+  });
+
+  it("refuse si l'appelant n'est pas PracticeMember de la practice ciblée", async () => {
+    const prisma = createFakePrismaForListAccessibleOrganizations({ member: null });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.listAccessibleOrganizations(PRACTICE_ID, REQUESTER_ID)).rejects.toThrow(/membre/);
+  });
+
+  it("accepte un accountant_external, pas seulement un practice_admin (ADR-070)", async () => {
+    const prisma = createFakePrismaForListAccessibleOrganizations({
+      member: { id: "member-1", role: "accountant_external" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.listAccessibleOrganizations(PRACTICE_ID, REQUESTER_ID)).resolves.not.toThrow();
+  });
+});

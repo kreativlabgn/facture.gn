@@ -103,4 +103,23 @@ export class MandatesService {
       data: { status: "revoked", revokedAt: new Date() },
     });
   }
+
+  // F7, ADR-070 — "Scope MVP réduit (consultation + FEC + switch)" exige
+  // explicitement que accountant_external puisse consulter/switcher, pas
+  // seulement practice_admin (contrairement à create()/revoke(), actions
+  // administratives engageant le cabinet) — donc PAS assertPracticeAdmin() ici,
+  // tout membre actif suffit.
+  async listAccessibleOrganizations(practiceId: string, requesterUserId: string) {
+    const member = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!member) {
+      throw new ForbiddenException("Seul un membre du cabinet peut consulter ses organisations accessibles");
+    }
+
+    return this.prisma.mandate.findMany({
+      where: { practiceId, status: "active" },
+      include: { organization: { select: { id: true, name: true } } },
+    });
+  }
 }
