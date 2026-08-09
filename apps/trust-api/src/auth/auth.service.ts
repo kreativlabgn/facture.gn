@@ -146,7 +146,18 @@ export class AuthService {
   // modification nécessaire là-bas) : il ne manquait que ce point d'écriture. Catch
   // sur la contrainte unique DB directement (pas un findUnique préalable, qui
   // laisserait une fenêtre de course entre la lecture et l'écriture).
-  async addPhone(userId: string, msisdn: string) {
+  //
+  // Re-confirmation du mot de passe (revue sécurité) : un JWT valide prouve une
+  // session active, pas une intention fraîche pour une action qui modifie
+  // durablement les moyens d'accès au compte — un JWT volé sans le mot de passe ne
+  // doit jamais suffire à planter un numéro persistant sur le compte de la victime.
+  async addPhone(userId: string, msisdn: string, password: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const valid = user.passwordHash ? await this.passwordService.verify(user.passwordHash, password) : false;
+    if (!valid) {
+      throw new UnauthorizedException("Mot de passe incorrect");
+    }
+
     try {
       return await this.prisma.userPhone.create({ data: { userId, msisdn, isPrimary: false } });
     } catch (error) {

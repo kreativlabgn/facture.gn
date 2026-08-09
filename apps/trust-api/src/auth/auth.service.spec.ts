@@ -1,3 +1,4 @@
+import { UnauthorizedException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { AuthService } from "./auth.service";
 
@@ -263,21 +264,36 @@ describe("AuthService", () => {
   describe("addPhone (B6, ADR-087)", () => {
     function createFakePrismaForAddPhone(createImpl?: ReturnType<typeof vi.fn>) {
       return {
+        user: {
+          findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "user-1", passwordHash: "$argon2id$hashed" }),
+        },
         userPhone: {
           create: createImpl ?? vi.fn().mockResolvedValue({ id: "phone-2", userId: "user-1", msisdn: "+224699887766", isPrimary: false }),
         },
       };
     }
 
-    it("crée un second numéro non-primaire pour l'utilisateur authentifié", async () => {
+    it("crée un second numéro non-primaire quand le mot de passe fourni est correct", async () => {
       const prisma = createFakePrismaForAddPhone();
-      const service = new AuthService(prisma as any, createFakePasswordService(), createFakeTokenService());
+      const passwordService = createFakePasswordService(true);
+      const service = new AuthService(prisma as any, passwordService, createFakeTokenService());
 
-      await service.addPhone("user-1", "+224699887766");
+      await service.addPhone("user-1", "+224699887766", "MotDePasse-Actuel-2026");
 
+      expect(passwordService.verify).toHaveBeenCalledWith("$argon2id$hashed", "MotDePasse-Actuel-2026");
       expect(prisma.userPhone.create).toHaveBeenCalledWith({
         data: { userId: "user-1", msisdn: "+224699887766", isPrimary: false },
       });
+    });
+
+    it("refuse un mot de passe incorrect — un JWT volé seul ne doit jamais suffire à planter un numéro (revue sécurité)", async () => {
+      const prisma = createFakePrismaForAddPhone();
+      const service = new AuthService(prisma as any, createFakePasswordService(false), createFakeTokenService());
+
+      await expect(service.addPhone("user-1", "+224699887766", "mauvais-mot-de-passe")).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(prisma.userPhone.create).not.toHaveBeenCalled();
     });
 
     it("refuse un msisdn déjà utilisé par n'importe quel compte, jamais un 500 brut", async () => {
@@ -286,9 +302,11 @@ describe("AuthService", () => {
         meta: { target: ["msisdn"] },
       });
       const prisma = createFakePrismaForAddPhone(vi.fn().mockRejectedValue(uniqueViolation));
-      const service = new AuthService(prisma as any, createFakePasswordService(), createFakeTokenService());
+      const service = new AuthService(prisma as any, createFakePasswordService(true), createFakeTokenService());
 
-      await expect(service.addPhone("user-1", "+224699887766")).rejects.toThrow(/existe déjà/);
+      await expect(service.addPhone("user-1", "+224699887766", "MotDePasse-Actuel-2026")).rejects.toThrow(
+        /existe déjà/,
+      );
     });
   });
 });

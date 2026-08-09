@@ -60,6 +60,6 @@ export class AuthController {
   @Post("phones")
   @ApiBearerAuth()
   addPhone(@Body(new ZodValidationPipe(addPhoneSchema)) dto: AddPhoneDto, @CurrentUser() user: CurrentUserPayload) {
-    return this.authService.addPhone(user.id, dto.msisdn);
+    return this.authService.addPhone(user.id, dto.msisdn, dto.password);
   }
 }
