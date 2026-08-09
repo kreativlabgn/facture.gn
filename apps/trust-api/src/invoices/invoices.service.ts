@@ -199,6 +199,21 @@ export class InvoicesService {
     const { totalHt, totalTva } = computeTaxBreakdown(proforma.totalTtc, taxRateBps);
 
     return this.prisma.$transaction(async (tx) => {
+      // Réclame le proforma atomiquement AVANT de créer la facture : sous deux
+      // conversions concurrentes (retry réseau plausible sur ce projet — PWA
+      // offline-first, réseau mobile instable), seule la transaction qui voit encore
+      // status="draft" au moment de l'écriture peut committer — l'autre reçoit
+      // count=0 et échoue proprement, jamais deux factures pour un même proforma.
+      const claimed = await tx.invoice.updateMany({
+        where: { id: proformaId, status: "draft" },
+        data: { status: "converted" },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          `Proforma ${proformaId} a déjà été converti par une autre requête`,
+        );
+      }
+
       const invoice = await tx.invoice.create({
         data: {
           organizationId: proforma.organizationId,
@@ -221,7 +236,7 @@ export class InvoicesService {
 
       await tx.invoice.update({
         where: { id: proformaId },
-        data: { status: "converted", convertedToInvoiceId: invoice.id },
+        data: { convertedToInvoiceId: invoice.id },
       });
 
       return invoice;
