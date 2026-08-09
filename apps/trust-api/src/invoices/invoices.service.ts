@@ -7,7 +7,10 @@ import { resolveNifForCertification } from "../certification/certification.servi
 import type { CertificationService } from "../certification/certification.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
+import { resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
+
+const BPS_DENOMINATOR = 10_000n;
 
 @Injectable()
 export class InvoicesService {
@@ -21,7 +24,18 @@ export class InvoicesService {
   ) {}
 
   async createDraft(dto: CreateInvoiceDto) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: dto.organizationId },
+    });
+    const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
+
     const totalTtc = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
+    // totalTva est TOUJOURS dérivé par soustraction, jamais recalculé indépendamment
+    // (ex. totalTtc × taxRateBps / (10000+taxRateBps)) — deux formules distinctes sous
+    // arrondi bigint pourraient diverger d'une unité GNF et casser l'invariant
+    // totalHt+totalTva=totalTtc, qui doit être garanti par construction (C4).
+    const totalHt = (totalTtc * BPS_DENOMINATOR) / (BPS_DENOMINATOR + BigInt(taxRateBps));
+    const totalTva = totalTtc - totalHt;
 
     return this.prisma.invoice.create({
       data: {
@@ -29,13 +43,15 @@ export class InvoicesService {
         documentType: dto.documentType,
         status: "draft",
         totalTtc,
+        totalHt,
+        totalTva,
         amountDue: totalTtc,
         lines: {
           create: dto.lines.map((line) => ({
             description: line.description,
             quantity: line.quantity,
             unitPrice: line.unitPrice,
-            taxRateBps: line.taxRateBps ?? 0,
+            taxRateBps,
           })),
         },
       },
