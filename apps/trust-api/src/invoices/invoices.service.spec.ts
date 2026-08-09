@@ -961,6 +961,98 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
   });
 });
 
+describe("InvoicesService — rattacher un client à la création (C6, ADR-039)", () => {
+  function createFakePrismaWithCustomer(customer: any) {
+    return {
+      invoice: {
+        create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal: "normal_tva" }),
+      },
+      customer: {
+        findUnique: vi.fn().mockResolvedValue(customer),
+      },
+    };
+  }
+
+  it("crée la facture avec customerId quand le client appartient à la même organisation", async () => {
+    const prisma = createFakePrismaWithCustomer({ id: "cust-1", organizationId: "org-1" });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      customerId: "cust-1",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
+    } as any);
+
+    expect(prisma.customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect(result.customerId).toBe("cust-1");
+  });
+
+  it("rejette un customerId appartenant à une AUTRE organisation", async () => {
+    const prisma = createFakePrismaWithCustomer({ id: "cust-1", organizationId: "org-2" });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.createDraft({
+        organizationId: "org-1",
+        documentType: "invoice",
+        customerId: "cust-1",
+        lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
+      } as any),
+    ).rejects.toThrow(/introuvable pour cette organisation/);
+  });
+
+  it("rejette un customerId inexistant", async () => {
+    const prisma = createFakePrismaWithCustomer(null);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.createDraft({
+        organizationId: "org-1",
+        documentType: "invoice",
+        customerId: "cust-inconnu",
+        lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
+      } as any),
+    ).rejects.toThrow(/introuvable pour cette organisation/);
+  });
+
+  it("ne fait AUCUNE requête customer quand customerId est absent — non-régression des tests createDraft() existants", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
+    } as any);
+
+    expect((prisma as any).customer).toBeUndefined();
+  });
+});
+
 function createFakePrismaForRegeneratePaymentLink(invoice: any, organization: any = {}) {
   const prisma: any = {
     invoice: {

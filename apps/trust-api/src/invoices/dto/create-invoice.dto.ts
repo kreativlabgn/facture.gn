@@ -13,6 +13,10 @@ export const createInvoiceSchema = z
   .object({
     organizationId: z.string().uuid(),
     documentType: z.enum(["invoice", "proforma", "quote"]).default("invoice"),
+    // C6 — client à crédit récurrent, optionnel ("nullable pour anonyme", ERD).
+    // Validé côté service (appartient à la même organizationId), jamais fait
+    // confiance au client sur ce point.
+    customerId: z.string().uuid().optional(),
     lines: z.array(invoiceLineSchema).min(1),
     // Remise globale en pourcentage (E2) — défaut 0, cohérent avec le défaut DB
     // (Invoice.discountPct @default(0)), jamais un défaut serveur différent.

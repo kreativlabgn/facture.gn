@@ -265,6 +265,7 @@ model Organization {
   recoveryRequests AccountRecoveryRequest[]
   assistedSessions AssistedSession[]
   mandates         Mandate[]
+  customers        Customer[]
 
   @@map("organization")
 }
@@ -300,6 +301,30 @@ model InvoiceSequence {
 
   @@unique([organizationId, year])
   @@map("invoice_sequence")
+}
+
+// C6, ADR-039 — "credit_limit/running_balance (calculé sur amount_due),
+// account_statement sans hash". running_balance n'est PAS une colonne ici :
+// c'est une valeur dérivée (SUM(Invoice.amountDue) sur les factures actives du
+// client), calculée à la demande par CustomersService — jamais une source de
+// vérité dupliquée. is_public_entity/public_buyer_account_id (ERD) marqués V2,
+// jamais scaffoldés ici. possible_duplicate_of (dédup) hors scope, aucun signal
+// backlog pour cette story précise.
+model Customer {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  name           String
+  phone          String?
+  nif            String?
+
+  creditLimit BigInt? @map("credit_limit")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  invoices     Invoice[]
+
+  @@map("customer")
 }
 
 model Invoice {
@@ -362,6 +387,7 @@ model Invoice {
   createdAt DateTime  @default(now()) @map("created_at")
 
   organization  Organization   @relation(fields: [organizationId], references: [id])
+  customer      Customer?      @relation(fields: [customerId], references: [id])
   convertedFrom Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
   convertedInto Invoice[]      @relation("InvoiceConversion")
   lines         InvoiceLine[]
