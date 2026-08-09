@@ -29,4 +29,12 @@ export class InvoicesController {
   void(@Param("id") id: string) {
     return this.invoicesService.void(id);
   }
+
+  // Même trio que /issue (owner/admin/cashier) — portée similaire, transforme un
+  // document en facture réellement facturable (C15).
+  @Post(":id/convert-to-invoice")
+  @Roles("owner", "admin", "cashier")
+  convertToInvoice(@Param("id") id: string) {
+    return this.invoicesService.convertToInvoice(id);
+  }
 }
