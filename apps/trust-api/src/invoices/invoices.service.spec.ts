@@ -173,6 +173,54 @@ describe("InvoicesService — remise globale à la création (E2)", () => {
   });
 });
 
+describe("InvoicesService — montant de référence en devise étrangère (I3, ADR-055)", () => {
+  it("persiste les 4 champs de référence devise tels quels quand ils sont fournis", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Prestation conseil diaspora", quantity: 1, unitPrice: 1_180_000n }],
+      referenceCurrency: "USD",
+      referenceAmount: 125n,
+      fxRate: "9440.50",
+      fxRateDate: new Date("2026-08-09"),
+    } as any);
+
+    expect(result.referenceCurrency).toBe("USD");
+    expect(result.referenceAmount).toBe(125n);
+    expect(result.fxRate).toBe("9440.50");
+    expect(result.fxRateDate).toEqual(new Date("2026-08-09"));
+  });
+
+  it("sans champs de référence devise, le comportement reste strictement inchangé — non-régression", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 100_000n }],
+    } as any);
+
+    expect(result.referenceCurrency).toBeUndefined();
+    expect(result.referenceAmount).toBeUndefined();
+    expect(result.fxRate).toBeUndefined();
+    expect(result.fxRateDate).toBeUndefined();
+  });
+});
+
 function createFakePrismaForConvertToInvoice(
   proforma: any,
   regimeFiscal: string,

@@ -45,6 +45,13 @@ export class InvoicesService {
         totalTva,
         discountPct,
         amountDue: totalTtc,
+        // Référence devise étrangère (I3, ADR-055) — purement informatif, jamais
+        // recalculé ni vérifié côté serveur. undefined si non fourni (les 4 champs
+        // ensemble ou aucun, garanti par le refine du DTO).
+        referenceCurrency: dto.referenceCurrency,
+        referenceAmount: dto.referenceAmount,
+        fxRate: dto.fxRate,
+        fxRateDate: dto.fxRateDate,
         lines: {
           create: dto.lines.map((line) => ({
             description: line.description,
@@ -236,6 +243,10 @@ export class InvoicesService {
           // purement informatif (traçabilité de la remise appliquée), aucun recalcul.
           discountPct: proforma.discountPct,
           amountDue: proforma.totalTtc,
+          // Référence devise (I3) délibérément PAS copiée, contrairement à
+          // discountPct : un taux de change peut être devenu obsolète entre la
+          // création du proforma/devis et sa conversion — jamais reconduit tel quel,
+          // l'organisation doit le ressaisir si toujours pertinent.
           lines: {
             create: proforma.lines.map((line: { description: string; quantity: number; unitPrice: bigint }) => ({
               description: line.description,
