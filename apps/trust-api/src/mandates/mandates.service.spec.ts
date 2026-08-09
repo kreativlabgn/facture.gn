@@ -167,3 +167,79 @@ describe("MandatesService — acceptation (F1, ADR-069)", () => {
     await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/pending/);
   });
 });
+
+function createFakePrismaForRevoke(
+  overrides: { member?: any; mandate?: any; updateImpl?: ReturnType<typeof vi.fn> } = {},
+) {
+  const prisma: any = {
+    practiceMember: {
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.member !== undefined ? overrides.member : { id: "member-1", role: "practice_admin" },
+      ),
+    },
+    mandate: {
+      findUnique: vi.fn().mockResolvedValue(
+        overrides.mandate !== undefined
+          ? overrides.mandate
+          : { id: MANDATE_ID, practiceId: PRACTICE_ID, status: "active" },
+      ),
+      update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
+    },
+  };
+  return prisma;
+}
+
+describe("MandatesService — révocation (F6, ADR-069)", () => {
+  it("révoque un mandat active détenu par la practice — status revoked, revokedAt renseigné", async () => {
+    const prisma = createFakePrismaForRevoke();
+    const service = new MandatesService(prisma as any);
+
+    await service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID);
+
+    expect(prisma.mandate.update).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID },
+      data: { status: "revoked", revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("refuse si l'appelant n'est pas practice_admin de la practice ciblée", async () => {
+    const prisma = createFakePrismaForRevoke({ member: null });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(/practice_admin/);
+  });
+
+  it("refuse (404) si le mandat n'existe pas", async () => {
+    const prisma = createFakePrismaForRevoke({ mandate: null });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (404) si le mandat est détenu par une autre practice que :id", async () => {
+    const prisma = createFakePrismaForRevoke({
+      mandate: { id: MANDATE_ID, practiceId: "autre-practice", status: "active" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (409) si le mandat est pending (jamais accepté, rien à révoquer)", async () => {
+    const prisma = createFakePrismaForRevoke({
+      mandate: { id: MANDATE_ID, practiceId: PRACTICE_ID, status: "pending" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(/active/);
+  });
+
+  it("refuse (409) si le mandat est déjà revoked ou expired", async () => {
+    const prisma = createFakePrismaForRevoke({
+      mandate: { id: MANDATE_ID, practiceId: PRACTICE_ID, status: "expired" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(/active/);
+  });
+});

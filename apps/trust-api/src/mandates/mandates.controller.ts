@@ -23,4 +23,14 @@ export class MandatesController {
   ) {
     return this.mandatesService.create(practiceId, dto, user.id);
   }
+
+  // F6, ADR-069 — même acteur et même garde en ligne que create() (practice_admin).
+  @Post(":mandateId/revoke")
+  revoke(
+    @Param("id") practiceId: string,
+    @Param("mandateId") mandateId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.mandatesService.revoke(practiceId, mandateId, user.id);
+  }
 }
