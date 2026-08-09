@@ -50,4 +50,18 @@ export class PracticesController {
   listAccessibleOrganizations(@Param("id") practiceId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.mandatesService.listAccessibleOrganizations(practiceId, user.id);
   }
+
+  // F12, ADR-078 — "liste des CGA actifs" pour le bouton « Adhérer à un CGA ».
+  // "cga" hardcodé, JAMAIS un paramètre client (finding sécurité corrigé avant
+  // merge, dev-security-reviewer) : accepter un type arbitraire exposerait
+  // nom/téléphone/email de TOUS les cabinets comptables/gestionnaires/
+  // fiduciaires à n'importe quel utilisateur authentifié, bien au-delà du scope
+  // réel de cette story. Aucun autre type n'est un besoin actuel — si un jour
+  // nécessaire, une route dédiée ou un allowlist explicite, jamais un passthrough.
+  // Aucun @Roles() : cette liste n'est scopée à aucune organisation précise
+  // (JwtAuthGuard suffit, même principe que create() ci-dessus).
+  @Get()
+  findAllByType() {
+    return this.practicesService.findAllByType("cga");
+  }
 }

@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import type { PrismaClient, ProfessionalPracticeType } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreatePracticeDto } from "./dto/create-practice.dto";
 import type { InviteMemberDto } from "./dto/invite-member.dto";
@@ -63,5 +63,12 @@ export class PracticesService {
     return this.prisma.practiceMember.create({
       data: { practiceId, userId: userPhone.userId, role: dto.role },
     });
+  }
+
+  // F12, ADR-078 — "liste des CGA actifs" : ProfessionalPractice n'a aucun
+  // concept "actif/inactif" scaffoldé, toute practice existante du type demandé
+  // est retournée. Scope à "cga" uniquement pour cette story (jamais généralisé).
+  async findAllByType(type: ProfessionalPracticeType) {
+    return this.prisma.professionalPractice.findMany({ where: { type } });
   }
 }

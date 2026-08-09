@@ -741,12 +741,23 @@ enum MandateGrantedRole {
   business_manager
 }
 
+// F12, ADR-078 — "adhérer à un CGA" inverse le sens d'initiation habituel
+// (F1/F5 : practice demande, organisation accepte). initiatedBy distingue les
+// deux sens et empêche structurellement qu'une practice s'auto-accepte une
+// demande qu'elle a elle-même créée (accept()/acceptAsPractice() vérifient
+// chacun le sens attendu) — jamais nullable, toute demande a une origine connue.
+enum MandateInitiator {
+  practice
+  organization
+}
+
 model Mandate {
   id                  String             @id @default(uuid())
   practiceId          String             @map("practice_id")
   organizationId      String             @map("organization_id")
   status              MandateStatus      @default(pending)
   grantedRole         MandateGrantedRole @map("granted_role")
+  initiatedBy         MandateInitiator   @map("initiated_by")
   permissionsOverride Json?              @map("permissions_override")
   // Nullable — peuplé seulement à l'acceptation (owner/admin qui a accepté),
   // jamais par cette story (F5 ne fait que créer la demande).

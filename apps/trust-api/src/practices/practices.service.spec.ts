@@ -137,3 +137,19 @@ describe("PracticesService — inviter un collaborateur (F8, ADR-068)", () => {
     ).resolves.toEqual({ id: "member-2", role: "accountant_external" });
   });
 });
+
+describe("PracticesService — lister par type (F12, ADR-078)", () => {
+  it("liste les practices du type demandé", async () => {
+    const prisma: any = {
+      professionalPractice: {
+        findMany: vi.fn().mockResolvedValue([{ id: "cga-1", type: "cga", name: "CGA Kaloum" }]),
+      },
+    };
+    const service = new PracticesService(prisma as any);
+
+    const result = await service.findAllByType("cga");
+
+    expect(prisma.professionalPractice.findMany).toHaveBeenCalledWith({ where: { type: "cga" } });
+    expect(result).toEqual([{ id: "cga-1", type: "cga", name: "CGA Kaloum" }]);
+  });
+});
