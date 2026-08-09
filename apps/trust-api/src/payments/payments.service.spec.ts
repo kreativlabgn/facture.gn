@@ -67,6 +67,17 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, sameAm
         invoiceState = next;
         return Promise.resolve(invoiceState);
       }),
+      // Réclame atomiquement sur le statut au moment de l'écriture (même précédent
+      // que convertToInvoice()/forfeitDeposit()) : count: 0 si l'état a changé
+      // depuis la lecture initiale (course concurrente) — voir C11, régénération
+      // de lien après paiement partiel.
+      updateMany: vi.fn(({ where, data }: any) => {
+        if (where.status !== undefined && invoiceState.status !== where.status) {
+          return Promise.resolve({ count: 0 });
+        }
+        invoiceState = { ...invoiceState, ...data };
+        return Promise.resolve({ count: 1 });
+      }),
     },
     invoiceEvent: {
       create: vi.fn(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
@@ -537,8 +548,9 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
       expect.objectContaining({ amountGnf: 500_000n }),
     );
-    expect(prisma.invoice.update).toHaveBeenCalledWith(
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: "inv-1", status: "partially_paid" },
         data: expect.objectContaining({
           paymentLinkUrl: "https://pay.facture.gn/solde-restant",
           paymentLinkId: "djomy-ref-solde",
@@ -593,6 +605,27 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
       expect.objectContaining({ amountGnf: 500_000n }),
     );
+  });
+
+  it("n'écrit jamais un lien devenu obsolète si la facture est passée à paid pendant l'appel money-api (course concurrente, revue résilience)", async () => {
+    const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
+    // Simule un 2e paiement concurrent qui solde la facture PENDANT l'appel HTTP
+    // à money-api (tryGenerate) — la lecture initiale voyait encore "partially_paid".
+    const paymentLinkClient = {
+      tryGenerate: vi.fn().mockImplementation(async () => {
+        await prisma.invoice.update({ where: { id: "inv-1" }, data: { status: "paid", amountDue: 0n } });
+        return relinkResult;
+      }),
+    };
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+
+    await service.recordCashPayment("inv-1", cashDto, "idem-relink-race");
+
+    // updateMany n'a rien appliqué (count: 0, le statut n'est plus partially_paid)
+    // et l'InvoiceEvent n'a jamais été écrit — jamais une trace d'audit mensongère.
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.paymentLinkUrl).toBeUndefined();
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 
   it("ne régénère jamais après un paiement provider (C2 Phase 2b) — exclusion volontaire", async () => {

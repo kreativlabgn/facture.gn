@@ -289,16 +289,25 @@ export class PaymentsService {
       }
 
       // Transaction requise (même précédent que regeneratePaymentLink(), C18) :
-      // jamais un lien mis à jour sans sa trace d'audit correspondante.
+      // jamais un lien mis à jour sans sa trace d'audit correspondante. updateMany
+      // (pas update) réclame atomiquement sur status="partially_paid" au moment de
+      // l'écriture — même précédent que convertToInvoice()/forfeitDeposit() : entre
+      // la lecture initiale et la fin de l'appel money-api (jusqu'à 3s), un autre
+      // paiement concurrent a pu solder la facture. count=0 → jamais un lien écrit
+      // pour un montant qui n'est déjà plus dû, jamais une trace d'audit mensongère
+      // (revue résilience, C11).
       await this.prisma.$transaction(async (tx) => {
-        await tx.invoice.update({
-          where: { id: invoiceId },
+        const claimed = await tx.invoice.updateMany({
+          where: { id: invoiceId, status: "partially_paid" },
           data: {
             paymentLinkUrl: paymentLink.paymentLinkUrl,
             paymentLinkId: paymentLink.providerRef,
             paymentLinkExpiresAt: paymentLink.expiresAt,
           },
         });
+        if (claimed.count === 0) {
+          return;
+        }
         await tx.invoiceEvent.create({
           data: { invoiceId, type: "payment_link_regenerated", actorId: null },
         });
