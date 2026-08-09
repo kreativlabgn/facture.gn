@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -62,6 +62,30 @@ export class InvoicesService {
         },
       },
     });
+  }
+
+  // F2, ADR-045 — "Agent terrain : assisted_session, jamais de membership
+  // persistant" (DAT). Mirroir de OrganizationsService.createAssisted() (B5) :
+  // isFieldAgent relu depuis la DB, jamais fait confiance au JWT. Réutilise
+  // createDraft()+issue() déjà testés — zéro duplication, une seule action
+  // atomique (créer ET émettre) plutôt qu'un brouillon assisté orphelin.
+  async createAssisted(dto: CreateInvoiceDto, fieldAgentUserId: string) {
+    const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: fieldAgentUserId } });
+    if (!agent.isFieldAgent) {
+      throw new ForbiddenException("Seul un agent terrain peut assister une organisation sans accès permanent");
+    }
+
+    const session = await this.prisma.assistedSession.findFirst({
+      where: { fieldAgentUserId, organizationId: dto.organizationId },
+    });
+    if (!session) {
+      throw new ForbiddenException(
+        `Aucune AssistedSession entre l'agent ${fieldAgentUserId} et l'organisation ${dto.organizationId}`,
+      );
+    }
+
+    const draft = await this.createDraft(dto);
+    return this.issue(draft.id);
   }
 
   // Une facture issued est immuable — toute correction passe par un avoir (DAT §5.4).

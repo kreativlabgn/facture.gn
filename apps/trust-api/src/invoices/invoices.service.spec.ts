@@ -1058,3 +1058,102 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     );
   });
 });
+
+function createFakePrismaForCreateAssisted(
+  overrides: { user?: any; assistedSession?: any; regimeFiscal?: string } = {},
+) {
+  let invoiceState: any = { id: "inv-1", documentType: "invoice" };
+
+  return {
+    user: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(
+        overrides.user !== undefined ? overrides.user : { id: "agent-1", isFieldAgent: true },
+      ),
+    },
+    assistedSession: {
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.assistedSession !== undefined
+          ? overrides.assistedSession
+          : { id: "session-1", fieldAgentUserId: "agent-1", organizationId: "org-1" },
+      ),
+    },
+    organization: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal: overrides.regimeFiscal ?? "tpu" }),
+    },
+    invoice: {
+      create: vi.fn().mockImplementation(({ data }: any) => {
+        invoiceState = { ...invoiceState, ...data };
+        return Promise.resolve(invoiceState);
+      }),
+      findUniqueOrThrow: vi.fn().mockImplementation(() => Promise.resolve(invoiceState)),
+      findFirst: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockImplementation(({ data }: any) => {
+        invoiceState = { ...invoiceState, ...data };
+        return Promise.resolve(invoiceState);
+      }),
+    },
+  };
+}
+
+const assistedInvoiceDto = {
+  organizationId: "org-1",
+  documentType: "invoice" as const,
+  lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 350_000n }],
+};
+
+describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-045)", () => {
+  it("crée ET émet la facture en un seul appel pour un agent avec une AssistedSession valide", async () => {
+    const prisma = createFakePrismaForCreateAssisted();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createAssisted(assistedInvoiceDto as any, "agent-1");
+
+    expect(result.status).toBe("issued");
+    expect(result.number).toBe("FG-2026-000001");
+    expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
+  });
+
+  it("refuse si l'appelant n'a pas isFieldAgent (relu depuis la DB)", async () => {
+    const prisma = createFakePrismaForCreateAssisted({ user: { id: "agent-1", isFieldAgent: false } });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.createAssisted(assistedInvoiceDto as any, "agent-1")).rejects.toThrow(/agent terrain/);
+  });
+
+  it("refuse si aucune AssistedSession n'existe pour ce couple agent/organisation", async () => {
+    const prisma = createFakePrismaForCreateAssisted({ assistedSession: null });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.createAssisted(assistedInvoiceDto as any, "agent-1")).rejects.toThrow(/AssistedSession/);
+  });
+
+  it("refuse si l'AssistedSession existe mais pour une autre organisation", async () => {
+    const prisma = createFakePrismaForCreateAssisted();
+    prisma.assistedSession.findFirst = vi.fn().mockResolvedValue(null); // simule le filtre where non satisfait
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.createAssisted({ ...assistedInvoiceDto, organizationId: "org-2" } as any, "agent-1"),
+    ).rejects.toThrow(/AssistedSession/);
+  });
+});

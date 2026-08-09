@@ -20,6 +20,21 @@ export class InvoicesController {
     return this.invoicesService.createDraft(dto);
   }
 
+  // F2, ADR-045 — aucun @Roles() : l'agent terrain (User.isFieldAgent, flag
+  // plateforme) n'est PAS un OrganizationRole, jamais de membership permanente
+  // (même principe que POST /organizations/assisted, B5). Autorisation
+  // entièrement en ligne dans le service (AssistedSession). Pipe scopé au
+  // paramètre @Body() — un @UsePipes() au niveau méthode s'appliquerait aussi à
+  // @CurrentUser(), qui échouerait alors le même schéma de validation (piège déjà
+  // documenté dans organizations.controller.ts).
+  @Post("assisted")
+  createAssisted(
+    @Body(new ZodValidationPipe(createInvoiceSchema)) dto: CreateInvoiceDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.invoicesService.createAssisted(dto, user.id);
+  }
+
   @Post(":id/issue")
   @Roles("owner", "admin", "cashier")
   issue(@Param("id") id: string) {
