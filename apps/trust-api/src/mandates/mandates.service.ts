@@ -23,6 +23,23 @@ export class MandatesService {
     }
   }
 
+  // Garde anti-doublon applicative (même précédent que C7/C13) — un mandat
+  // revoked/expired ne bloque jamais une nouvelle demande, seuls pending/active
+  // représentent une relation encore en cours. Factorisé ici car utilisé par
+  // create() (F5) ET requestFromOrganization() (F12) — même garde, 2e occurrence
+  // identique, seuil "règle de trois" atteint (même discipline déjà appliquée à
+  // assertPracticeAdmin() ci-dessus).
+  private async assertNoActiveMandate(practiceId: string, organizationId: string, entityLabel: string) {
+    const existing = await this.prisma.mandate.findFirst({
+      where: { practiceId, organizationId, status: { in: ["pending", "active"] } },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Un mandat ${existing.status} existe déjà entre ${entityLabel} et l'organisation ${organizationId}`,
+      );
+    }
+  }
+
   // F5 se limite à la CRÉATION de la demande (status: pending) — l'acceptation
   // (pending → active) et la révocation (F6) sont des stories séparées, aucune
   // transition de status n'est construite ici.
@@ -34,17 +51,7 @@ export class MandatesService {
       throw new NotFoundException(`Organisation ${dto.organizationId} introuvable`);
     }
 
-    // Garde anti-doublon applicative (même précédent que C7/C13) — un mandat
-    // revoked/expired ne bloque jamais une nouvelle demande, seuls pending/active
-    // représentent une relation encore en cours.
-    const existing = await this.prisma.mandate.findFirst({
-      where: { practiceId, organizationId: dto.organizationId, status: { in: ["pending", "active"] } },
-    });
-    if (existing) {
-      throw new ConflictException(
-        `Un mandat ${existing.status} existe déjà entre ce cabinet et l'organisation ${dto.organizationId}`,
-      );
-    }
+    await this.assertNoActiveMandate(practiceId, dto.organizationId, "ce cabinet");
 
     return this.prisma.mandate.create({
       data: {
@@ -151,14 +158,7 @@ export class MandatesService {
       throw new ConflictException(`Seul un CGA peut être rejoint par ce chemin (type actuel : ${practice.type})`);
     }
 
-    const existing = await this.prisma.mandate.findFirst({
-      where: { practiceId, organizationId, status: { in: ["pending", "active"] } },
-    });
-    if (existing) {
-      throw new ConflictException(
-        `Un mandat ${existing.status} existe déjà entre ce CGA et l'organisation ${organizationId}`,
-      );
-    }
+    await this.assertNoActiveMandate(practiceId, organizationId, "ce CGA");
 
     return this.prisma.mandate.create({
       data: { practiceId, organizationId, grantedRole: "accountant_external", initiatedBy: "organization" },

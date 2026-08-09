@@ -172,11 +172,14 @@ describe("MandatesService — acceptation (F1, ADR-069)", () => {
     await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/pending/);
   });
 
-  // F12 — défense en profondeur : un mandat initiatedBy "organization" (F12) ne
-  // peut jamais être accepté via ce chemin ORG-side, seul acceptAsPractice() le
-  // peut. Structurellement impossible aujourd'hui (aucune route n'expose ce
-  // mélange), mais vérifié explicitement plutôt que supposé.
-  it("refuse (409) un mandat initiatedBy \"organization\" — jamais accepté côté organisation", async () => {
+  // F12 — défense en profondeur, scénario MIROIR de l'auto-acceptation practice
+  // (ci-dessous) : l'organisation elle-même appelle accept() sur SA PROPRE
+  // demande créée via requestFromOrganization() (mandate.organizationId ===
+  // ORG_ID, le même que l'appelant) — sans ce check, elle s'auto-accepterait
+  // instantanément, contournant le consentement du CGA (identifié en revue
+  // sécurité, dev-security-reviewer). Seul acceptAsPractice() peut légitimement
+  // accepter un mandat initiatedBy "organization".
+  it("refuse (409) une organisation tentant d'auto-accepter sa propre demande requestFromOrganization()", async () => {
     const prisma = createFakePrismaForAccept({
       mandate: { id: MANDATE_ID, organizationId: ORG_ID, status: "pending", initiatedBy: "organization" },
     });
