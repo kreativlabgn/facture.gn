@@ -259,4 +259,36 @@ describe("AuthService", () => {
       });
     });
   });
+
+  describe("addPhone (B6, ADR-087)", () => {
+    function createFakePrismaForAddPhone(createImpl?: ReturnType<typeof vi.fn>) {
+      return {
+        userPhone: {
+          create: createImpl ?? vi.fn().mockResolvedValue({ id: "phone-2", userId: "user-1", msisdn: "+224699887766", isPrimary: false }),
+        },
+      };
+    }
+
+    it("crée un second numéro non-primaire pour l'utilisateur authentifié", async () => {
+      const prisma = createFakePrismaForAddPhone();
+      const service = new AuthService(prisma as any, createFakePasswordService(), createFakeTokenService());
+
+      await service.addPhone("user-1", "+224699887766");
+
+      expect(prisma.userPhone.create).toHaveBeenCalledWith({
+        data: { userId: "user-1", msisdn: "+224699887766", isPrimary: false },
+      });
+    });
+
+    it("refuse un msisdn déjà utilisé par n'importe quel compte, jamais un 500 brut", async () => {
+      const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["msisdn"] },
+      });
+      const prisma = createFakePrismaForAddPhone(vi.fn().mockRejectedValue(uniqueViolation));
+      const service = new AuthService(prisma as any, createFakePasswordService(), createFakeTokenService());
+
+      await expect(service.addPhone("user-1", "+224699887766")).rejects.toThrow(/existe déjà/);
+    });
+  });
 });

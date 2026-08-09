@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PASSWORD_SERVICE, AUTH_TOKEN_SERVICE } from "./auth.tokens";
 import type { PasswordService } from "./password.service";
 import type { AuthTokenService } from "./auth-token.service";
@@ -139,5 +140,20 @@ export class AuthService {
 
       return { temporaryPassword };
     });
+  }
+
+  // ADR-087, B6 — login() résout déjà par n'importe quelle ligne UserPhone (aucune
+  // modification nécessaire là-bas) : il ne manquait que ce point d'écriture. Catch
+  // sur la contrainte unique DB directement (pas un findUnique préalable, qui
+  // laisserait une fenêtre de course entre la lecture et l'écriture).
+  async addPhone(userId: string, msisdn: string) {
+    try {
+      return await this.prisma.userPhone.create({ data: { userId, msisdn, isPrimary: false } });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error, "msisdn")) {
+        throw new ConflictException(`Un compte existe déjà pour le numéro ${msisdn}`);
+      }
+      throw error;
+    }
   }
 }
