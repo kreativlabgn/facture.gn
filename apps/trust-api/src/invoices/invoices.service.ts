@@ -305,6 +305,47 @@ export class InvoicesService {
     });
   }
 
+  // ADR-066 : "Régénérable à la demande" — divergence assumée vs. issue(), où la
+  // génération de lien est un effet secondaire meilleur-effort d'une action plus
+  // importante déjà committée. Ici la régénération EST l'action demandée : un échec
+  // de tryGenerate() doit être visible (ConflictException), jamais un succès
+  // silencieux sans nouveau lien. Le tag "dormant" (2e mécanisme d'ADR-066, factures
+  // >90j sans action) est hors scope : nécessiterait une tâche planifiée périodique,
+  // absente de ce repo.
+  async regeneratePaymentLink(invoiceId: string, actorId: string) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+
+    if (invoice.status !== "issued" && invoice.status !== "partially_paid") {
+      throw new ConflictException(
+        `Facture ${invoiceId} ne peut recevoir un nouveau lien de paiement depuis le statut ${invoice.status}`,
+      );
+    }
+
+    const paymentLink = await this.paymentLinkClient.tryGenerate({
+      invoiceId: invoice.id,
+      organizationId: invoice.organizationId,
+      amountGnf: invoice.totalTtc,
+    });
+    if (!paymentLink) {
+      throw new ConflictException("Impossible de générer un nouveau lien de paiement pour le moment");
+    }
+
+    const updated = await this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        paymentLinkUrl: paymentLink.paymentLinkUrl,
+        paymentLinkId: paymentLink.providerRef,
+        paymentLinkExpiresAt: paymentLink.expiresAt,
+      },
+    });
+
+    await this.prisma.invoiceEvent.create({
+      data: { invoiceId, type: "payment_link_regenerated", actorId },
+    });
+
+    return updated;
+  }
+
   // voided réservé aux factures sans aucun paiement (PRD §4.2).
   async void(invoiceId: string) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });

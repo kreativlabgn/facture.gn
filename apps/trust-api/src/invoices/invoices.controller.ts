@@ -51,4 +51,12 @@ export class InvoicesController {
   ) {
     return this.invoicesService.forfeitDeposit(id, dto.reason, user.id);
   }
+
+  // Même trio que /issue et /convert-to-invoice — régénération à la demande
+  // (C18, ADR-066).
+  @Post(":id/regenerate-payment-link")
+  @Roles("owner", "admin", "cashier")
+  regeneratePaymentLink(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.invoicesService.regeneratePaymentLink(id, user.id);
+  }
 }
