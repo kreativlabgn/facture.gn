@@ -230,6 +230,32 @@ describe("InvoicesService — machine à états", () => {
 
     await expect(service.issue("inv-1")).rejects.toThrow(/numéro/);
   });
+
+  it("traduit une violation de contrainte unique sur certification_id en erreur explicite, jamais un 500 brut (collision entre organisations sans NIF, B1/B4)", async () => {
+    const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["certification_id"] },
+    });
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+        update: vi.fn().mockRejectedValue(uniqueViolation),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).rejects.toThrow(/certification/);
+  });
 });
 
 describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", () => {

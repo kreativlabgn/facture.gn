@@ -106,6 +106,16 @@ export class InvoicesService {
           `Le numéro ${number} existe déjà pour cette organisation — réémission impossible`,
         );
       }
+      // Filet de sécurité : certification_id est unique globalement (GN-{NIF8}-{YYYY}-
+      // {HASH6}). Les organisations sans NIF (B1/B4) partagent toutes le même segment
+      // NIF8 (UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER), ce qui réduit l'espace de
+      // collision de HASH6 à l'échelle de toute la plateforme pour une année donnée —
+      // un 409 explicite vaut mieux qu'un 500 brut si deux hash coïncident.
+      if (isUniqueConstraintViolation(error, "certification_id")) {
+        throw new ConflictException(
+          "Collision d'identifiant de certification — réémission impossible, réessayer",
+        );
+      }
       throw error;
     }
 
