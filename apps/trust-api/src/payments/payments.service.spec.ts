@@ -274,7 +274,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
     expect(invoice.overpaymentAmount).toBe(0n); // jamais une fausse détection de trop-perçu
     expect(payment.amount).toBe(1_000_000n); // appliqué : amountDue exact, jamais dto.amountGnf
     expect(payment.amountCollected).toBe(1_300_000n); // rapporté tel quel (money-api)
-    expect(payment.platformFeeAmount).toBe(25_000n); // 2,5% freemium de 1 000 000
+    expect(payment.platformFeeAmount).toBe(21_000n); // 2,1% freemium de 1 000 000 (corrigé)
   });
 });
 
@@ -581,9 +581,9 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
 
     await service.recordCashPayment("inv-1", cashDto, "idem-relink-1");
 
-    // 500 000 + commission freemium 2,5% (12 500) = 512 500 (ADR-074).
+    // 500 000 + commission freemium 2,1% (10 500) = 510 500 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ amountGnf: 512_500n }),
+      expect.objectContaining({ amountGnf: 510_500n }),
     );
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -639,9 +639,9 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
 
     await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-relink-5");
 
-    // 500 000 + commission freemium 2,5% (12 500) = 512 500 (ADR-074).
+    // 500 000 + commission freemium 2,1% (10 500) = 510 500 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ amountGnf: 512_500n }),
+      expect.objectContaining({ amountGnf: 510_500n }),
     );
   });
 
