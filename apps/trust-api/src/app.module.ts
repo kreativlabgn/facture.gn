@@ -6,6 +6,7 @@ import { OrganizationsModule } from "./organizations/organizations.module";
 import { InvoicesModule } from "./invoices/invoices.module";
 import { MoneyClientModule } from "./money-client/money-client.module";
 import { PaymentsModule } from "./payments/payments.module";
+import { CreditNotesModule } from "./credit-notes/credit-notes.module";
 import { VerificationModule } from "./verification/verification.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
@@ -20,6 +21,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     OrganizationsModule,
     InvoicesModule,
     PaymentsModule,
+    CreditNotesModule,
     VerificationModule,
   ],
   providers: [
