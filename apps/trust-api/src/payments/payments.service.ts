@@ -45,6 +45,10 @@ export class PaymentsService {
 
   // Appelé exclusivement par money-api après confirmation webhook (ADR-075) —
   // providerRef sert déjà de clé d'idempotence naturelle, pas de header client.
+  // Aucune détection d'anomalie ici (G1, ADR-032) : les patterns actuels
+  // (montant rond, boucle client) sont spécifiques au cash — le 3e pattern
+  // d'ADR-032 ("écart MM vs facturé") couvrirait ce chemin mais est hors scope,
+  // réservé à une extension future du même moteur (G3, ADR-091).
   async recordProviderPayment(invoiceId: string, dto: ConfirmProviderPaymentDto) {
     const idempotencyKey = dto.providerRef;
     const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
