@@ -1197,3 +1197,51 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     ).rejects.toThrow(/AssistedSession/);
   });
 });
+
+describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
+  it("retourne la facture telle qu'elle existe actuellement en DB, sans transformation", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "partially_paid",
+          amountDue: 500_000n,
+          amountPaid: 500_000n,
+          paymentLinkUrl: "https://pay.djomy.africa/abc",
+        }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.findOne("inv-1");
+
+    expect(result).toEqual({
+      id: "inv-1",
+      status: "partially_paid",
+      amountDue: 500_000n,
+      amountPaid: 500_000n,
+      paymentLinkUrl: "https://pay.djomy.africa/abc",
+    });
+  });
+
+  it("propage l'échec (404) si la facture n'existe pas", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockRejectedValue(new Error("Facture introuvable")),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.findOne("inv-inconnue")).rejects.toThrow(/introuvable/);
+  });
+});

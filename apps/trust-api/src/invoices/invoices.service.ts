@@ -408,6 +408,14 @@ export class InvoicesService {
     });
   }
 
+  // C10 — lecture seule, jamais de valeur mise en cache (chaque appel relit la DB) :
+  // le "temps réel" de la story est un problème de fréquence de polling côté
+  // client, pas un mécanisme serveur. RolesGuard (idSource "invoice", défaut)
+  // a déjà résolu et 404-é la facture avant d'arriver ici.
+  async findOne(invoiceId: string) {
+    return this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  }
+
   // voided réservé aux factures sans aucun paiement (PRD §4.2).
   async void(invoiceId: string) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });

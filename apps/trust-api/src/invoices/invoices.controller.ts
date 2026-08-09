@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UsePipes } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UsePipes } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
@@ -33,6 +33,14 @@ export class InvoicesController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.invoicesService.createAssisted(dto, user.id);
+  }
+
+  // C10 — même trio élargi que POST /invoices : suivre le statut (paiement,
+  // lien) d'une facture déjà créée. idSource "invoice" par défaut (RolesGuard).
+  @Get(":id")
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
+  findOne(@Param("id") id: string) {
+    return this.invoicesService.findOne(id);
   }
 
   @Post(":id/issue")
