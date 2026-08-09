@@ -30,7 +30,9 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
       }),
     },
     organization: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: "GN12345678" }),
+      // commercialTier: freemium par défaut (grille commission, ADR-074) — reflète
+      // Organization.commercialTier @default(freemium) du schema.
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: "GN12345678", commercialTier: "freemium" }),
       ...overrides.organization,
     },
   };
@@ -627,7 +629,7 @@ describe("InvoicesService — machine à états", () => {
         }),
       },
       organization: {
-        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: null }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: null, commercialTier: "freemium" }),
       },
     });
     const certification = createFakeCertification();
@@ -778,14 +780,37 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
 
     const result = await service.issue("inv-1");
 
+    // amountGnf majoré de la commission freemium (2,5% de 1 500 000 = 37 500,
+    // ADR-074) — jamais totalTtc seul, voir issue().
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith({
       invoiceId: "inv-1",
       organizationId: "org-1",
-      amountGnf: 1_500_000n,
+      amountGnf: 1_537_500n,
     });
     expect(result.paymentLinkUrl).toBe(resolvedLink.paymentLinkUrl);
     expect(result.paymentLinkId).toBe(resolvedLink.providerRef);
     expect(result.paymentLinkExpiresAt).toBe(resolvedLink.expiresAt);
+  });
+
+  it("majore le lien selon le palier commercial de l'organisation (ADR-074) — pro 1,5%, pas freemium", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+      organization: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }) },
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(resolvedLink);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    await service.issue("inv-1");
+
+    // 1,5% de 1 500 000 = 22 500 (pro, pas 2,5% freemium = 37 500).
+    expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ amountGnf: 1_522_500n }),
+    );
   });
 
   it("réussit normalement (émission jamais bloquée) quand le second update() échoue — money-api a répondu un corps inattendu", async () => {
@@ -869,11 +894,15 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
   });
 });
 
-function createFakePrismaForRegeneratePaymentLink(invoice: any) {
+function createFakePrismaForRegeneratePaymentLink(invoice: any, organization: any = {}) {
   const prisma: any = {
     invoice: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(invoice),
       update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...invoice, ...data })),
+    },
+    // commercialTier: freemium par défaut (grille commission, ADR-074).
+    organization: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "freemium", ...organization }),
     },
     invoiceEvent: {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
@@ -896,6 +925,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       organizationId: "org-1",
       status: "issued",
       totalTtc: 350_000n,
+      amountDue: 350_000n,
     });
     const service = new InvoicesService(
       prisma as any,
@@ -917,6 +947,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       organizationId: "org-1",
       status: "issued",
       totalTtc: 350_000n,
+      amountDue: 350_000n,
     });
     const service = new InvoicesService(
       prisma as any,
@@ -938,6 +969,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       organizationId: "org-1",
       status: "issued",
       totalTtc: 350_000n,
+      amountDue: 350_000n,
     });
     const service = new InvoicesService(
       prisma as any,
@@ -957,6 +989,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       organizationId: "org-1",
       status: "issued",
       totalTtc: 350_000n,
+      amountDue: 350_000n,
     });
     const service = new InvoicesService(
       prisma as any,
@@ -1022,6 +1055,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       organizationId: "org-1",
       status: "partially_paid",
       totalTtc: 350_000n,
+      amountDue: 200_000n,
     });
     const service = new InvoicesService(
       prisma as any,
@@ -1053,8 +1087,9 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
 
     await service.regeneratePaymentLink("inv-1", "user-djenabou");
 
+    // 120 000 + commission freemium 2,5% (3 000) = 123 000 (ADR-074).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ amountGnf: 120_000n }),
+      expect.objectContaining({ amountGnf: 123_000n }),
     );
   });
 });
@@ -1078,7 +1113,11 @@ function createFakePrismaForCreateAssisted(
       ),
     },
     organization: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal: overrides.regimeFiscal ?? "tpu" }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "org-1",
+        regimeFiscal: overrides.regimeFiscal ?? "tpu",
+        commercialTier: "freemium",
+      }),
     },
     invoice: {
       create: vi.fn().mockImplementation(({ data }: any) => {

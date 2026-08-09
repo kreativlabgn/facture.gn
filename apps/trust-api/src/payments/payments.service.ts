@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
+import { computePlatformFee } from "../common/commission-grid";
 import { detectCashAnomalyPatterns } from "./cash-anomaly-detection";
 import type { CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
@@ -57,6 +58,16 @@ export class PaymentsService {
   // (montant rond, boucle client) sont spécifiques au cash — le 3e pattern
   // d'ADR-032 ("écart MM vs facturé") couvrirait ce chemin mais est hors scope,
   // réservé à une extension future du même moteur (G3, ADR-091).
+  // ADR-074, grille 5 paliers : dto.amountGnf (ce que le payeur a réglé) inclut
+  // désormais structurellement la commission majorée au moment de la génération
+  // du lien (voir invoices.service.ts:issue()/regeneratePaymentLink(),
+  // regenerateLinkForRemainingBalance() ci-dessous) — il dépasse donc toujours
+  // invoice.amountDue, légitimement. allowOverpayment: true contourne la
+  // comparaison stricte de getPayableInvoiceOrThrow() (devenue obsolète pour ce
+  // chemin), MAIS jamais dto.amountGnf n'est appliqué à l'invoice : seul
+  // invoice.amountDue exact l'est (ci-dessous), donc le mécanisme trop-perçu C14
+  // (overpaymentAmount) ne peut structurellement pas s'activer par erreur —
+  // ADR-059 "montant certifié jamais pollué" reste intact.
   async recordProviderPayment(invoiceId: string, dto: ConfirmProviderPaymentDto) {
     const idempotencyKey = dto.providerRef;
     const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
@@ -64,12 +75,17 @@ export class PaymentsService {
       return existing;
     }
 
-    await this.getPayableInvoiceOrThrow(invoiceId, dto.amountGnf);
+    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amountGnf, true);
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: invoice.organizationId },
+    });
+    const netAmount = invoice.amountDue;
+    const platformFeeAmount = computePlatformFee(netAmount, organization.commercialTier);
 
-    return this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amountGnf, {
-      amount: dto.amountGnf,
+    return this.createPaymentAndApply(invoiceId, idempotencyKey, netAmount, {
+      amount: netAmount,
       amountCollected: dto.amountGnf,
-      platformFeeAmount: 0n, // grille 5 paliers ADR-074 simplifiée à ce stade, cf. Phase 1
+      platformFeeAmount,
       gatewayFeeAmount: dto.feeGatewayGnf,
       method: "payment_link",
       providerRef: dto.providerRef,
@@ -279,10 +295,17 @@ export class PaymentsService {
         return;
       }
 
+      // Majoré de la commission (ADR-074) — même précédent que issue()/
+      // regeneratePaymentLink() (invoices.service.ts).
+      const organization = await this.prisma.organization.findUniqueOrThrow({
+        where: { id: invoice.organizationId },
+      });
+      const platformFee = computePlatformFee(invoice.amountDue, organization.commercialTier);
+
       const paymentLink = await this.paymentLinkClient.tryGenerate({
         invoiceId: invoice.id,
         organizationId: invoice.organizationId,
-        amountGnf: invoice.amountDue,
+        amountGnf: invoice.amountDue + platformFee,
       });
       if (!paymentLink) {
         return;

@@ -6,6 +6,7 @@ import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import { resolveNifForCertification } from "../certification/certification.service";
 import type { CertificationService } from "../certification/certification.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
+import { computePlatformFee } from "../common/commission-grid";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
 import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
@@ -178,10 +179,15 @@ export class InvoicesService {
     // de paiement < 3s") — une panne Money Context ne doit jamais faire échouer
     // l'émission (Parcours Fanta : cash et lien ne s'excluent jamais l'un l'autre ;
     // C18 permet de régénérer un lien absent plus tard).
+    // amountGnf majoré de la commission (ADR-074, grille 5 paliers) — jamais le
+    // total_ttc seul : ADR-059 exige que la commission soit portée par le payeur,
+    // jamais prélevée sur le marchand (qui reçoit toujours le montant certifié
+    // intégral, totalTtc, jamais touché par ce calcul).
+    const platformFee = computePlatformFee(issuedInvoice.totalTtc, organization.commercialTier);
     const paymentLink = await this.paymentLinkClient.tryGenerate({
       invoiceId: issuedInvoice.id,
       organizationId: issuedInvoice.organizationId,
-      amountGnf: issuedInvoice.totalTtc,
+      amountGnf: issuedInvoice.totalTtc + platformFee,
     });
     if (!paymentLink) {
       return issuedInvoice;
@@ -366,10 +372,15 @@ export class InvoicesService {
     // amountDue (jamais totalTtc, C11) : sur une facture partially_paid, le lien doit
     // refléter le solde RESTANT — utiliser totalTtc redemanderait au client un
     // montant déjà partiellement réglé (bug corrigé, C11).
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: invoice.organizationId },
+    });
+    // Majoré de la commission (ADR-074) — même précédent que issue().
+    const platformFee = computePlatformFee(invoice.amountDue, organization.commercialTier);
     const paymentLink = await this.paymentLinkClient.tryGenerate({
       invoiceId: invoice.id,
       organizationId: invoice.organizationId,
-      amountGnf: invoice.amountDue,
+      amountGnf: invoice.amountDue + platformFee,
     });
     if (!paymentLink) {
       throw new ConflictException("Impossible de générer un nouveau lien de paiement pour le moment");

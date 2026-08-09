@@ -12,7 +12,11 @@ function createFakePaymentLinkClient(result: any = null) {
 // l'incrément/décrément est bien relatif (Prisma { increment }/{ decrement }) et non
 // une valeur absolue recalculée — deux appels séquentiels sur la même facture doivent
 // cumuler correctement, ce qu'un mock à retour fixe ne peut pas vérifier.
-function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, sameAmountRecentCount = 0) {
+function createFakePrisma(
+  invoiceOverrides: Record<string, unknown> = {},
+  sameAmountRecentCount = 0,
+  organizationOverrides: Record<string, unknown> = {},
+) {
   let invoiceState: any = {
     id: "inv-1",
     status: "issued",
@@ -81,6 +85,11 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, sameAm
     },
     invoiceEvent: {
       create: vi.fn(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
+    },
+    // commercialTier: freemium par défaut (grille commission, ADR-074) — utilisé
+    // uniquement par recordProviderPayment()/regenerateLinkForRemainingBalance().
+    organization: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "freemium", ...organizationOverrides }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
   };
@@ -239,18 +248,33 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
     expect(invoice.status).toBe("partially_paid");
   });
 
-  it("refuse un montant provider supérieur au solde dû — le trop-perçu reste cash-only (C14)", async () => {
+  // Repurposé (ADR-074, grille commission) : dto.amountGnf dépasse désormais
+  // TOUJOURS invoice.amountDue légitimement (majoration commission déjà incluse
+  // dans le lien généré, voir invoices.service.ts:issue()) — l'ancien garde-fou
+  // "rejette si amountGnf > amountDue" rejetterait donc tout paiement provider
+  // légitime. Ce test vérifie désormais que l'invariant qu'il protégeait
+  // ORIGINELLEMENT reste vrai autrement : le montant appliqué à l'invoice est
+  // TOUJOURS invoice.amountDue exact, jamais dto.amountGnf — donc jamais de faux
+  // trop-perçu (overpaymentAmount) même quand dto.amountGnf dépasse largement
+  // amountDue.
+  it("accepte un dto.amountGnf largement supérieur à amountDue (commission incluse) sans jamais déclencher le trop-perçu C14", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
 
-    await expect(
-      service.recordProviderPayment("inv-1", {
-        amountGnf: 1_300_000n,
-        provider: "djomy" as const,
-        providerRef: "djomy-stub-overpaid",
-        feeGatewayGnf: 13_000n,
-      }),
-    ).rejects.toThrow(ConflictException);
+    const payment = await service.recordProviderPayment("inv-1", {
+      amountGnf: 1_300_000n,
+      provider: "djomy" as const,
+      providerRef: "djomy-stub-overpaid",
+      feeGatewayGnf: 13_000n,
+    });
+
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(0n);
+    expect(invoice.status).toBe("paid");
+    expect(invoice.overpaymentAmount).toBe(0n); // jamais une fausse détection de trop-perçu
+    expect(payment.amount).toBe(1_000_000n); // appliqué : amountDue exact, jamais dto.amountGnf
+    expect(payment.amountCollected).toBe(1_300_000n); // rapporté tel quel (money-api)
+    expect(payment.platformFeeAmount).toBe(25_000n); // 2,5% freemium de 1 000 000
   });
 });
 
@@ -473,6 +497,18 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
     expect(invoice.amountPaid).toBe(1_500_000n);
   });
 
+  it("calcule platformFeeAmount selon le palier commercial de l'organisation (ADR-074) — pro 1,5%, pas freemium", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n }, 0, { commercialTier: "pro" });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+
+    await service.recordProviderPayment("inv-1", providerDto);
+
+    // 1,5% de 1 500 000 = 22 500 (pro, pas 2,5% freemium = 37 500).
+    expect(prisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ platformFeeAmount: 22_500n }) }),
+    );
+  });
+
   it("refuse un paiement sur une facture introuvable", async () => {
     const prisma = createFakePrisma();
     prisma.invoice.findUnique = vi.fn().mockResolvedValue(null);
@@ -545,8 +581,9 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
 
     await service.recordCashPayment("inv-1", cashDto, "idem-relink-1");
 
+    // 500 000 + commission freemium 2,5% (12 500) = 512 500 (ADR-074).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ amountGnf: 500_000n }),
+      expect.objectContaining({ amountGnf: 512_500n }),
     );
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -602,8 +639,9 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
 
     await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-relink-5");
 
+    // 500 000 + commission freemium 2,5% (12 500) = 512 500 (ADR-074).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ amountGnf: 500_000n }),
+      expect.objectContaining({ amountGnf: 512_500n }),
     );
   });
 
