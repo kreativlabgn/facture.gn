@@ -19,6 +19,7 @@ function createFakePasswordService(verifyResult = true) {
   return {
     hash: vi.fn().mockResolvedValue("$argon2id$hashed"),
     verify: vi.fn().mockResolvedValue(verifyResult),
+    generateTemporaryPassword: vi.fn().mockReturnValue("temp-password-fixture"),
   };
 }
 
@@ -100,6 +101,148 @@ describe("AuthService", () => {
 
       expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-1" });
       expect(result).toEqual({ accessToken: "signed.jwt.token" });
+    });
+  });
+
+  describe("récupération de compte (B3, ADR-042)", () => {
+    function createFakePrismaForRecovery(opts: {
+      phone?: any;
+      organization?: any;
+      membership?: any;
+      existingPendingRequest?: any;
+      recoveryRequest?: any;
+      updateManyCount?: number;
+    } = {}) {
+      const prisma: any = {
+        userPhone: {
+          findUnique: vi.fn().mockResolvedValue(opts.phone ?? null),
+        },
+        organization: {
+          findUnique: vi.fn().mockResolvedValue(opts.organization ?? null),
+        },
+        organizationMember: {
+          findUnique: vi.fn().mockResolvedValue(opts.membership ?? null),
+        },
+        accountRecoveryRequest: {
+          findFirst: vi.fn().mockResolvedValue(opts.existingPendingRequest ?? null),
+          create: vi.fn().mockResolvedValue({ id: "recovery-1" }),
+          findUniqueOrThrow: vi.fn().mockResolvedValue(opts.recoveryRequest),
+          updateMany: vi.fn().mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
+        },
+        user: {
+          update: vi.fn().mockResolvedValue({ id: "user-1" }),
+        },
+        $transaction: vi.fn((callback: any) => callback(prisma)),
+      };
+      return prisma;
+    }
+
+    const GENERIC_MESSAGE_MATCHER = /demande/;
+
+    describe("requestRecovery", () => {
+      it("crée une demande pending quand msisdn+nif correspondent à un membre actif", async () => {
+        const prisma = createFakePrismaForRecovery({
+          phone: { userId: "user-1" },
+          organization: { id: "org-1" },
+          membership: { role: "owner", revokedAt: null },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        await service.requestRecovery({ msisdn: "+224622334455", organizationNif: "GN12345678" });
+
+        expect(prisma.accountRecoveryRequest.create).toHaveBeenCalledWith({
+          data: { userId: "user-1", organizationId: "org-1" },
+        });
+      });
+
+      it("ne crée aucune demande si le msisdn est inconnu, mais retourne le même message générique", async () => {
+        const prisma = createFakePrismaForRecovery({ phone: null, organization: { id: "org-1" } });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        const result = await service.requestRecovery({ msisdn: "+224699999999", organizationNif: "GN12345678" });
+
+        expect(prisma.accountRecoveryRequest.create).not.toHaveBeenCalled();
+        expect(result.message).toMatch(GENERIC_MESSAGE_MATCHER);
+      });
+
+      it("ne crée aucune demande si le nif ne correspond à aucune organisation, même message générique", async () => {
+        const prisma = createFakePrismaForRecovery({ phone: { userId: "user-1" }, organization: null });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        const result = await service.requestRecovery({ msisdn: "+224622334455", organizationNif: "NIF-INCONNU" });
+
+        expect(prisma.accountRecoveryRequest.create).not.toHaveBeenCalled();
+        expect(result.message).toMatch(GENERIC_MESSAGE_MATCHER);
+      });
+    });
+
+    describe("resolveRecovery", () => {
+      it("refuse un approbateur qui n'est ni owner ni admin de l'organisation de la demande", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+          membership: { role: "cashier", revokedAt: null },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        await expect(
+          service.resolveRecovery("recovery-1", "user-2", "approved"),
+        ).rejects.toThrow(/owner|admin/);
+      });
+
+      it("refuse que le demandeur approuve sa propre demande", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        await expect(
+          service.resolveRecovery("recovery-1", "user-1", "approved"),
+        ).rejects.toThrow(/propre demande/);
+      });
+
+      it("génère un mot de passe temporaire et met à jour passwordHash sur approbation", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+          membership: { role: "admin", revokedAt: null },
+        });
+        const passwordService = createFakePasswordService();
+        passwordService.generateTemporaryPassword = vi.fn().mockReturnValue("temp-Pw-XyZ12345");
+        const service = new AuthService(prisma, passwordService, createFakeTokenService());
+
+        const result = await service.resolveRecovery("recovery-1", "user-2", "approved");
+
+        expect(result.temporaryPassword).toBe("temp-Pw-XyZ12345");
+        expect(prisma.user.update).toHaveBeenCalledWith({
+          where: { id: "user-1" },
+          data: { passwordHash: "$argon2id$hashed" },
+        });
+      });
+
+      it("ne touche jamais passwordHash sur rejet", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+          membership: { role: "owner", revokedAt: null },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        const result = await service.resolveRecovery("recovery-1", "user-2", "rejected");
+
+        expect(prisma.user.update).not.toHaveBeenCalled();
+        expect(result.temporaryPassword).toBeNull();
+      });
+
+      it("refuse une double résolution concurrente d'une même demande", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+          membership: { role: "owner", revokedAt: null },
+          updateManyCount: 0,
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        await expect(
+          service.resolveRecovery("recovery-1", "user-2", "approved"),
+        ).rejects.toThrow(/résolue/);
+      });
     });
   });
 });

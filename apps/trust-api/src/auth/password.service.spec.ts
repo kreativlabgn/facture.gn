@@ -23,4 +23,12 @@ describe("Argon2PasswordService", () => {
 
     await expect(service.verify(hash, "mauvais-mot-de-passe")).resolves.toBe(false);
   });
+
+  it("génère un mot de passe temporaire d'au moins 16 caractères, jamais deux fois le même (B3)", () => {
+    const first = service.generateTemporaryPassword();
+    const second = service.generateTemporaryPassword();
+
+    expect(first.length).toBeGreaterThanOrEqual(16);
+    expect(first).not.toBe(second);
+  });
 });
