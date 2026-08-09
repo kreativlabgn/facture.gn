@@ -5,6 +5,10 @@ import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decor
 import { Public } from "../auth/public.decorator";
 import { DgiVerificationAuthGuard } from "../common/dgi-verification-auth.guard";
 import { createOrganizationSchema, type CreateOrganizationDto } from "./dto/create-organization.dto";
+import {
+  createAssistedOrganizationSchema,
+  type CreateAssistedOrganizationDto,
+} from "./dto/create-assisted-organization.dto";
 import { OrganizationsService } from "./organizations.service";
 
 @ApiTags("organizations")
@@ -35,5 +39,18 @@ export class OrganizationsController {
   @UseGuards(DgiVerificationAuthGuard)
   verifyDgi(@Param("id") organizationId: string) {
     return this.organizationsService.verifyDgi(organizationId);
+  }
+
+  // JWT requis (B5) — jamais @Public() : l'appelant doit être authentifié comme
+  // l'agent terrain lui-même (pas de FieldAgentAuthGuard ici, contrairement à
+  // /auth/field-agents/:userId/grant qui est un octroi machine-à-machine ponctuel).
+  // Aucun @Roles() : isFieldAgent n'est pas un OrganizationRole, la garde vit dans
+  // le service (relit isFieldAgent depuis la DB, jamais fait confiance au client).
+  @Post("assisted")
+  createAssisted(
+    @Body(new ZodValidationPipe(createAssistedOrganizationSchema)) dto: CreateAssistedOrganizationDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.organizationsService.createAssisted(user.id, dto);
   }
 }

@@ -127,3 +127,95 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
     expect(prisma.organization.update).not.toHaveBeenCalled();
   });
 });
+
+function createFakePrismaForAssisted(overrides?: { isFieldAgent?: boolean; accountCodeCollisions?: number }) {
+  let organizationCreateCalls = 0;
+  const collisions = overrides?.accountCodeCollisions ?? 0;
+
+  const prisma: any = {
+    user: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "agent-1", isFieldAgent: overrides?.isFieldAgent ?? true }),
+      create: vi.fn().mockResolvedValue({ id: "merchant-1" }),
+    },
+    userPhone: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({ id: "phone-1" }),
+    },
+    organization: {
+      create: vi.fn().mockImplementation(() => {
+        organizationCreateCalls++;
+        if (organizationCreateCalls <= collisions) {
+          return Promise.reject(
+            Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { target: ["account_code"] } }),
+          );
+        }
+        return Promise.resolve({ id: "org-1" });
+      }),
+    },
+    organizationMember: {
+      create: vi.fn().mockResolvedValue({ id: "member-1" }),
+    },
+    assistedSession: {
+      create: vi.fn().mockResolvedValue({ id: "session-1" }),
+    },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
+const ASSISTED_DTO = {
+  organizationName: "Boutique Djénabou",
+  regimeFiscal: "tpu" as const,
+  legalForm: "commercial" as const,
+  merchantName: "Djénabou Diallo",
+  consentRecorded: true as const,
+};
+
+describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
+  it("refuse si l'appelant n'a pas le statut agent terrain (isFieldAgent=false)", async () => {
+    const prisma = createFakePrismaForAssisted({ isFieldAgent: false });
+    const service = new OrganizationsService(prisma as any);
+
+    await expect(service.createAssisted("agent-1", ASSISTED_DTO)).rejects.toThrow(/agent terrain/);
+    expect(prisma.organization.create).not.toHaveBeenCalled();
+  });
+
+  it("crée le marchand comme owner — jamais de membership pour l'agent terrain lui-même", async () => {
+    const prisma = createFakePrismaForAssisted();
+    const service = new OrganizationsService(prisma as any);
+
+    await service.createAssisted("agent-1", ASSISTED_DTO);
+
+    expect(prisma.organizationMember.create).toHaveBeenCalledWith({
+      data: { organizationId: "org-1", userId: "merchant-1", role: "owner" },
+    });
+    expect(prisma.organizationMember.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: "agent-1" }) }),
+    );
+  });
+
+  it("enregistre une AssistedSession traçant l'agent, l'organisation et le consentement horodaté", async () => {
+    const prisma = createFakePrismaForAssisted();
+    const service = new OrganizationsService(prisma as any);
+
+    await service.createAssisted("agent-1", ASSISTED_DTO);
+
+    expect(prisma.assistedSession.create).toHaveBeenCalledWith({
+      data: {
+        fieldAgentUserId: "agent-1",
+        organizationId: "org-1",
+        consentRecordedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it("réessaie la génération du code-compte jusqu'à 3 tentatives en cas de collision", async () => {
+    const prisma = createFakePrismaForAssisted({ accountCodeCollisions: 2 });
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.createAssisted("agent-1", ASSISTED_DTO);
+
+    expect(result).toEqual({ id: "org-1" });
+    expect(prisma.organization.create).toHaveBeenCalledTimes(3);
+  });
+});
