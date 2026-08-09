@@ -321,6 +321,9 @@ export class InvoicesService {
       );
     }
 
+    // Aucune garde sur paymentLinkExpiresAt : ADR-066 dit "régénérable à la demande",
+    // pas "uniquement si expiré" — un marchand peut vouloir un nouveau lien même non
+    // expiré (perdu, jamais transmis au client). Choix délibéré, pas un oubli.
     const paymentLink = await this.paymentLinkClient.tryGenerate({
       invoiceId: invoice.id,
       organizationId: invoice.organizationId,
@@ -330,20 +333,26 @@ export class InvoicesService {
       throw new ConflictException("Impossible de générer un nouveau lien de paiement pour le moment");
     }
 
-    const updated = await this.prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        paymentLinkUrl: paymentLink.paymentLinkUrl,
-        paymentLinkId: paymentLink.providerRef,
-        paymentLinkExpiresAt: paymentLink.expiresAt,
-      },
-    });
+    // Transaction requise (revue de code) : contrairement à G1 où l'InvoiceEvent est
+    // un signal secondaire best-effort, ici il est la SEULE preuve d'audit de qui a
+    // déclenché la régénération — un lien mis à jour sans sa trace correspondante
+    // serait un vrai trou d'audit, jamais un lien changé sans que ce soit tracé.
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          paymentLinkUrl: paymentLink.paymentLinkUrl,
+          paymentLinkId: paymentLink.providerRef,
+          paymentLinkExpiresAt: paymentLink.expiresAt,
+        },
+      });
 
-    await this.prisma.invoiceEvent.create({
-      data: { invoiceId, type: "payment_link_regenerated", actorId },
-    });
+      await tx.invoiceEvent.create({
+        data: { invoiceId, type: "payment_link_regenerated", actorId },
+      });
 
-    return updated;
+      return updated;
+    });
   }
 
   // voided réservé aux factures sans aucun paiement (PRD §4.2).

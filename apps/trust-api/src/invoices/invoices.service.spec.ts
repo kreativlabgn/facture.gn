@@ -796,6 +796,7 @@ function createFakePrismaForRegeneratePaymentLink(invoice: any) {
     invoiceEvent: {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
   };
   return prisma;
 }
@@ -847,6 +848,25 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: { invoiceId: "inv-1", type: "payment_link_regenerated", actorId: "user-djenabou" },
     });
+  });
+
+  it("met à jour le lien et trace l'InvoiceEvent atomiquement (revue sécurité) — jamais un lien mis à jour sans sa trace d'audit", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "issued",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+
+    expect(prisma.$transaction).toHaveBeenCalled();
   });
 
   it("lève une ConflictException explicite si la génération échoue — jamais un succès silencieux (divergence assumée vs. issue())", async () => {
