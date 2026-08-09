@@ -31,4 +31,13 @@ describe("Argon2PasswordService", () => {
     expect(first.length).toBeGreaterThanOrEqual(16);
     expect(first).not.toBe(second);
   });
+
+  it("génère un mot de passe temporaire sans caractère ambigu à l'oral/à la transcription (B3 — transmis de vive voix par le backup admin)", () => {
+    const password = service.generateTemporaryPassword();
+
+    // 0/O, 1/I/L exclus — confusion classique à la dictée téléphonique. Alphabet
+    // volontairement en majuscules uniquement (jamais de sensibilité à la casse à
+    // communiquer oralement).
+    expect(password).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]+$/);
+  });
 });

@@ -18,10 +18,22 @@ export class Argon2PasswordService implements PasswordService {
   }
 
   // Mot de passe temporaire de récupération de compte (B3) — jamais Math.random(),
-  // toujours crypto.randomBytes (CSPRNG). base64url : pas de caractères ambigus à
-  // transmettre de vive voix à problème (contrairement à hex, plus dense en entropie
-  // par caractère que hex pour la même longueur affichée).
+  // toujours crypto.randomBytes (CSPRNG). Alphabet volontairement restreint et
+  // majuscules uniquement : le plan B3 prévoit que ce mot de passe soit transmis de
+  // vive voix par le backup admin (contexte PME) — base64url (casse mixte, -, _)
+  // serait pénible et source d'erreur à dicter. 0/O et 1/I/L exclus (confusion
+  // classique à l'oral). 31 caractères (pas 32) : biais de modulo négligeable, sans
+  // conséquence ici (pas une clé cryptographique, juste un secret à usage unique
+  // dont on veut surtout une entropie suffisante et une transcription fiable — 16
+  // caractères ≈ 79 bits, trente fois la marge nécessaire pour un mot de passe
+  // immédiatement remplacé à la prochaine connexion).
   generateTemporaryPassword(): string {
-    return randomBytes(16).toString("base64url");
+    const alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+    const bytes = randomBytes(16);
+    let password = "";
+    for (const byte of bytes) {
+      password += alphabet[byte % alphabet.length];
+    }
+    return password;
   }
 }
