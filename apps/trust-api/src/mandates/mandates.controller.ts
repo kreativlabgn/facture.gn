@@ -33,4 +33,16 @@ export class MandatesController {
   ) {
     return this.mandatesService.revoke(practiceId, mandateId, user.id);
   }
+
+  // F12, ADR-078 — accepte une demande INITIÉE PAR L'ORGANISATION (contrepartie
+  // de POST /organizations/:id/mandates). Nommage distinct de /accept (côté
+  // organisation, F1) pour éviter toute ambiguïté entre les deux sens.
+  @Post(":mandateId/accept-request")
+  acceptRequest(
+    @Param("id") practiceId: string,
+    @Param("mandateId") mandateId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.mandatesService.acceptAsPractice(practiceId, mandateId, user.id);
+  }
 }

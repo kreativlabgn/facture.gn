@@ -38,7 +38,12 @@ describe("MandatesService", () => {
     await service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID);
 
     expect(prisma.mandate.create).toHaveBeenCalledWith({
-      data: { practiceId: PRACTICE_ID, organizationId: ORG_ID, grantedRole: "accountant_external" },
+      data: {
+        practiceId: PRACTICE_ID,
+        organizationId: ORG_ID,
+        grantedRole: "accountant_external",
+        initiatedBy: "practice",
+      },
     });
   });
 
@@ -112,7 +117,7 @@ function createFakePrismaForAccept(overrides: { mandate?: any; updateImpl?: Retu
       findUnique: vi.fn().mockResolvedValue(
         overrides.mandate !== undefined
           ? overrides.mandate
-          : { id: MANDATE_ID, organizationId: ORG_ID, status: "pending" },
+          : { id: MANDATE_ID, organizationId: ORG_ID, status: "pending", initiatedBy: "practice" },
       ),
       update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
     },
@@ -165,6 +170,163 @@ describe("MandatesService — acceptation (F1, ADR-069)", () => {
     const service = new MandatesService(prisma as any);
 
     await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/pending/);
+  });
+
+  // F12 — défense en profondeur : un mandat initiatedBy "organization" (F12) ne
+  // peut jamais être accepté via ce chemin ORG-side, seul acceptAsPractice() le
+  // peut. Structurellement impossible aujourd'hui (aucune route n'expose ce
+  // mélange), mais vérifié explicitement plutôt que supposé.
+  it("refuse (409) un mandat initiatedBy \"organization\" — jamais accepté côté organisation", async () => {
+    const prisma = createFakePrismaForAccept({
+      mandate: { id: MANDATE_ID, organizationId: ORG_ID, status: "pending", initiatedBy: "organization" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/practice/);
+  });
+});
+
+const CGA_PRACTICE_ID = "cga-practice-1";
+
+function createFakePrismaForRequestFromOrganization(
+  overrides: { practice?: any; existingMandate?: any; createImpl?: ReturnType<typeof vi.fn> } = {},
+) {
+  const prisma: any = {
+    professionalPractice: {
+      findUnique: vi.fn().mockResolvedValue(
+        overrides.practice !== undefined ? overrides.practice : { id: CGA_PRACTICE_ID, type: "cga" },
+      ),
+    },
+    mandate: {
+      findFirst: vi.fn().mockResolvedValue(overrides.existingMandate ?? null),
+      create: overrides.createImpl ?? vi.fn().mockResolvedValue({ id: "mandate-1" }),
+    },
+  };
+  return prisma;
+}
+
+describe("MandatesService — adhérer à un CGA, initié par l'organisation (F12, ADR-078)", () => {
+  it("crée un mandat pending initiatedBy \"organization\", grantedRole fixé serveur à accountant_external", async () => {
+    const prisma = createFakePrismaForRequestFromOrganization();
+    const service = new MandatesService(prisma as any);
+
+    await service.requestFromOrganization(ORG_ID, CGA_PRACTICE_ID);
+
+    expect(prisma.mandate.create).toHaveBeenCalledWith({
+      data: {
+        practiceId: CGA_PRACTICE_ID,
+        organizationId: ORG_ID,
+        grantedRole: "accountant_external",
+        initiatedBy: "organization",
+      },
+    });
+  });
+
+  it("refuse (404) si la practice ciblée n'existe pas", async () => {
+    const prisma = createFakePrismaForRequestFromOrganization({ practice: null });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.requestFromOrganization(ORG_ID, CGA_PRACTICE_ID)).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (409) si la practice ciblée n'est PAS de type cga", async () => {
+    const prisma = createFakePrismaForRequestFromOrganization({
+      practice: { id: CGA_PRACTICE_ID, type: "cabinet_comptable" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.requestFromOrganization(ORG_ID, CGA_PRACTICE_ID)).rejects.toThrow(/CGA/);
+  });
+
+  it("refuse (409) si un mandat pending ou active existe déjà pour ce couple", async () => {
+    const prisma = createFakePrismaForRequestFromOrganization({
+      existingMandate: { id: "mandate-existing", status: "pending" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.requestFromOrganization(ORG_ID, CGA_PRACTICE_ID)).rejects.toThrow(/mandat/);
+  });
+});
+
+function createFakePrismaForAcceptAsPractice(
+  overrides: { member?: any; mandate?: any; updateImpl?: ReturnType<typeof vi.fn> } = {},
+) {
+  const prisma: any = {
+    practiceMember: {
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.member !== undefined ? overrides.member : { id: "member-1", role: "practice_admin" },
+      ),
+    },
+    mandate: {
+      findUnique: vi.fn().mockResolvedValue(
+        overrides.mandate !== undefined
+          ? overrides.mandate
+          : { id: MANDATE_ID, practiceId: CGA_PRACTICE_ID, status: "pending", initiatedBy: "organization" },
+      ),
+      update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
+    },
+  };
+  return prisma;
+}
+
+describe("MandatesService — accepter une adhésion, côté CGA (F12, ADR-078)", () => {
+  it("accepte un mandat pending initiatedBy \"organization\" détenu par la practice — status active", async () => {
+    const prisma = createFakePrismaForAcceptAsPractice();
+    const service = new MandatesService(prisma as any);
+
+    await service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID);
+
+    expect(prisma.mandate.update).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID },
+      data: { status: "active", grantedBy: ACCEPTOR_ID, grantedAt: expect.any(Date) },
+    });
+  });
+
+  // LE test qui prouve que le contournement de consentement identifié à la
+  // conception est structurellement bloqué — pas juste supposé par la présence
+  // du champ initiatedBy. Sans ce check, un practice_admin pourrait s'auto-
+  // accepter un mandat qu'il a lui-même créé via create() (F5), contournant le
+  // consentement organisationnel qu'ADR-069 est censé garantir.
+  it("refuse (409) un mandat initiatedBy \"practice\" — jamais d'auto-acceptation par la practice qui l'a créé", async () => {
+    const prisma = createFakePrismaForAcceptAsPractice({
+      mandate: { id: MANDATE_ID, practiceId: CGA_PRACTICE_ID, status: "pending", initiatedBy: "practice" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(
+      /organisation/,
+    );
+  });
+
+  it("refuse si l'appelant n'est pas practice_admin de la practice ciblée", async () => {
+    const prisma = createFakePrismaForAcceptAsPractice({ member: null });
+    const service = new MandatesService(prisma as any);
+
+    await expect(
+      service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID),
+    ).rejects.toThrow(/practice_admin/);
+  });
+
+  it("refuse (404) si le mandat est détenu par une autre practice", async () => {
+    const prisma = createFakePrismaForAcceptAsPractice({
+      mandate: { id: MANDATE_ID, practiceId: "autre-practice", status: "pending", initiatedBy: "organization" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(
+      /introuvable/,
+    );
+  });
+
+  it("refuse (409) si le mandat n'est pas pending", async () => {
+    const prisma = createFakePrismaForAcceptAsPractice({
+      mandate: { id: MANDATE_ID, practiceId: CGA_PRACTICE_ID, status: "active", initiatedBy: "organization" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(
+      /pending/,
+    );
   });
 });
 

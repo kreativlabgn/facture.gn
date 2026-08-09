@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import type { ProfessionalPracticeType } from "@facture-gn/db";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { MandatesService } from "../mandates/mandates.service";
@@ -49,5 +50,13 @@ export class PracticesController {
   @Get(":id/organizations")
   listAccessibleOrganizations(@Param("id") practiceId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.mandatesService.listAccessibleOrganizations(practiceId, user.id);
+  }
+
+  // F12, ADR-078 — "liste des CGA actifs" pour le bouton « Adhérer à un CGA ».
+  // Aucun @Roles() : cette liste n'est scopée à aucune organisation précise
+  // (JwtAuthGuard suffit, même principe que create() ci-dessus).
+  @Get()
+  findAllByType(@Query("type") type: ProfessionalPracticeType) {
+    return this.practicesService.findAllByType(type);
   }
 }

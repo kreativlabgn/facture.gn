@@ -47,7 +47,12 @@ export class MandatesService {
     }
 
     return this.prisma.mandate.create({
-      data: { practiceId, organizationId: dto.organizationId, grantedRole: dto.grantedRole },
+      data: {
+        practiceId,
+        organizationId: dto.organizationId,
+        grantedRole: dto.grantedRole,
+        initiatedBy: "practice",
+      },
     });
   }
 
@@ -67,6 +72,14 @@ export class MandatesService {
     if (mandate.status !== "pending") {
       throw new ConflictException(
         `Seul un mandat pending peut être accepté (statut actuel : ${mandate.status})`,
+      );
+    }
+
+    // F12 — défense en profondeur : un mandat initiatedBy "organization" doit
+    // être accepté via acceptAsPractice(), jamais ici.
+    if (mandate.initiatedBy !== "practice") {
+      throw new ConflictException(
+        "Ce mandat a été initié par l'organisation — seule la practice ciblée peut l'accepter",
       );
     }
 
@@ -120,6 +133,66 @@ export class MandatesService {
     return this.prisma.mandate.findMany({
       where: { practiceId, status: "active" },
       include: { organization: { select: { id: true, name: true } } },
+    });
+  }
+
+  // F12, ADR-078 — "adhérer à un CGA" : sens d'initiation inverse de create()
+  // (F5). Autorisation organisationnelle déjà garantie en amont par RolesGuard
+  // (@Roles("owner","admin") + @OrganizationIdSource("organization")) — aucune
+  // vérification de membership ici, contrairement à create()/assertPracticeAdmin
+  // (practice-scoped). grantedRole fixé serveur (même restriction MVP qu'ADR-070),
+  // jamais un choix exposé au client.
+  async requestFromOrganization(organizationId: string, practiceId: string) {
+    const practice = await this.prisma.professionalPractice.findUnique({ where: { id: practiceId } });
+    if (!practice) {
+      throw new NotFoundException(`Cabinet ${practiceId} introuvable`);
+    }
+    if (practice.type !== "cga") {
+      throw new ConflictException(`Seul un CGA peut être rejoint par ce chemin (type actuel : ${practice.type})`);
+    }
+
+    const existing = await this.prisma.mandate.findFirst({
+      where: { practiceId, organizationId, status: { in: ["pending", "active"] } },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Un mandat ${existing.status} existe déjà entre ce CGA et l'organisation ${organizationId}`,
+      );
+    }
+
+    return this.prisma.mandate.create({
+      data: { practiceId, organizationId, grantedRole: "accountant_external", initiatedBy: "organization" },
+    });
+  }
+
+  // F12, ADR-078 — contrepartie de requestFromOrganization() : ici la practice
+  // (CGA) accepte. Vérifie initiatedBy === "organization" — c'est CE check qui
+  // empêche structurellement une practice de s'auto-accepter un mandat qu'elle a
+  // elle-même créé via create() (F5), ce qui contournerait le consentement
+  // organisationnel qu'ADR-069 est censé garantir.
+  async acceptAsPractice(practiceId: string, mandateId: string, actorUserId: string) {
+    await this.assertPracticeAdmin(practiceId, actorUserId, "accepter une adhésion au nom de celui-ci");
+
+    const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
+    if (!mandate || mandate.practiceId !== practiceId) {
+      throw new NotFoundException(`Mandat ${mandateId} introuvable pour la practice ${practiceId}`);
+    }
+
+    if (mandate.status !== "pending") {
+      throw new ConflictException(
+        `Seul un mandat pending peut être accepté (statut actuel : ${mandate.status})`,
+      );
+    }
+
+    if (mandate.initiatedBy !== "organization") {
+      throw new ConflictException(
+        "Ce mandat a été initié par la practice elle-même — seule l'organisation ciblée peut l'accepter",
+      );
+    }
+
+    return this.prisma.mandate.update({
+      where: { id: mandateId },
+      data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
   }
 }
