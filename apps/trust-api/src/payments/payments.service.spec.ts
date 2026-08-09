@@ -6,12 +6,16 @@ import { PaymentsService } from "./payments.service";
 // l'incrément/décrément est bien relatif (Prisma { increment }/{ decrement }) et non
 // une valeur absolue recalculée — deux appels séquentiels sur la même facture doivent
 // cumuler correctement, ce qu'un mock à retour fixe ne peut pas vérifier.
-function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}) {
+function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, sameAmountRecentCount = 0) {
   let invoiceState: any = {
     id: "inv-1",
     status: "issued",
     amountPaid: 0n,
     amountDue: 1_500_000n,
+    organizationId: "org-1",
+    // null par défaut (G1) : la vérification de boucle client/montant ne s'applique
+    // qu'aux factures avec un client identifié — n'affecte aucun test préexistant.
+    customerId: null,
     ...invoiceOverrides,
   };
   const paymentsByIdempotencyKey = new Map<string, any>();
@@ -27,6 +31,9 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}) {
         paymentsByIdempotencyKey.set(data.idempotencyKey, payment);
         return Promise.resolve(payment);
       }),
+      // Nombre de paiements cash identiques déjà vus pour le même client (G1) —
+      // 0 par défaut, n'affecte aucun test préexistant qui ne le surcharge pas.
+      count: vi.fn(() => Promise.resolve(sameAmountRecentCount)),
     },
     invoice: {
       findUnique: vi.fn(() => Promise.resolve(invoiceState)),
@@ -44,6 +51,9 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}) {
         invoiceState = next;
         return Promise.resolve(invoiceState);
       }),
+    },
+    invoiceEvent: {
+      create: vi.fn(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
   };
@@ -164,6 +174,79 @@ describe("PaymentsService — encaissement cash", () => {
         data: expect.objectContaining({ platformFeeAmount: 0n, gatewayFeeAmount: 0n }),
       }),
     );
+  });
+});
+
+describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-032)", () => {
+  it("écrit un InvoiceEvent suspicious_cash_pattern_detected pour un montant rond ≥ 1M GNF", async () => {
+    const prisma = createFakePrisma({ amountDue: 150_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordCashPayment("inv-1", { amount: 150_000_000n, method: "cash" as const }, "idem-key-round");
+
+    expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
+      data: {
+        invoiceId: "inv-1",
+        type: "suspicious_cash_pattern_detected",
+        actorId: null,
+        amount: 150_000_000n,
+        metadata: { patterns: ["round_amount"] },
+      },
+    });
+  });
+
+  it("écrit un InvoiceEvent client_amount_loop au 3e paiement identique pour le même client", async () => {
+    const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" }, 3);
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-loop");
+
+    expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
+      data: {
+        invoiceId: "inv-1",
+        type: "suspicious_cash_pattern_detected",
+        actorId: null,
+        amount: 123_456n,
+        metadata: { patterns: ["client_amount_loop"] },
+      },
+    });
+  });
+
+  it("ignore la vérification de boucle quand customerId est absent, même si le montant se répète", async () => {
+    const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: null }, 5);
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-no-client");
+
+    expect(prisma.payment.count).not.toHaveBeenCalled();
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("n'écrit aucun InvoiceEvent pour un paiement cash normal — le paiement réussit toujours (non-régression)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any);
+
+    const result = await service.recordCashPayment("inv-1", cashDto, "idem-key-normal");
+
+    expect(result).toBeDefined();
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("un paiement cash légitime réussit même si la détection d'anomalie échoue — meilleur effort, jamais couplé (revue sécurité)", async () => {
+    const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" });
+    prisma.payment.count = vi.fn().mockRejectedValue(new Error("panne DB inattendue sur la détection"));
+    const service = new PaymentsService(prisma as any);
+
+    const result = await service.recordCashPayment(
+      "inv-1",
+      { amount: 123_456n, method: "cash" as const },
+      "idem-key-detection-failure",
+    );
+
+    expect(result).toBeDefined();
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountPaid).toBe(123_456n);
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 });
 
