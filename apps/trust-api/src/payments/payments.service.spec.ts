@@ -12,6 +12,9 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, sameAm
     status: "issued",
     amountPaid: 0n,
     amountDue: 1_500_000n,
+    // 0n par défaut (C14), cohérent avec Invoice.overpaymentAmount @default(0) —
+    // n'affecte aucun test préexistant qui ne le surcharge pas.
+    overpaymentAmount: 0n,
     organizationId: "org-1",
     // null par défaut (G1) : la vérification de boucle client/montant ne s'applique
     // qu'aux factures avec un client identifié — n'affecte aucun test préexistant.
@@ -44,6 +47,13 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, sameAm
         }
         if (data.amountDue && typeof data.amountDue === "object" && "decrement" in data.amountDue) {
           next.amountDue = invoiceState.amountDue - data.amountDue.decrement;
+        } else if (typeof data.amountDue === "bigint") {
+          // Valeur directe (C14) : correction du trop-perçu, jamais utilisée pour
+          // un incrément/décrément normal — voir applyPaymentToInvoice().
+          next.amountDue = data.amountDue;
+        }
+        if (data.overpaymentAmount && typeof data.overpaymentAmount === "object" && "increment" in data.overpaymentAmount) {
+          next.overpaymentAmount = invoiceState.overpaymentAmount + data.overpaymentAmount.increment;
         }
         if (data.status !== undefined) {
           next.status = data.status;
@@ -103,12 +113,9 @@ describe("PaymentsService — encaissement cash", () => {
     expect(invoice.status).toBe("paid");
   });
 
-  it("refuse un montant supérieur au solde dû restant (pas de sur-paiement silencieux)", async () => {
-    const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any);
-
-    await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-3")).rejects.toThrow(ConflictException);
-  });
+  // Avant C14 : tout montant cash > solde dû était rejeté ("trop-perçu non géré").
+  // Depuis C14, le cash absorbe l'excédent dans Invoice.overpaymentAmount plutôt que
+  // de bloquer l'encaissement — voir describe("PaymentsService — trop-perçu cash").
 
   it("refuse un paiement sur une facture draft", async () => {
     const prisma = createFakePrisma({ status: "draft" });
@@ -174,6 +181,59 @@ describe("PaymentsService — encaissement cash", () => {
         data: expect.objectContaining({ platformFeeAmount: 0n, gatewayFeeAmount: 0n }),
       }),
     );
+  });
+});
+
+describe("PaymentsService — trop-perçu cash (C14)", () => {
+  it("accepte un paiement cash supérieur au solde dû et trace l'excédent dans overpaymentAmount", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordCashPayment("inv-1", { amount: 1_300_000n, method: "cash" as const }, "idem-key-overpaid");
+
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(0n);
+    expect(invoice.amountPaid).toBe(1_300_000n);
+    expect(invoice.overpaymentAmount).toBe(300_000n);
+    expect(invoice.status).toBe("paid");
+  });
+
+  it("montant cash exactement égal au solde dû — overpaymentAmount reste 0 (non-régression)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordCashPayment("inv-1", { amount: 1_000_000n, method: "cash" as const }, "idem-key-exact");
+
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(0n);
+    expect(invoice.overpaymentAmount).toBe(0n);
+    expect(invoice.status).toBe("paid");
+  });
+
+  it("montant cash inférieur au solde dû — overpaymentAmount reste 0 (non-régression)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await service.recordCashPayment("inv-1", { amount: 400_000n, method: "cash" as const }, "idem-key-partiel");
+
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(600_000n);
+    expect(invoice.overpaymentAmount).toBe(0n);
+    expect(invoice.status).toBe("partially_paid");
+  });
+
+  it("refuse un montant provider supérieur au solde dû — le trop-perçu reste cash-only (C14)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_000_000n });
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordProviderPayment("inv-1", {
+        amountGnf: 1_300_000n,
+        provider: "djomy" as const,
+        providerRef: "djomy-stub-overpaid",
+        feeGatewayGnf: 13_000n,
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });
 

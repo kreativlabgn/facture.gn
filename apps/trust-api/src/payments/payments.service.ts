@@ -24,7 +24,9 @@ export class PaymentsService {
       return existing;
     }
 
-    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
+    // allowOverpayment: true — trop-perçu cash uniquement (C14, backlog explicite),
+    // jamais pour recordProviderPayment() (lien généré pour un montant exact).
+    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amount, true);
 
     const payment = await this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
       amount: dto.amount,
@@ -132,7 +134,7 @@ export class PaymentsService {
     }
   }
 
-  private async getPayableInvoiceOrThrow(invoiceId: string, amount: bigint) {
+  private async getPayableInvoiceOrThrow(invoiceId: string, amount: bigint, allowOverpayment = false) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) {
       throw new NotFoundException(`Facture ${invoiceId} introuvable`);
@@ -142,9 +144,12 @@ export class PaymentsService {
         `Facture ${invoiceId} ne peut recevoir de paiement depuis le statut ${invoice.status}`,
       );
     }
-    if (amount > invoice.amountDue) {
+    // C14 : le cash absorbe un trop-perçu (voir applyPaymentToInvoice()) plutôt que
+    // de le rejeter — allowOverpayment contourne cette seule garde, jamais les
+    // autres (statut, existence).
+    if (!allowOverpayment && amount > invoice.amountDue) {
       throw new ConflictException(
-        `Montant ${amount} supérieur au solde dû ${invoice.amountDue} — trop-perçu non géré ici`,
+        `Montant ${amount} supérieur au solde dû ${invoice.amountDue} — trop-perçu non géré pour ce mode de paiement`,
       );
     }
     return invoice;
@@ -255,6 +260,25 @@ export class PaymentsService {
         amountDue: { decrement: amount },
       },
     });
+
+    // C14 : amountDue ne peut devenir négatif qu'une seule fois — dès qu'il atteint
+    // <=0 le statut passe à "paid", qui bloque tout nouveau paiement cash/provider
+    // (PAYABLE_STATUSES). La valeur négative observée ici appartient donc forcément
+    // à CE paiement, jamais à un autre en course — correction sûre dans la même
+    // transaction (verrou de ligne tenu depuis l'update ci-dessus), sans recalcul
+    // depuis une lecture faite hors transaction (même principe race-free que
+    // l'incrément relatif ci-dessus, C1).
+    if (updatedInvoice.amountDue < 0n) {
+      await tx.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          amountDue: 0n,
+          overpaymentAmount: { increment: -updatedInvoice.amountDue },
+          status: "paid",
+        },
+      });
+      return;
+    }
 
     await tx.invoice.update({
       where: { id: invoiceId },
