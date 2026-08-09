@@ -339,10 +339,13 @@ export class InvoicesService {
     // Aucune garde sur paymentLinkExpiresAt : ADR-066 dit "régénérable à la demande",
     // pas "uniquement si expiré" — un marchand peut vouloir un nouveau lien même non
     // expiré (perdu, jamais transmis au client). Choix délibéré, pas un oubli.
+    // amountDue (jamais totalTtc, C11) : sur une facture partially_paid, le lien doit
+    // refléter le solde RESTANT — utiliser totalTtc redemanderait au client un
+    // montant déjà partiellement réglé (bug corrigé, C11).
     const paymentLink = await this.paymentLinkClient.tryGenerate({
       invoiceId: invoice.id,
       organizationId: invoice.organizationId,
-      amountGnf: invoice.totalTtc,
+      amountGnf: invoice.amountDue,
     });
     if (!paymentLink) {
       throw new ConflictException("Impossible de générer un nouveau lien de paiement pour le moment");

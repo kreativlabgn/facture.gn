@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable, Logger, NotFoundException } from
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { detectCashAnomalyPatterns } from "./cash-anomaly-detection";
 import type { CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
@@ -17,7 +18,10 @@ const STRUCTURING_LOOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
-  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
+    private readonly paymentLinkClient: PaymentLinkClient,
+  ) {}
 
   async recordCashPayment(invoiceId: string, dto: CreatePaymentDto, idempotencyKey: string) {
     const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
@@ -42,6 +46,7 @@ export class PaymentsService {
     });
 
     await this.detectAndRecordCashAnomaly(invoice, dto.amount);
+    await this.regenerateLinkForRemainingBalance(invoiceId);
 
     return payment;
   }
@@ -86,13 +91,17 @@ export class PaymentsService {
 
     await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
 
-    return this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
+    const payment = await this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
       amount: dto.amount,
       amountCollected: dto.amount,
       platformFeeAmount: 0n,
       gatewayFeeAmount: 0n,
       method: "bank_transfer",
     });
+
+    await this.regenerateLinkForRemainingBalance(invoiceId);
+
+    return payment;
   }
 
   // ADR-064 : un proforma n'accepte QUE des arrhes, jamais un paiement normal —
@@ -251,6 +260,52 @@ export class PaymentsService {
     } catch (error) {
       this.logger.warn(
         `Paiement cash sur la facture ${invoice.id} enregistré, mais la détection d'anomalie a échoué : ${(error as Error).message}`,
+      );
+    }
+  }
+
+  // C11, ADR-062 — "nouveau lien pour le solde restant". Meilleur effort, HORS de
+  // la transaction de paiement (même précédent que detectAndRecordCashAnomaly(),
+  // G1) : un échec ici ne doit jamais faire échouer un encaissement déjà
+  // légitimement committé. amountGnf: invoice.amountDue (jamais totalTtc, même
+  // fix que regeneratePaymentLink() ci-dessus) — le client doit voir le solde
+  // RÉELLEMENT restant, pas le total original. Volontairement PAS appelée depuis
+  // recordProviderPayment() : un paiement partiel via lien déjà en cours est un
+  // cas marginal, régénérer juste après un webhook de confirmation serait redondant.
+  private async regenerateLinkForRemainingBalance(invoiceId: string) {
+    try {
+      const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+      if (!invoice || invoice.status !== "partially_paid") {
+        return;
+      }
+
+      const paymentLink = await this.paymentLinkClient.tryGenerate({
+        invoiceId: invoice.id,
+        organizationId: invoice.organizationId,
+        amountGnf: invoice.amountDue,
+      });
+      if (!paymentLink) {
+        return;
+      }
+
+      // Transaction requise (même précédent que regeneratePaymentLink(), C18) :
+      // jamais un lien mis à jour sans sa trace d'audit correspondante.
+      await this.prisma.$transaction(async (tx) => {
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            paymentLinkUrl: paymentLink.paymentLinkUrl,
+            paymentLinkId: paymentLink.providerRef,
+            paymentLinkExpiresAt: paymentLink.expiresAt,
+          },
+        });
+        await tx.invoiceEvent.create({
+          data: { invoiceId, type: "payment_link_regenerated", actorId: null },
+        });
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Facture ${invoiceId} : régénération best-effort du lien de paiement après paiement partiel a échoué : ${(error as Error).message}`,
       );
     }
   }

@@ -1034,4 +1034,27 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
 
     expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
   });
+
+  it("génère le nouveau lien pour le solde restant (amountDue), jamais le total original (C11 — bug corrigé)", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "partially_paid",
+      totalTtc: 350_000n,
+      amountDue: 120_000n,
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(resolvedPaymentLink);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+
+    expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ amountGnf: 120_000n }),
+    );
+  });
 });
