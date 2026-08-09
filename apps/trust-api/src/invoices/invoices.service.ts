@@ -27,7 +27,12 @@ export class InvoicesService {
     });
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
 
-    const totalTtc = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
+    const totalTtcBrut = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
+    // Remise globale (E2) appliquée AVANT le calcul HT/TVA — convention TTC-first
+    // (C4) : la remise réduit le montant TTC brut, la ventilation HT/TVA est
+    // ensuite dérivée du montant déjà net, jamais recalculée indépendamment.
+    const discountPct = dto.discountPct ?? 0;
+    const totalTtc = totalTtcBrut - (totalTtcBrut * BigInt(discountPct)) / 100n;
     const { totalHt, totalTva } = computeTaxBreakdown(totalTtc, taxRateBps);
 
     return this.prisma.invoice.create({
@@ -38,6 +43,7 @@ export class InvoicesService {
         totalTtc,
         totalHt,
         totalTva,
+        discountPct,
         amountDue: totalTtc,
         lines: {
           create: dto.lines.map((line) => ({
@@ -222,6 +228,9 @@ export class InvoicesService {
           totalTtc: proforma.totalTtc,
           totalHt,
           totalTva,
+          // proforma.totalTtc est déjà net de remise (E2) — copier discountPct est
+          // purement informatif (traçabilité de la remise appliquée), aucun recalcul.
+          discountPct: proforma.discountPct,
           amountDue: proforma.totalTtc,
           lines: {
             create: proforma.lines.map((line: { description: string; quantity: number; unitPrice: bigint }) => ({

@@ -128,6 +128,50 @@ describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-
   });
 });
 
+describe("InvoicesService — remise globale à la création (E2)", () => {
+  it("réduit totalTtc/amountDue du pourcentage AVANT le calcul HT/TVA, et persiste discountPct", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 100_000n }],
+      discountPct: 10,
+    } as any);
+
+    expect(result.totalTtc).toBe(90_000n);
+    expect(result.amountDue).toBe(90_000n);
+    expect(result.discountPct).toBe(10);
+    expect(result.totalHt + result.totalTva).toBe(result.totalTtc);
+  });
+
+  it("sans remise (discountPct 0 ou absent), le comportement reste strictement inchangé — non-régression", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 100_000n }],
+    } as any);
+
+    expect(result.totalTtc).toBe(100_000n);
+    expect(result.amountDue).toBe(100_000n);
+    expect(result.discountPct).toBe(0);
+  });
+});
+
 function createFakePrismaForConvertToInvoice(
   proforma: any,
   regimeFiscal: string,
@@ -235,6 +279,31 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       where: { id: "inv-1" },
       data: { convertedToInvoiceId: "inv-2" },
     });
+  });
+
+  it("copie discountPct du proforma vers la nouvelle facture (E2) — totalTtc déjà net, purement traçabilité", async () => {
+    const prisma = createFakePrismaForConvertToInvoice(
+      {
+        id: "inv-1",
+        documentType: "proforma",
+        status: "draft",
+        organizationId: "org-1",
+        totalTtc: 315_000n,
+        discountPct: 15,
+        lines: [{ description: "Nuitée hôtel", quantity: 1, unitPrice: 315_000n, taxRateBps: 0 }],
+      },
+      "tpu",
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const newInvoice = await service.convertToInvoice("inv-1");
+
+    expect(newInvoice.discountPct).toBe(15);
   });
 
   it("recalcule le régime fiscal depuis l'organisation ACTUELLE, jamais depuis les lignes déjà stockées sur le proforma", async () => {
