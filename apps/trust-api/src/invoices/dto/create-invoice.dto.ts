@@ -13,6 +13,9 @@ export const createInvoiceSchema = z.object({
   organizationId: z.string().uuid(),
   documentType: z.enum(["invoice", "proforma", "quote"]).default("invoice"),
   lines: z.array(invoiceLineSchema).min(1),
+  // Remise globale en pourcentage (E2) — défaut 0, cohérent avec le défaut DB
+  // (Invoice.discountPct @default(0)), jamais un défaut serveur différent.
+  discountPct: z.number().int().min(0).max(100).default(0),
 });
 
 export type CreateInvoiceDto = z.infer<typeof createInvoiceSchema>;
