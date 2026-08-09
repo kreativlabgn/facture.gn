@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { computePlatformFee } from "./commission-grid";
 
 describe("computePlatformFee — grille 5 paliers (ADR-074)", () => {
-  it("applique 2,5% pour freemium", () => {
-    expect(computePlatformFee(2_000_000n, "freemium")).toBe(50_000n);
+  it("applique 2,1% pour freemium — réduit de 2,5% pour absorber la hausse du frais gateway Djomy (1%→1,4%), total payeur maintenu à 3,5% max", () => {
+    expect(computePlatformFee(2_000_000n, "freemium")).toBe(42_000n);
   });
 
   it("applique 2,0% pour starter", () => {

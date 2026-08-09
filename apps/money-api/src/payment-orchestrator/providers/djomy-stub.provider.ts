@@ -10,7 +10,11 @@ import type {
 } from "../provider.interface";
 
 const PAYMENT_LINK_TTL_DAYS = 30; // DAT §config : payment_link_ttl_days
-const DJOMY_GATEWAY_FEE_BPS = 100n; // 1% annoncé, ADR-072 (à confirmer)
+// 1,4% — taux réel confirmé (corrige le 1% initialement "annoncé" d'ADR-072).
+// Djomy applique un barème dégressif par volume, jamais modélisé ici faute de
+// paliers exacts communiqués — 1,4% est utilisé comme taux plat uniforme,
+// simplification documentée en attendant le barème complet.
+const DJOMY_GATEWAY_FEE_BPS = 140n;
 
 @Injectable()
 export class DjomyStubProvider implements PaymentProvider {

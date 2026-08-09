@@ -8,8 +8,23 @@ import type { CommercialTier } from "@facture-gn/db";
 // "Commission cible (négo)" (taux plancher négociable au cas par cas, jamais
 // public) est explicitement hors scope — aucun champ scaffoldé pour un taux par
 // organisation, seule la commission affichée (par défaut) est implémentée ici.
+//
+// Correction du frais gateway Djomy (ADR-072 "annoncé 1%, à confirmer" → réel
+// 1,4%, voir djomy-stub.provider.ts) : freemium réduit sa propre commission de
+// 2,5% à 2,1% (décision produit : 2,5% - (1,4% - 1,0%)) pour viser un total
+// payeur de 3,5%. Les autres paliers gardent leur marge inchangée — le total
+// payeur augmente simplement du vrai 1,4% gateway (starter 3,4%, pro 2,9%,
+// enterprise 2,6%, custom 2,4%), jamais recalculé pour absorber quoi que ce soit.
+//
+// Écart mesuré (E2E réel) et sciemment accepté : le total payeur freemium
+// atteint en réalité 3,5294%, pas exactement 3,5% — le gateway Djomy calcule
+// son 1,4% sur le montant DÉJÀ majoré par notre commission (effet de cascade,
+// amountGnf transmis à money-api = amountDue + platformFee), pas sur le montant
+// brut de la facture. Un taux exact de ~2,071% annulerait cet effet
+// (p + g + p×g = 3,5%), mais l'écart réel (~0,03 point, quelques GNF par
+// transaction) a été jugé négligeable — 2,1% (soustraction simple) conservé.
 const COMMISSION_BPS_BY_TIER: Record<CommercialTier, number> = {
-  freemium: 250,
+  freemium: 210,
   starter: 200,
   pro: 150,
   enterprise: 120,

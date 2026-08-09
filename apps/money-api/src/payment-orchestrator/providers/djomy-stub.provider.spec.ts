@@ -10,14 +10,14 @@ const request: CreatePaymentLinkRequest = {
 };
 
 describe("DjomyStubProvider", () => {
-  it("génère un lien de paiement déterministe avec 1% de frais gateway (ADR-072)", async () => {
+  it("génère un lien de paiement déterministe avec 1,4% de frais gateway (ADR-072, corrigé)", async () => {
     const provider = new DjomyStubProvider();
 
     const result = await provider.createPaymentLink(request);
 
     expect(result.provider).toBe("djomy");
     expect(result.paymentLinkUrl).toContain(request.invoiceId);
-    expect(result.feeGatewayGnf).toBe(1_000_000n); // 1% de 100 000 000
+    expect(result.feeGatewayGnf).toBe(1_400_000n); // 1,4% de 100 000 000
     expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 

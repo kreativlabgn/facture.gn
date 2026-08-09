@@ -780,12 +780,13 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
 
     const result = await service.issue("inv-1");
 
-    // amountGnf majoré de la commission freemium (2,5% de 1 500 000 = 37 500,
-    // ADR-074) — jamais totalTtc seul, voir issue().
+    // amountGnf majoré de la commission freemium (2,1% de 1 500 000 = 31 500,
+    // ADR-074, corrigé pour absorber le frais gateway Djomy réel 1,4%) — jamais
+    // totalTtc seul, voir issue().
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith({
       invoiceId: "inv-1",
       organizationId: "org-1",
-      amountGnf: 1_537_500n,
+      amountGnf: 1_531_500n,
     });
     expect(result.paymentLinkUrl).toBe(resolvedLink.paymentLinkUrl);
     expect(result.paymentLinkId).toBe(resolvedLink.providerRef);
@@ -1087,9 +1088,9 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
 
     await service.regeneratePaymentLink("inv-1", "user-djenabou");
 
-    // 120 000 + commission freemium 2,5% (3 000) = 123 000 (ADR-074).
+    // 120 000 + commission freemium 2,1% (2 520) = 122 520 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ amountGnf: 123_000n }),
+      expect.objectContaining({ amountGnf: 122_520n }),
     );
   });
 });
