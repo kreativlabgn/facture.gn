@@ -58,3 +58,58 @@ describe("createInvoiceSchema — remise globale (E2)", () => {
     expect(tropHaut.success).toBe(false);
   });
 });
+
+describe("createInvoiceSchema — montant de référence en devise étrangère (I3, ADR-055)", () => {
+  const base = {
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    documentType: "invoice" as const,
+    lines: [{ description: "Prestation conseil diaspora", quantity: 1, unitPrice: "1180000" }],
+  };
+
+  it("accepte une facture sans aucun des 4 champs de référence devise — non-régression", () => {
+    const result = createInvoiceSchema.safeParse(base);
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepte les 4 champs fournis ensemble", () => {
+    const result = createInvoiceSchema.safeParse({
+      ...base,
+      referenceCurrency: "USD",
+      referenceAmount: "125",
+      fxRate: "9440.50",
+      fxRateDate: "2026-08-09",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejette si un seul des 4 champs est fourni — ils forment un seul instantané de change cohérent", () => {
+    const result = createInvoiceSchema.safeParse({
+      ...base,
+      referenceCurrency: "USD",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejette un referenceCurrency mal formé — jamais une devise arbitraire non normalisée (ISO 4217)", () => {
+    const minuscule = createInvoiceSchema.safeParse({
+      ...base,
+      referenceCurrency: "usd",
+      referenceAmount: "125",
+      fxRate: "9440.50",
+      fxRateDate: "2026-08-09",
+    });
+    const troisLettresManquantes = createInvoiceSchema.safeParse({
+      ...base,
+      referenceCurrency: "US",
+      referenceAmount: "125",
+      fxRate: "9440.50",
+      fxRateDate: "2026-08-09",
+    });
+
+    expect(minuscule.success).toBe(false);
+    expect(troisLettresManquantes.success).toBe(false);
+  });
+});
