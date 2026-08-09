@@ -1,3 +1,4 @@
+import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { InvoicesService } from "./invoices.service";
 
@@ -783,5 +784,172 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
     expect(resultSucces.certificationId).toBe(resultEchec.certificationId);
     expect(resultSucces.hash).toBe(resultEchec.hash);
     expect(resultSucces.signature).toEqual(resultEchec.signature);
+  });
+});
+
+function createFakePrismaForRegeneratePaymentLink(invoice: any) {
+  const prisma: any = {
+    invoice: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(invoice),
+      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...invoice, ...data })),
+    },
+    invoiceEvent: {
+      create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
+    },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
+const resolvedPaymentLink = {
+  paymentLinkUrl: "https://pay.facture.gn/nouveau-lien",
+  providerRef: "djomy-ref-nouveau",
+  expiresAt: new Date("2026-09-08T00:00:00.000Z"),
+};
+
+describe("InvoicesService — régénération du lien de paiement à la demande (C18, ADR-066)", () => {
+  it("met à jour paymentLinkUrl/paymentLinkId/paymentLinkExpiresAt quand la régénération réussit", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "issued",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou");
+
+    expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
+    expect(result.paymentLinkId).toBe("djomy-ref-nouveau");
+    expect(result.paymentLinkExpiresAt).toEqual(new Date("2026-09-08T00:00:00.000Z"));
+  });
+
+  it("écrit un InvoiceEvent payment_link_regenerated tracé à l'auteur de la demande", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "issued",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+
+    expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
+      data: { invoiceId: "inv-1", type: "payment_link_regenerated", actorId: "user-djenabou" },
+    });
+  });
+
+  it("met à jour le lien et trace l'InvoiceEvent atomiquement (revue sécurité) — jamais un lien mis à jour sans sa trace d'audit", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "issued",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it("lève une ConflictException explicite si la génération échoue — jamais un succès silencieux (divergence assumée vs. issue())", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "issued",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(null) as any,
+    );
+
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    expect(prisma.invoice.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse la régénération sur une facture draft — rien n'a encore été émis", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "draft",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+  });
+
+  it("refuse la régénération sur une facture voided ou paid — plus rien à régler", async () => {
+    const prismaVoided = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "voided",
+      totalTtc: 350_000n,
+    });
+    const serviceVoided = new InvoicesService(
+      prismaVoided as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+    await expect(serviceVoided.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+
+    const prismaPaid = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "paid",
+      totalTtc: 350_000n,
+    });
+    const servicePaid = new InvoicesService(
+      prismaPaid as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+    await expect(servicePaid.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+  });
+
+  it("accepte la régénération sur une facture partially_paid — toujours payable", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink({
+      id: "inv-1",
+      organizationId: "org-1",
+      status: "partially_paid",
+      totalTtc: 350_000n,
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou");
+
+    expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
   });
 });

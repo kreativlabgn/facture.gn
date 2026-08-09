@@ -305,6 +305,56 @@ export class InvoicesService {
     });
   }
 
+  // ADR-066 : "Régénérable à la demande" — divergence assumée vs. issue(), où la
+  // génération de lien est un effet secondaire meilleur-effort d'une action plus
+  // importante déjà committée. Ici la régénération EST l'action demandée : un échec
+  // de tryGenerate() doit être visible (ConflictException), jamais un succès
+  // silencieux sans nouveau lien. Le tag "dormant" (2e mécanisme d'ADR-066, factures
+  // >90j sans action) est hors scope : nécessiterait une tâche planifiée périodique,
+  // absente de ce repo.
+  async regeneratePaymentLink(invoiceId: string, actorId: string) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+
+    if (invoice.status !== "issued" && invoice.status !== "partially_paid") {
+      throw new ConflictException(
+        `Facture ${invoiceId} ne peut recevoir un nouveau lien de paiement depuis le statut ${invoice.status}`,
+      );
+    }
+
+    // Aucune garde sur paymentLinkExpiresAt : ADR-066 dit "régénérable à la demande",
+    // pas "uniquement si expiré" — un marchand peut vouloir un nouveau lien même non
+    // expiré (perdu, jamais transmis au client). Choix délibéré, pas un oubli.
+    const paymentLink = await this.paymentLinkClient.tryGenerate({
+      invoiceId: invoice.id,
+      organizationId: invoice.organizationId,
+      amountGnf: invoice.totalTtc,
+    });
+    if (!paymentLink) {
+      throw new ConflictException("Impossible de générer un nouveau lien de paiement pour le moment");
+    }
+
+    // Transaction requise (revue de code) : contrairement à G1 où l'InvoiceEvent est
+    // un signal secondaire best-effort, ici il est la SEULE preuve d'audit de qui a
+    // déclenché la régénération — un lien mis à jour sans sa trace correspondante
+    // serait un vrai trou d'audit, jamais un lien changé sans que ce soit tracé.
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          paymentLinkUrl: paymentLink.paymentLinkUrl,
+          paymentLinkId: paymentLink.providerRef,
+          paymentLinkExpiresAt: paymentLink.expiresAt,
+        },
+      });
+
+      await tx.invoiceEvent.create({
+        data: { invoiceId, type: "payment_link_regenerated", actorId },
+      });
+
+      return updated;
+    });
+  }
+
   // voided réservé aux factures sans aucun paiement (PRD §4.2).
   async void(invoiceId: string) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
