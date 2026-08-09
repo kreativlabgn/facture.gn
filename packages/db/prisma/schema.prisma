@@ -149,6 +149,8 @@ model User {
   phones        UserPhone[]
   invoiceEvents InvoiceEvent[]
   memberships   OrganizationMember[]
+  recoveryRequestsMade     AccountRecoveryRequest[] @relation("RecoveryRequester")
+  recoveryRequestsResolved AccountRecoveryRequest[] @relation("RecoveryResolver")
 
   @@map("user")
 }
@@ -197,6 +199,32 @@ model UserPhone {
   @@map("user_phone")
 }
 
+enum RecoveryStatus {
+  pending
+  approved
+  rejected
+}
+
+// ADR-042, B3 — "backup admin obligatoire" est un nudge, jamais un blocage
+// (cohérent avec B1/B4, inscription jamais bloquée) : aucun champ de désignation
+// dédié, n'importe quel OrganizationMember owner/admin non révoqué de
+// l'organisation ciblée joue ce rôle au moment de la résolution.
+model AccountRecoveryRequest {
+  id             String         @id @default(uuid())
+  userId         String         @map("user_id")
+  organizationId String         @map("organization_id")
+  status         RecoveryStatus @default(pending)
+  requestedAt    DateTime       @default(now()) @map("requested_at")
+  resolvedAt     DateTime?      @map("resolved_at")
+  resolvedByUserId String?      @map("resolved_by_user_id")
+
+  user           User          @relation("RecoveryRequester", fields: [userId], references: [id])
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  resolvedByUser User?         @relation("RecoveryResolver", fields: [resolvedByUserId], references: [id])
+
+  @@map("account_recovery_request")
+}
+
 model Organization {
   id                          String                 @id @default(uuid())
   name                        String
@@ -218,9 +246,10 @@ model Organization {
   commercialTier              CommercialTier         @default(freemium) @map("commercial_tier")
   createdAt                   DateTime               @default(now()) @map("created_at")
 
-  invoices  Invoice[]
-  sequences InvoiceSequence[]
-  members   OrganizationMember[]
+  invoices          Invoice[]
+  sequences         InvoiceSequence[]
+  members           OrganizationMember[]
+  recoveryRequests  AccountRecoveryRequest[]
 
   @@map("organization")
 }
