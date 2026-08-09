@@ -35,4 +35,28 @@ export class OrganizationsService {
       throw error;
     }
   }
+
+  // "En tant que système" (B2, backlog) — aucun rôle organisationnel ne peut
+  // déclencher ceci (voir DgiVerificationAuthGuard) : une organisation ne peut pas
+  // s'auto-certifier vérifiée DGI, ça viderait la vérification de son sens.
+  async verifyDgi(organizationId: string) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+    });
+
+    if (!organization.nif || !organization.etaxNumber) {
+      throw new ConflictException(
+        "Impossible de vérifier une organisation sans NIF ni eTax — les deux sont exigés conjointement (ADR-035)",
+      );
+    }
+
+    if (organization.dgiVerificationStatus === "verified") {
+      return organization;
+    }
+
+    return this.prisma.organization.update({
+      where: { id: organizationId },
+      data: { dgiVerificationStatus: "verified" },
+    });
+  }
 }
