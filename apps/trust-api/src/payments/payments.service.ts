@@ -2,11 +2,15 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { detectCashAnomalyPatterns } from "./cash-anomaly-detection";
 import type { CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
 import type { RecordDepositDto } from "./dto/record-deposit.dto";
 
 const PAYABLE_STATUSES = new Set(["issued", "partially_paid"]);
+
+// Fenêtre glissante pour la détection de boucle client/montant (G1, ADR-032).
+const STRUCTURING_LOOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class PaymentsService {
@@ -18,19 +22,25 @@ export class PaymentsService {
       return existing;
     }
 
-    await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
+    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
 
-    return this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
-      amount: dto.amount,
-      amountCollected: dto.amount,
-      platformFeeAmount: 0n,
-      gatewayFeeAmount: 0n,
-      method: "cash",
-      proofPhotoUrl: dto.proofPhotoUrl,
-      proofGpsLat: dto.proofGpsLat,
-      proofGpsLng: dto.proofGpsLng,
-      proofSignature: dto.proofSignature,
-    });
+    return this.createPaymentAndApply(
+      invoiceId,
+      idempotencyKey,
+      dto.amount,
+      {
+        amount: dto.amount,
+        amountCollected: dto.amount,
+        platformFeeAmount: 0n,
+        gatewayFeeAmount: 0n,
+        method: "cash",
+        proofPhotoUrl: dto.proofPhotoUrl,
+        proofGpsLat: dto.proofGpsLat,
+        proofGpsLng: dto.proofGpsLng,
+        proofSignature: dto.proofSignature,
+      },
+      (tx) => this.detectAndRecordCashAnomaly(tx, invoice, dto.amount),
+    );
   }
 
   // Appelé exclusivement par money-api après confirmation webhook (ADR-075) —
@@ -141,6 +151,7 @@ export class PaymentsService {
     idempotencyKey: string,
     amount: bigint,
     paymentData: Omit<Prisma.PaymentUncheckedCreateInput, "invoiceId" | "status" | "idempotencyKey">,
+    onCreated?: (tx: Prisma.TransactionClient) => Promise<void>,
   ) {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -154,12 +165,55 @@ export class PaymentsService {
         });
 
         await this.applyPaymentToInvoice(tx, invoiceId, amount);
+        await onCreated?.(tx);
 
         return payment;
       });
     } catch (error) {
       return this.resolveIdempotencyRace(error, idempotencyKey);
     }
+  }
+
+  // G1, ADR-032 — "revue humaine systématique", jamais un rejet automatique : la
+  // détection ne fait qu'écrire un InvoiceEvent, le paiement réussit toujours.
+  // Écart MM vs facturé (3e pattern d'ADR-032) hors scope : nécessiterait une
+  // corrélation Money Context, réservé à une extension future du même moteur (G3,
+  // ADR-091).
+  private async detectAndRecordCashAnomaly(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; organizationId: string; customerId: string | null },
+    amount: bigint,
+  ) {
+    let sameAmountRecentCount = 1; // ce paiement inclus
+
+    // Sans customerId, aucune boucle attribuable à un client identifié — limitation
+    // documentée (Invoice.customerId n'a pas de modèle Customer associé).
+    if (invoice.customerId) {
+      const priorCount = await tx.payment.count({
+        where: {
+          method: "cash",
+          amount,
+          collectedAt: { gte: new Date(Date.now() - STRUCTURING_LOOP_WINDOW_MS) },
+          invoice: { organizationId: invoice.organizationId, customerId: invoice.customerId },
+        },
+      });
+      sameAmountRecentCount = priorCount + 1;
+    }
+
+    const patterns = detectCashAnomalyPatterns({ amount, sameAmountRecentCount });
+    if (patterns.length === 0) {
+      return;
+    }
+
+    await tx.invoiceEvent.create({
+      data: {
+        invoiceId: invoice.id,
+        type: "suspicious_cash_pattern_detected",
+        actorId: null,
+        amount,
+        metadata: { patterns },
+      },
+    });
   }
 
   // Course concurrente : deux requêtes avec le même Idempotency-Key arrivent en
