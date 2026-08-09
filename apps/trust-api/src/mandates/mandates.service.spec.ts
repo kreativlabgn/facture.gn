@@ -102,3 +102,68 @@ describe("MandatesService", () => {
     });
   });
 });
+
+const MANDATE_ID = "mandate-1";
+const ACCEPTOR_ID = "owner-1";
+
+function createFakePrismaForAccept(overrides: { mandate?: any; updateImpl?: ReturnType<typeof vi.fn> } = {}) {
+  const prisma: any = {
+    mandate: {
+      findUnique: vi.fn().mockResolvedValue(
+        overrides.mandate !== undefined
+          ? overrides.mandate
+          : { id: MANDATE_ID, organizationId: ORG_ID, status: "pending" },
+      ),
+      update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
+    },
+  };
+  return prisma;
+}
+
+describe("MandatesService — acceptation (F1, ADR-069)", () => {
+  it("accepte un mandat pending ciblant l'organisation — status active, grantedBy/grantedAt renseignés", async () => {
+    const prisma = createFakePrismaForAccept();
+    const service = new MandatesService(prisma as any);
+
+    await service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID);
+
+    expect(prisma.mandate.update).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID },
+      data: { status: "active", grantedBy: ACCEPTOR_ID, grantedAt: expect.any(Date) },
+    });
+  });
+
+  it("refuse (404) si le mandat n'existe pas", async () => {
+    const prisma = createFakePrismaForAccept({ mandate: null });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (404) si le mandat cible une autre organisation que :id", async () => {
+    const prisma = createFakePrismaForAccept({
+      mandate: { id: MANDATE_ID, organizationId: "autre-organisation", status: "pending" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (409) si le mandat est déjà active", async () => {
+    const prisma = createFakePrismaForAccept({
+      mandate: { id: MANDATE_ID, organizationId: ORG_ID, status: "active" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/pending/);
+  });
+
+  it("refuse (409) si le mandat est revoked ou expired", async () => {
+    const prisma = createFakePrismaForAccept({
+      mandate: { id: MANDATE_ID, organizationId: ORG_ID, status: "revoked" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/pending/);
+  });
+});

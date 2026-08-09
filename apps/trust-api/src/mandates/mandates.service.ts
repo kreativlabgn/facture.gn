@@ -45,4 +45,29 @@ export class MandatesService {
       data: { practiceId, organizationId: dto.organizationId, grantedRole: dto.grantedRole },
     });
   }
+
+  // F1, ADR-069 — "accorder l'accès" = l'action d'acceptation elle-même
+  // (Mandate.grantedBy est documenté ERD comme "owner/admin qui a accepté").
+  // Contrepartie de create() (F5, initiée par le cabinet) : ici l'organisation
+  // ciblée accepte. Aucun rejet explicite construit (MandateStatus n'a pas de
+  // valeur ERD pour ça) — laisser pending sans action est un rejet de facto.
+  async accept(organizationId: string, mandateId: string, actorUserId: string) {
+    const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
+    // Même mandat introuvable si le mandat existe mais cible une autre
+    // organisation — jamais confirmer l'existence d'un mandat hors périmètre.
+    if (!mandate || mandate.organizationId !== organizationId) {
+      throw new NotFoundException(`Mandat ${mandateId} introuvable pour l'organisation ${organizationId}`);
+    }
+
+    if (mandate.status !== "pending") {
+      throw new ConflictException(
+        `Seul un mandat pending peut être accepté (statut actuel : ${mandate.status})`,
+      );
+    }
+
+    return this.prisma.mandate.update({
+      where: { id: mandateId },
+      data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
+    });
+  }
 }
