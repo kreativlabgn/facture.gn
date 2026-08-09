@@ -17,3 +17,17 @@ const TAX_RATE_BPS_BY_REGIME: Record<RegimeFiscal, number> = {
 export function resolveTaxRateBps(regimeFiscal: RegimeFiscal): number {
   return TAX_RATE_BPS_BY_REGIME[regimeFiscal];
 }
+
+const BPS_DENOMINATOR = 10_000n;
+
+// Unique point de calcul HT/TVA depuis un TTC (convention TTC-first, C4) — appelé à
+// la fois par createDraft() et convertToInvoice() (C15). totalTva est TOUJOURS
+// dérivé par soustraction, jamais recalculé indépendamment : deux formules
+// distinctes sous arrondi bigint pourraient diverger d'une unité GNF et casser
+// l'invariant totalHt+totalTva=totalTtc (protégé aussi par une contrainte CHECK SQL,
+// mais ce n'est pas le seul garde-fou attendu).
+export function computeTaxBreakdown(totalTtc: bigint, taxRateBps: number): { totalHt: bigint; totalTva: bigint } {
+  const totalHt = (totalTtc * BPS_DENOMINATOR) / (BPS_DENOMINATOR + BigInt(taxRateBps));
+  const totalTva = totalTtc - totalHt;
+  return { totalHt, totalTva };
+}

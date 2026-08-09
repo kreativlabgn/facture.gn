@@ -7,10 +7,8 @@ import { resolveNifForCertification } from "../certification/certification.servi
 import type { CertificationService } from "../certification/certification.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
-import { resolveTaxRateBps } from "./tax-regime";
+import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
-
-const BPS_DENOMINATOR = 10_000n;
 
 @Injectable()
 export class InvoicesService {
@@ -30,12 +28,7 @@ export class InvoicesService {
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
 
     const totalTtc = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
-    // totalTva est TOUJOURS dérivé par soustraction, jamais recalculé indépendamment
-    // (ex. totalTtc × taxRateBps / (10000+taxRateBps)) — deux formules distinctes sous
-    // arrondi bigint pourraient diverger d'une unité GNF et casser l'invariant
-    // totalHt+totalTva=totalTtc, qui doit être garanti par construction (C4).
-    const totalHt = (totalTtc * BPS_DENOMINATOR) / (BPS_DENOMINATOR + BigInt(taxRateBps));
-    const totalTva = totalTtc - totalHt;
+    const { totalHt, totalTva } = computeTaxBreakdown(totalTtc, taxRateBps);
 
     return this.prisma.invoice.create({
       data: {
@@ -74,6 +67,14 @@ export class InvoicesService {
     if (invoice.status !== "draft") {
       throw new ConflictException(
         `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,
+      );
+    }
+    // ADR-064 : un proforma (prix indicatif, jamais engageant) ou un devis ne peuvent
+    // jamais être émis directement comme facture certifiée — seule la conversion
+    // (convertToInvoice) produit une vraie facture à partir d'un proforma.
+    if (invoice.documentType !== "invoice") {
+      throw new ConflictException(
+        `Seule une facture peut être émise, pas un document de type ${invoice.documentType}`,
       );
     }
 
@@ -167,6 +168,79 @@ export class InvoicesService {
       );
       return issuedInvoice;
     }
+  }
+
+  // ADR-064 : la conversion crée toujours une NOUVELLE facture — jamais une mutation
+  // en place du proforma — et recalcule le régime fiscal depuis l'organisation
+  // ACTUELLE, jamais depuis les lignes déjà stockées sur le proforma (même si
+  // regimeFiscal n'est modifiable nulle part aujourd'hui, cette règle protège contre
+  // une dérive silencieuse le jour où un mécanisme de changement existera).
+  async convertToInvoice(proformaId: string) {
+    const proforma = await this.prisma.invoice.findUniqueOrThrow({
+      where: { id: proformaId },
+      include: { lines: true },
+    });
+
+    if (proforma.documentType !== "proforma") {
+      throw new ConflictException(
+        `Seul un document de type proforma peut être converti en facture (actuel : ${proforma.documentType})`,
+      );
+    }
+    if (proforma.status !== "draft") {
+      throw new ConflictException(
+        `Proforma ${proformaId} ne peut être converti depuis le statut ${proforma.status}`,
+      );
+    }
+
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: proforma.organizationId },
+    });
+    const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
+    const { totalHt, totalTva } = computeTaxBreakdown(proforma.totalTtc, taxRateBps);
+
+    return this.prisma.$transaction(async (tx) => {
+      // Réclame le proforma atomiquement AVANT de créer la facture : sous deux
+      // conversions concurrentes (retry réseau plausible sur ce projet — PWA
+      // offline-first, réseau mobile instable), seule la transaction qui voit encore
+      // status="draft" au moment de l'écriture peut committer — l'autre reçoit
+      // count=0 et échoue proprement, jamais deux factures pour un même proforma.
+      const claimed = await tx.invoice.updateMany({
+        where: { id: proformaId, status: "draft" },
+        data: { status: "converted" },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          `Proforma ${proformaId} a déjà été converti par une autre requête`,
+        );
+      }
+
+      const invoice = await tx.invoice.create({
+        data: {
+          organizationId: proforma.organizationId,
+          documentType: "invoice",
+          status: "draft",
+          totalTtc: proforma.totalTtc,
+          totalHt,
+          totalTva,
+          amountDue: proforma.totalTtc,
+          lines: {
+            create: proforma.lines.map((line: { description: string; quantity: number; unitPrice: bigint }) => ({
+              description: line.description,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              taxRateBps,
+            })),
+          },
+        },
+      });
+
+      await tx.invoice.update({
+        where: { id: proformaId },
+        data: { convertedToInvoiceId: invoice.id },
+      });
+
+      return invoice;
+    });
   }
 
   // voided réservé aux factures sans aucun paiement (PRD §4.2).

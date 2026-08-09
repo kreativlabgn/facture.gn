@@ -5,7 +5,9 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
   // update() cumulatif (comme le vrai Prisma, qui renvoie toujours la ligne complète,
   // pas seulement les champs patchés) — nécessaire car issue() peut faire deux
   // update() successifs (certification, puis lien de paiement en meilleur effort).
-  let invoiceState: any = { id: "inv-1" };
+  // documentType: "invoice" par défaut (C15, ADR-064) — reflète @default(invoice) du
+  // schema ; les tests qui exercent explicitement un proforma le surchargent.
+  let invoiceState: any = { id: "inv-1", documentType: "invoice" };
   const seedFindUniqueOrThrow = overrides.invoice?.findUniqueOrThrow;
 
   return {
@@ -126,6 +128,171 @@ describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-
   });
 });
 
+function createFakePrismaForConvertToInvoice(
+  proforma: any,
+  regimeFiscal: string,
+  updateManyCount = 1,
+) {
+  const proformaState = { ...proforma };
+  const prisma: any = {
+    invoice: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(proformaState),
+      create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-2", ...data })),
+      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...proformaState, ...data })),
+      updateMany: vi.fn().mockResolvedValue({ count: updateManyCount }),
+    },
+    organization: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal }),
+    },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
+describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
+  it("refuse d'émettre un proforma directement — /issue réservé aux factures", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", documentType: "proforma" }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).rejects.toThrow(/proforma/);
+  });
+
+  it("refuse de convertir un document qui n'est pas un proforma", async () => {
+    const prisma = createFakePrismaForConvertToInvoice(
+      { id: "inv-1", documentType: "invoice", status: "draft", organizationId: "org-1", totalTtc: 350_000n, lines: [] },
+      "tpu",
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/proforma/);
+  });
+
+  it("refuse de convertir un proforma déjà converti — empêche une double conversion", async () => {
+    const prisma = createFakePrismaForConvertToInvoice(
+      {
+        id: "inv-1",
+        documentType: "proforma",
+        status: "converted",
+        organizationId: "org-1",
+        totalTtc: 350_000n,
+        lines: [],
+      },
+      "tpu",
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/statut/);
+  });
+
+  it("crée une nouvelle facture draft et marque le proforma converted avec convertedToInvoiceId", async () => {
+    const prisma = createFakePrismaForConvertToInvoice(
+      {
+        id: "inv-1",
+        documentType: "proforma",
+        status: "draft",
+        organizationId: "org-1",
+        totalTtc: 350_000n,
+        lines: [{ description: "Nuitée hôtel", quantity: 1, unitPrice: 350_000n, taxRateBps: 0 }],
+      },
+      "tpu",
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const newInvoice = await service.convertToInvoice("inv-1");
+
+    expect(newInvoice.documentType).toBe("invoice");
+    expect(newInvoice.status).toBe("draft");
+    expect(newInvoice.totalTtc).toBe(350_000n);
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", status: "draft" },
+      data: { status: "converted" },
+    });
+    expect(prisma.invoice.update).toHaveBeenCalledWith({
+      where: { id: "inv-1" },
+      data: { convertedToInvoiceId: "inv-2" },
+    });
+  });
+
+  it("recalcule le régime fiscal depuis l'organisation ACTUELLE, jamais depuis les lignes déjà stockées sur le proforma", async () => {
+    // Le proforma a été créé quand l'organisation était tpu (taxRateBps=0 sur ses
+    // lignes) — au moment de la conversion, l'organisation est mockée normal_tva :
+    // la nouvelle facture doit refléter 18%, pas le 0% figé sur le proforma.
+    const prisma = createFakePrismaForConvertToInvoice(
+      {
+        id: "inv-1",
+        documentType: "proforma",
+        status: "draft",
+        organizationId: "org-1",
+        totalTtc: 1_180_000n,
+        lines: [{ description: "Prestation conseil", quantity: 1, unitPrice: 1_180_000n, taxRateBps: 0 }],
+      },
+      "normal_tva",
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const newInvoice = await service.convertToInvoice("inv-1");
+
+    expect(newInvoice.totalHt).toBe(1_000_000n);
+    expect(newInvoice.totalTva).toBe(180_000n);
+  });
+
+  it("refuse une conversion concurrente — deux appels quasi simultanés ne peuvent pas produire deux factures pour un même proforma", async () => {
+    // updateMany count=0 simule le cas où une autre transaction a déjà fait basculer
+    // ce proforma hors de draft entre notre lecture initiale et notre écriture —
+    // reproduction réaliste d'un retry réseau (PWA offline-first, réseau mobile
+    // instable) qui renverrait deux POST /convert-to-invoice quasi simultanés.
+    const prisma = createFakePrismaForConvertToInvoice(
+      {
+        id: "inv-1",
+        documentType: "proforma",
+        status: "draft",
+        organizationId: "org-1",
+        totalTtc: 350_000n,
+        lines: [{ description: "Nuitée hôtel", quantity: 1, unitPrice: 350_000n, taxRateBps: 0 }],
+      },
+      "tpu",
+      0,
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/conver/);
+  });
+});
+
 describe("InvoicesService — immutabilité post-émission", () => {
   it("refuse toute mutation directe d'une facture issued — seul un avoir peut corriger", async () => {
     const prisma = createFakePrisma({
@@ -172,6 +339,7 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
           status: "draft",
+          documentType: "invoice",
           organizationId: "org-1",
           totalTtc: 1_500_000n,
         }),
@@ -202,6 +370,7 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
           status: "draft",
+          documentType: "invoice",
           organizationId: "org-1",
           totalTtc: 1_500_000n,
         }),
@@ -285,6 +454,7 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
           status: "draft",
+          documentType: "invoice",
           organizationId: "org-1",
           totalTtc: 1_500_000n,
         }),
@@ -311,6 +481,7 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
           status: "draft",
+          documentType: "invoice",
           organizationId: "org-1",
           totalTtc: 1_500_000n,
         }),
@@ -332,6 +503,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
   const draftInvoice = {
     id: "inv-1",
     status: "draft",
+    documentType: "invoice",
     organizationId: "org-1",
     totalTtc: 1_500_000n,
   };
