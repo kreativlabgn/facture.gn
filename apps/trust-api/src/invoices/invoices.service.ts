@@ -248,12 +248,25 @@ export class InvoicesService {
   // réservation stockée dans ce schéma). L'arrhes (Payment) n'est jamais effacée ;
   // l'InvoiceEvent est la trace d'audit permanente de ce qui lui est arrivé
   // (ADR-015, "source de vérité audit") — jamais recalculé, jamais mutable.
-  async forfeitDeposit(proformaId: string, reason: "cancellation_indemnity" | "no_show_forfeited") {
+  async forfeitDeposit(
+    proformaId: string,
+    reason: "cancellation_indemnity" | "no_show_forfeited",
+    actorId: string,
+  ) {
     const proforma = await this.prisma.invoice.findUniqueOrThrow({ where: { id: proformaId } });
 
     if (proforma.documentType !== "proforma") {
       throw new ConflictException(
         `Seul un proforma peut avoir une arrhes forfaitée (actuel : ${proforma.documentType})`,
+      );
+    }
+    // Message dédié (distinct de la garde anti-course ci-dessous) : un proforma déjà
+    // converted/voided n'est pas une course concurrente, c'est un état métier légitime
+    // (ex. le client s'est présenté, la réservation a été honorée) — Djénabou doit
+    // comprendre la vraie raison, pas un message générique de conflit.
+    if (proforma.status !== "draft") {
+      throw new ConflictException(
+        `Proforma ${proformaId} ne peut avoir son arrhes forfaitée depuis le statut ${proforma.status}`,
       );
     }
 
@@ -267,7 +280,8 @@ export class InvoicesService {
     return this.prisma.$transaction(async (tx) => {
       // Même garde atomique que convertToInvoice() (C15) : sous deux forfaits
       // concurrents, seule la transaction qui voit encore status="draft" au moment
-      // de l'écriture peut committer.
+      // de l'écriture peut committer — la vérification ci-dessus a déjà éliminé le
+      // cas "état métier déjà différent", ce filet ne couvre plus que la vraie course.
       const claimed = await tx.invoice.updateMany({
         where: { id: proformaId, status: "draft" },
         data: { status: "voided" },
@@ -277,7 +291,7 @@ export class InvoicesService {
       }
 
       return tx.invoiceEvent.create({
-        data: { invoiceId: proformaId, type: reason, amount: deposit.amount },
+        data: { invoiceId: proformaId, type: reason, amount: deposit.amount, actorId },
       });
     });
   }

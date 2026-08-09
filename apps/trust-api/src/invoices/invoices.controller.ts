@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post, UsePipes } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { forfeitDepositSchema, type ForfeitDepositDto } from "./dto/forfeit-deposit.dto";
 import { InvoicesService } from "./invoices.service";
@@ -46,7 +47,8 @@ export class InvoicesController {
   forfeitDeposit(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(forfeitDepositSchema)) dto: ForfeitDepositDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.invoicesService.forfeitDeposit(id, dto.reason);
+    return this.invoicesService.forfeitDeposit(id, dto.reason, user.id);
   }
 }

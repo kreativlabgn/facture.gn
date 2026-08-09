@@ -1,4 +1,3 @@
-import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { InvoicesService } from "./invoices.service";
 
@@ -328,7 +327,9 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.forfeitDeposit("proforma-1", "no_show_forfeited")).rejects.toThrow(/arrhes/);
+    await expect(
+      service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou"),
+    ).rejects.toThrow(/arrhes/);
   });
 
   it("écrit un InvoiceEvent avec le bon type/montant et passe le proforma à voided", async () => {
@@ -343,18 +344,36 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited");
+    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou");
 
     expect(event.type).toBe("no_show_forfeited");
     expect(event.amount).toBe(300_000n);
     expect(event.invoiceId).toBe("proforma-1");
+    expect(event.actorId).toBe("user-djenabou");
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
       where: { id: "proforma-1", status: "draft" },
       data: { status: "voided" },
     });
   });
 
-  it("refuse le forfait d'un proforma déjà voided/converted — empêche un double forfait", async () => {
+  it("refuse avec un message dédié le forfait d'un proforma déjà converti — distinct d'une course concurrente", async () => {
+    const prisma = createFakePrismaForForfeitDeposit(
+      { id: "proforma-1", documentType: "proforma", status: "converted" },
+      { id: "payment-1", amount: 300_000n, depositType: "arrhes" },
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+    ).rejects.toThrow(/statut/);
+  });
+
+  it("refuse avec le message de course concurrente si le statut change entre la lecture et l'écriture", async () => {
     const prisma = createFakePrismaForForfeitDeposit(
       { id: "proforma-1", documentType: "proforma", status: "draft" },
       { id: "payment-1", amount: 300_000n, depositType: "arrhes" },
@@ -367,9 +386,9 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.forfeitDeposit("proforma-1", "cancellation_indemnity")).rejects.toThrow(
-      ConflictException,
-    );
+    await expect(
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+    ).rejects.toThrow(/autre requête/);
   });
 });
 
