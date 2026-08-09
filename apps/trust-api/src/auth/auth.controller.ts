@@ -7,6 +7,7 @@ import { AuthService } from "./auth.service";
 import { registerSchema, type RegisterDto } from "./dto/register.dto";
 import { loginSchema, type LoginDto } from "./dto/login.dto";
 import { requestRecoverySchema, type RequestRecoveryDto } from "./dto/request-recovery.dto";
+import { addPhoneSchema, type AddPhoneDto } from "./dto/add-phone.dto";
 
 @ApiTags("auth")
 @Controller("auth")
@@ -50,5 +51,15 @@ export class AuthController {
   @ApiBearerAuth()
   rejectRecovery(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
     return this.authService.resolveRecovery(id, user.id, "rejected");
+  }
+
+  // JWT requis (B6) — jamais @Public() : on ajoute un numéro au compte déjà
+  // authentifié, pas à un compte anonyme. Pipe scopé à @Body() (pas @UsePipes() au
+  // niveau méthode, qui s'appliquerait aussi à @CurrentUser() et échouerait le même
+  // schéma de validation — piège déjà documenté dans organizations.controller.ts).
+  @Post("phones")
+  @ApiBearerAuth()
+  addPhone(@Body(new ZodValidationPipe(addPhoneSchema)) dto: AddPhoneDto, @CurrentUser() user: CurrentUserPayload) {
+    return this.authService.addPhone(user.id, dto.msisdn, dto.password);
   }
 }

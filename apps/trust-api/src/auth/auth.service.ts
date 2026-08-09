@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PASSWORD_SERVICE, AUTH_TOKEN_SERVICE } from "./auth.tokens";
 import type { PasswordService } from "./password.service";
 import type { AuthTokenService } from "./auth-token.service";
@@ -139,5 +140,31 @@ export class AuthService {
 
       return { temporaryPassword };
     });
+  }
+
+  // ADR-087, B6 — login() résout déjà par n'importe quelle ligne UserPhone (aucune
+  // modification nécessaire là-bas) : il ne manquait que ce point d'écriture. Catch
+  // sur la contrainte unique DB directement (pas un findUnique préalable, qui
+  // laisserait une fenêtre de course entre la lecture et l'écriture).
+  //
+  // Re-confirmation du mot de passe (revue sécurité) : un JWT valide prouve une
+  // session active, pas une intention fraîche pour une action qui modifie
+  // durablement les moyens d'accès au compte — un JWT volé sans le mot de passe ne
+  // doit jamais suffire à planter un numéro persistant sur le compte de la victime.
+  async addPhone(userId: string, msisdn: string, password: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const valid = user.passwordHash ? await this.passwordService.verify(user.passwordHash, password) : false;
+    if (!valid) {
+      throw new UnauthorizedException("Mot de passe incorrect");
+    }
+
+    try {
+      return await this.prisma.userPhone.create({ data: { userId, msisdn, isPrimary: false } });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error, "msisdn")) {
+        throw new ConflictException(`Un compte existe déjà pour le numéro ${msisdn}`);
+      }
+      throw error;
+    }
   }
 }
