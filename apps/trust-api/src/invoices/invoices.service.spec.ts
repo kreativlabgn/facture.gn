@@ -293,6 +293,105 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
   });
 });
 
+function createFakePrismaForForfeitDeposit(
+  proforma: any,
+  depositPayment: any,
+  updateManyCount = 1,
+) {
+  const prisma: any = {
+    invoice: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(proforma),
+      updateMany: vi.fn().mockResolvedValue({ count: updateManyCount }),
+    },
+    payment: {
+      findFirst: vi.fn().mockResolvedValue(depositPayment),
+    },
+    invoiceEvent: {
+      create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
+    },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
+describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
+  it("refuse le forfait si aucune arrhes n'a été enregistrée sur ce proforma", async () => {
+    const prisma = createFakePrismaForForfeitDeposit(
+      { id: "proforma-1", documentType: "proforma", status: "draft" },
+      null,
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou"),
+    ).rejects.toThrow(/arrhes/);
+  });
+
+  it("écrit un InvoiceEvent avec le bon type/montant et passe le proforma à voided", async () => {
+    const prisma = createFakePrismaForForfeitDeposit(
+      { id: "proforma-1", documentType: "proforma", status: "draft" },
+      { id: "payment-1", amount: 300_000n, depositType: "arrhes" },
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou");
+
+    expect(event.type).toBe("no_show_forfeited");
+    expect(event.amount).toBe(300_000n);
+    expect(event.invoiceId).toBe("proforma-1");
+    expect(event.actorId).toBe("user-djenabou");
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "proforma-1", status: "draft" },
+      data: { status: "voided" },
+    });
+  });
+
+  it("refuse avec un message dédié le forfait d'un proforma déjà converti — distinct d'une course concurrente", async () => {
+    const prisma = createFakePrismaForForfeitDeposit(
+      { id: "proforma-1", documentType: "proforma", status: "converted" },
+      { id: "payment-1", amount: 300_000n, depositType: "arrhes" },
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+    ).rejects.toThrow(/statut/);
+  });
+
+  it("refuse avec le message de course concurrente si le statut change entre la lecture et l'écriture", async () => {
+    const prisma = createFakePrismaForForfeitDeposit(
+      { id: "proforma-1", documentType: "proforma", status: "draft" },
+      { id: "payment-1", amount: 300_000n, depositType: "arrhes" },
+      0,
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+    ).rejects.toThrow(/autre requête/);
+  });
+});
+
 describe("InvoicesService — immutabilité post-émission", () => {
   it("refuse toute mutation directe d'une facture issued — seul un avoir peut corriger", async () => {
     const prisma = createFakePrisma({

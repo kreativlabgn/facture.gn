@@ -9,6 +9,7 @@ import {
   confirmProviderPaymentSchema,
   type ConfirmProviderPaymentDto,
 } from "./dto/confirm-provider-payment.dto";
+import { recordDepositSchema, type RecordDepositDto } from "./dto/record-deposit.dto";
 import { PaymentsService } from "./payments.service";
 
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
@@ -35,6 +36,23 @@ export class PaymentsController {
       );
     }
     return this.paymentsService.recordCashPayment(invoiceId, dto, idempotencyKey);
+  }
+
+  // Arrhes (C5, ADR-034) — mêmes rôles que la création de facture au comptoir,
+  // toujours cash au MVP.
+  @Post("deposit")
+  @Roles("owner", "admin", "cashier", "field_agent", "delivery_driver")
+  createDeposit(
+    @Param("id") invoiceId: string,
+    @Body(new ZodValidationPipe(recordDepositSchema)) dto: RecordDepositDto,
+    @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
+  ) {
+    if (!idempotencyKey || !UUID_V4_REGEX.test(idempotencyKey)) {
+      throw new BadRequestException(
+        `En-tête ${IDEMPOTENCY_KEY_HEADER} manquant ou invalide (UUID v4 attendu, ADR-016)`,
+      );
+    }
+    return this.paymentsService.recordDepositPayment(invoiceId, dto, idempotencyKey);
   }
 
   // Appel machine-à-machine exclusif (money-api, après confirmation webhook,

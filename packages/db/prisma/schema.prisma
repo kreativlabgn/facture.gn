@@ -68,6 +68,16 @@ enum InvoiceDocumentType {
   quote
 }
 
+// Une seule valeur aujourd'hui (C5) — enum plutôt que String brute pour rester
+// cohérent avec tous les autres champs discriminants de ce schema (RegimeFiscal,
+// InvoiceDocumentType, InvoiceStatus, PaymentMethod), et pour qu'une future
+// distinction arrhes/acompte (mentionnée par ADR-034, non construite ici) ne puisse
+// pas introduire une valeur mal orthographiée qui échapperait silencieusement aux
+// filtres depositType="arrhes" déjà en place.
+enum DepositType {
+  arrhes
+}
+
 // 7 valeurs — DAT §4 : invoice.status
 enum InvoiceStatus {
   draft
@@ -304,14 +314,20 @@ model Payment {
   id        String @id @default(uuid())
   invoiceId String @map("invoice_id")
 
-  amount            BigInt @map("amount") // centimes GNF — ce que le marchand reçoit
+  // centimes GNF — ce que le marchand reçoit pour un règlement normal (depositType
+  // null) ; pour une arrhes (depositType=arrhes, C5), le montant du dépôt de
+  // sécurité lui-même, jamais appliqué au solde de la facture (Invoice.amountPaid/
+  // amountDue) — deux significations distinctes de la même colonne, jamais mélangées
+  // par les chemins d'écriture (recordCashPayment/recordProviderPayment vs
+  // recordDepositPayment).
+  amount            BigInt @map("amount")
   amountCollected   BigInt @map("amount_collected") // centimes GNF — ce que le payeur a payé
   platformFeeAmount BigInt @default(0) @map("platform_fee_amount")
   gatewayFeeAmount  BigInt @default(0) @map("gateway_fee_amount")
 
   method             PaymentMethod  @default(cash)
   providerSubMethod  String?        @map("provider_sub_method")
-  depositType        String?        @map("deposit_type")
+  depositType        DepositType?   @map("deposit_type")
   providerRef        String?        @map("provider_ref")
   status             PaymentStatus  @default(pending)
 

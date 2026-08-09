@@ -12,3 +12,19 @@ describe("InvoicesController — POST /invoices/:id/convert-to-invoice (C15)", (
     expect(result).toEqual({ id: "inv-2", documentType: "invoice" });
   });
 });
+
+describe("InvoicesController — POST /invoices/:id/forfeit-deposit (C5)", () => {
+  it("délègue au service avec l'id du proforma, le reason du body, et l'utilisateur courant (traçabilité audit)", async () => {
+    const service = { forfeitDeposit: vi.fn().mockResolvedValue({ id: "event-1", type: "no_show_forfeited" }) };
+    const controller = new InvoicesController(service as any);
+
+    const result = await controller.forfeitDeposit(
+      "proforma-1",
+      { reason: "no_show_forfeited" },
+      { id: "user-djenabou" },
+    );
+
+    expect(service.forfeitDeposit).toHaveBeenCalledWith("proforma-1", "no_show_forfeited", "user-djenabou");
+    expect(result).toEqual({ id: "event-1", type: "no_show_forfeited" });
+  });
+});
