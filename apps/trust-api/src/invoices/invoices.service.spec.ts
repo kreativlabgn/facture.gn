@@ -282,6 +282,40 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     });
   });
 
+  it("convertit également un devis (documentType=quote) — C16, même mécanisme que le proforma", async () => {
+    const prisma = createFakePrismaForConvertToInvoice(
+      {
+        id: "inv-1",
+        documentType: "quote",
+        status: "draft",
+        organizationId: "org-1",
+        totalTtc: 220_000n,
+        lines: [{ description: "Prestation conseil", quantity: 1, unitPrice: 220_000n, taxRateBps: 0 }],
+      },
+      "tpu",
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const newInvoice = await service.convertToInvoice("inv-1");
+
+    expect(newInvoice.documentType).toBe("invoice");
+    expect(newInvoice.status).toBe("draft");
+    expect(newInvoice.totalTtc).toBe(220_000n);
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", status: "draft" },
+      data: { status: "converted" },
+    });
+    expect(prisma.invoice.update).toHaveBeenCalledWith({
+      where: { id: "inv-1" },
+      data: { convertedToInvoiceId: "inv-2" },
+    });
+  });
+
   it("copie discountPct du proforma vers la nouvelle facture (E2) — totalTtc déjà net, purement traçabilité", async () => {
     const prisma = createFakePrismaForConvertToInvoice(
       {

@@ -187,9 +187,13 @@ export class InvoicesService {
       include: { lines: true },
     });
 
-    if (proforma.documentType !== "proforma") {
+    // C16, ADR-064 : proforma ET devis se convertissent par le même mécanisme —
+    // aucune différence de traitement à la conversion elle-même, la distinction
+    // (arrhes autorisées vs aucun paiement) est portée en amont par les gardes
+    // indépendantes de forfeitDeposit()/recordDepositPayment() (restées proforma-only).
+    if (proforma.documentType !== "proforma" && proforma.documentType !== "quote") {
       throw new ConflictException(
-        `Seul un document de type proforma peut être converti en facture (actuel : ${proforma.documentType})`,
+        `Seul un document de type proforma ou devis peut être converti en facture (actuel : ${proforma.documentType})`,
       );
     }
     if (proforma.status !== "draft") {

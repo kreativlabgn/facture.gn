@@ -288,6 +288,15 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  it("refuse un dépôt sur un devis — C16 élargit convertToInvoice() aux devis, jamais recordDepositPayment() (non-régression)", async () => {
+    const prisma = createFakePrismaForDeposit({ documentType: "quote" });
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-quote"),
+    ).rejects.toThrow(ConflictException);
+  });
+
   it("refuse un dépôt sur un proforma qui n'est plus draft", async () => {
     const prisma = createFakePrismaForDeposit({ status: "converted" });
     const service = new PaymentsService(prisma as any);
