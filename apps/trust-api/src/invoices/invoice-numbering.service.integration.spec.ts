@@ -81,11 +81,27 @@ describe.runIf(hasDatabase)("Invoice.number — unicité par organisation, pas g
     expect(numberA).toBe("FG-2026-000001");
     expect(numberB).toBe("FG-2026-000001");
 
+    // totalHt/totalTva alignés sur totalTtc (organisations tpu, 0% TVA — C4) : la
+    // contrainte invoice_tax_invariant_check exige total_ht+total_tva=total_ttc.
     const invoiceA = await prisma.invoice.create({
-      data: { organizationId: orgAId, number: numberA, status: "issued", totalTtc: 700_000n, amountDue: 700_000n },
+      data: {
+        organizationId: orgAId,
+        number: numberA,
+        status: "issued",
+        totalTtc: 700_000n,
+        totalHt: 700_000n,
+        amountDue: 700_000n,
+      },
     });
     const invoiceB = await prisma.invoice.create({
-      data: { organizationId: orgBId, number: numberB, status: "issued", totalTtc: 250_000n, amountDue: 250_000n },
+      data: {
+        organizationId: orgBId,
+        number: numberB,
+        status: "issued",
+        totalTtc: 250_000n,
+        totalHt: 250_000n,
+        amountDue: 250_000n,
+      },
     });
 
     expect(invoiceA.number).toBe(invoiceB.number);
@@ -94,12 +110,26 @@ describe.runIf(hasDatabase)("Invoice.number — unicité par organisation, pas g
 
   it("une même organisation ne peut pas avoir deux factures portant le même number", async () => {
     await prisma.invoice.create({
-      data: { organizationId: orgAId, number: "FG-2026-000099", status: "issued", totalTtc: 100_000n, amountDue: 100_000n },
+      data: {
+        organizationId: orgAId,
+        number: "FG-2026-000099",
+        status: "issued",
+        totalTtc: 100_000n,
+        totalHt: 100_000n,
+        amountDue: 100_000n,
+      },
     });
 
     await expect(
       prisma.invoice.create({
-        data: { organizationId: orgAId, number: "FG-2026-000099", status: "issued", totalTtc: 200_000n, amountDue: 200_000n },
+        data: {
+          organizationId: orgAId,
+          number: "FG-2026-000099",
+          status: "issued",
+          totalTtc: 200_000n,
+          totalHt: 200_000n,
+          amountDue: 200_000n,
+        },
       }),
     ).rejects.toThrow(/Unique constraint/);
   });

@@ -1,10 +1,12 @@
 import { z } from "zod";
 
+// taxRateBps n'est plus un champ client (C4) — le taux de TVA est dérivé
+// exclusivement de organization.regimeFiscal côté serveur (resolveTaxRateBps),
+// jamais une valeur de confiance externe (ADR-033).
 const invoiceLineSchema = z.object({
   description: z.string().min(1),
   quantity: z.number().int().positive(),
   unitPrice: z.coerce.bigint().positive(),
-  taxRateBps: z.number().int().min(0).optional(),
 });
 
 export const createInvoiceSchema = z.object({

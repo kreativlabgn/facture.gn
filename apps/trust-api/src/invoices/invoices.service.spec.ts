@@ -56,6 +56,76 @@ function createFakePaymentLinkClient(result: any = null) {
   return { tryGenerate: vi.fn().mockResolvedValue(result) };
 }
 
+function createFakePrismaForCreateDraft(regimeFiscal: string) {
+  return {
+    invoice: {
+      create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
+    },
+    organization: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal }),
+    },
+  };
+}
+
+describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-033)", () => {
+  it("calcule totalHt/totalTva à 18% pour une organisation normal_tva, jamais un taux client", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
+    } as any);
+
+    expect(result.totalTtc).toBe(1_180_000n);
+    expect(result.totalHt).toBe(1_000_000n);
+    expect(result.totalTva).toBe(180_000n);
+  });
+
+  it("n'applique aucune TVA pour une organisation tpu — impôt forfaitaire séparé, pas une TVA sur facture", async () => {
+    const prisma = createFakePrismaForCreateDraft("tpu");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 350_000n }],
+    } as any);
+
+    expect(result.totalTva).toBe(0n);
+    expect(result.totalHt).toBe(result.totalTtc);
+  });
+
+  it("garantit totalHt + totalTva === totalTtc même sur un montant qui ne se divise pas exactement par 1,18 (arrondi bigint)", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_000_000n }],
+    } as any);
+
+    expect(result.totalHt + result.totalTva).toBe(result.totalTtc);
+  });
+});
+
 describe("InvoicesService — immutabilité post-émission", () => {
   it("refuse toute mutation directe d'une facture issued — seul un avoir peut corriger", async () => {
     const prisma = createFakePrisma({
