@@ -1,8 +1,12 @@
-import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
+import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organization.dto";
+
+const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
 
 @Injectable()
 export class OrganizationsService {
@@ -67,5 +71,71 @@ export class OrganizationsService {
     this.logger.log(`Organisation ${organizationId} vérifiée DGI (dgi_verification_status → verified)`);
 
     return verified;
+  }
+
+  // ADR-045/046/047, B5 — Chemin B : un agent terrain saisit l'inscription à la
+  // place du marchand. isFieldAgent est rechargé depuis la DB (jamais fait confiance
+  // au JWT/params) : c'est la seule frontière d'autorisation ici, RolesGuard ne
+  // couvre pas ce statut plateforme. Le marchand créé (passwordHash: null, comme
+  // tout placeholder Chemin B) devient owner — jamais l'agent lui-même, qui n'obtient
+  // aucune OrganizationMember : AssistedSession est la seule preuve du lien
+  // agent↔organisation (voir schema.prisma).
+  async createAssisted(fieldAgentUserId: string, dto: CreateAssistedOrganizationDto) {
+    const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: fieldAgentUserId } });
+    if (!agent.isFieldAgent) {
+      throw new ForbiddenException("Seul un agent terrain peut créer une organisation en inscription assistée");
+    }
+
+    if (dto.msisdn) {
+      const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
+      if (existingPhone) {
+        throw new ConflictException(`Un compte existe déjà pour le numéro ${dto.msisdn}`);
+      }
+    }
+
+    // Retry sur collision de code-compte (ADR-047, même précédent que
+    // certification_id — B1/B4) : 8 caractères Base32 tirés aléatoirement, la
+    // collision est rare mais possible, jamais un 500 brut pour l'agent terrain.
+    for (let attempt = 1; attempt <= MAX_ACCOUNT_CODE_ATTEMPTS; attempt++) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const organization = await tx.organization.create({
+            data: {
+              name: dto.organizationName,
+              regimeFiscal: dto.regimeFiscal,
+              legalForm: dto.legalForm,
+              nif: dto.nif,
+              etaxNumber: dto.etaxNumber,
+              accountCode: generateAccountCode(),
+            },
+          });
+
+          const merchant = await tx.user.create({ data: { name: dto.merchantName, passwordHash: null } });
+
+          if (dto.msisdn) {
+            await tx.userPhone.create({ data: { userId: merchant.id, msisdn: dto.msisdn, isPrimary: true } });
+          }
+
+          await tx.organizationMember.create({
+            data: { organizationId: organization.id, userId: merchant.id, role: "owner" },
+          });
+
+          await tx.assistedSession.create({
+            data: { fieldAgentUserId, organizationId: organization.id, consentRecordedAt: new Date() },
+          });
+
+          return organization;
+        });
+      } catch (error) {
+        const isLastAttempt = attempt === MAX_ACCOUNT_CODE_ATTEMPTS;
+        if (isUniqueConstraintViolation(error, "account_code") && !isLastAttempt) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    // Inatteignable : la boucle retourne ou lève à chaque itération.
+    throw new ConflictException("Impossible de générer un code-compte unique après plusieurs tentatives");
   }
 }

@@ -1,6 +1,7 @@
-import { Body, Controller, Param, Post, UsePipes } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { Body, Controller, Param, Post, UseGuards, UsePipes } from "@nestjs/common";
+import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { FieldAgentAuthGuard } from "../common/field-agent-auth.guard";
 import { CurrentUser, type CurrentUserPayload } from "./current-user.decorator";
 import { Public } from "./public.decorator";
 import { AuthService } from "./auth.service";
@@ -61,5 +62,17 @@ export class AuthController {
   @ApiBearerAuth()
   addPhone(@Body(new ZodValidationPipe(addPhoneSchema)) dto: AddPhoneDto, @CurrentUser() user: CurrentUserPayload) {
     return this.authService.addPhone(user.id, dto.msisdn, dto.password);
+  }
+
+  // Appel machine-à-machine exclusif (B5) — même pattern que verify-dgi
+  // (organizations.controller.ts) : aucun OrganizationRole ne couvre l'octroi du
+  // statut agent terrain plateforme, donc @Public() + FieldAgentAuthGuard plutôt
+  // que JwtAuthGuard/RolesGuard.
+  @Post("field-agents/:userId/grant")
+  @Public()
+  @ApiSecurity("internal-api-key")
+  @UseGuards(FieldAgentAuthGuard)
+  grantFieldAgent(@Param("userId") userId: string) {
+    return this.authService.grantFieldAgentStatus(userId);
   }
 }

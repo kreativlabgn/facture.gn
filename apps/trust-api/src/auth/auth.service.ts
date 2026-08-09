@@ -167,4 +167,11 @@ export class AuthService {
       throw error;
     }
   }
+
+  // ADR-045, B5 — élève un utilisateur déjà enregistré (Chemin A) au statut agent
+  // terrain plateforme. Aucun check explicite d'existence : Prisma lève déjà son
+  // erreur si userId est inconnu, cohérent avec findUniqueOrThrow ailleurs.
+  async grantFieldAgentStatus(userId: string): Promise<void> {
+    await this.prisma.user.update({ where: { id: userId }, data: { isFieldAgent: true } });
+  }
 }

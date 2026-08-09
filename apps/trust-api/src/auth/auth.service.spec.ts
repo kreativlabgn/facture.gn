@@ -309,4 +309,20 @@ describe("AuthService", () => {
       );
     });
   });
+
+  describe("grantFieldAgentStatus (B5, ADR-045)", () => {
+    it("passe isFieldAgent à true pour l'utilisateur donné", async () => {
+      const prisma: any = {
+        user: { update: vi.fn().mockResolvedValue({ id: "user-1", isFieldAgent: true }) },
+      };
+      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+      await service.grantFieldAgentStatus("user-1");
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: "user-1" },
+        data: { isFieldAgent: true },
+      });
+    });
+  });
 });

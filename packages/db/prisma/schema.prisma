@@ -146,11 +146,18 @@ model User {
   preferredLanguage  PreferredLanguage @default(fr) @map("preferred_language")
   createdAt          DateTime          @default(now()) @map("created_at")
 
+  // ADR-045, B5 — flag plateforme, indépendant de tout OrganizationRole (les 7 rôles
+  // existants sont tous scopés à une organisation). Accordé exclusivement via un
+  // endpoint interne dédié (FieldAgentAuthGuard, secret propre — jamais confondu
+  // avec MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY).
+  isFieldAgent Boolean @default(false) @map("is_field_agent")
+
   phones        UserPhone[]
   invoiceEvents InvoiceEvent[]
   memberships   OrganizationMember[]
   recoveryRequestsMade     AccountRecoveryRequest[] @relation("RecoveryRequester")
   recoveryRequestsResolved AccountRecoveryRequest[] @relation("RecoveryResolver")
+  assistedSessions         AssistedSession[]
 
   @@map("user")
 }
@@ -245,13 +252,36 @@ model Organization {
   paymentLinkAutoSend         Boolean                @default(true) @map("payment_link_auto_send")
   commercialTier              CommercialTier         @default(freemium) @map("commercial_tier")
   createdAt                   DateTime               @default(now()) @map("created_at")
+  // Nullable : seules les organisations inscrites via le Chemin B (assisté, B5)
+  // en ont un — ADR-046/047, 8 caractères Base32, vérification de collision à la
+  // génération (voir organizations.service.ts:createAssisted).
+  accountCode                 String?                @unique @map("account_code")
 
   invoices          Invoice[]
   sequences         InvoiceSequence[]
   members           OrganizationMember[]
   recoveryRequests  AccountRecoveryRequest[]
+  assistedSessions  AssistedSession[]
 
   @@map("organization")
+}
+
+// ADR-045, B5 — trace de l'inscription assistée. Jamais de membership pour l'agent
+// terrain lui-même (fieldAgentUserId n'est PAS dans OrganizationMember) : cette
+// table EST la seule preuve du lien agent↔organisation. consentRecordedAt (jamais
+// un booléen simple) — horodatage du consentement explicitement recueilli, cohérent
+// avec le reste du schema (resolvedAt, revokedAt...).
+model AssistedSession {
+  id                String   @id @default(uuid())
+  fieldAgentUserId  String   @map("field_agent_user_id")
+  organizationId    String   @map("organization_id")
+  consentRecordedAt DateTime @map("consent_recorded_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  fieldAgent   User         @relation(fields: [fieldAgentUserId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("assisted_session")
 }
 
 // Compteur atomique par organisation/année — support de la numérotation
