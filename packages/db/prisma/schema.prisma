@@ -365,6 +365,7 @@ model Invoice {
   events            InvoiceEvent[]
   payments          Payment[]
   creditNotes       CreditNote[]
+  refunds           Refund[]
 
   @@unique([organizationId, number])
   @@map("invoice")
@@ -446,6 +447,7 @@ model CreditNote {
 
   invoice Invoice          @relation(fields: [invoiceId], references: [id])
   lines   CreditNoteLine[]
+  refunds Refund[]
 
   @@map("credit_note")
 }
@@ -463,6 +465,45 @@ model CreditNoteLine {
   invoiceLine InvoiceLine @relation(fields: [invoiceLineId], references: [id])
 
   @@map("credit_note_line")
+}
+
+enum RefundMethod {
+  cash
+  payment_link_payout
+  bank_transfer
+  credit_on_account
+}
+
+enum RefundStatus {
+  pending
+  completed
+  failed
+}
+
+// ADR-063, C13 — "credit_note = document comptable. refund = mouvement d'argent."
+// Deux faits distincts, jamais confondus : CreditNote peut exister sans jamais être
+// remboursé (crédit conservé côté client). payment_link_payout (Djomy Payout,
+// fallback Moneroo) est créé "pending" — aucune exécution ni confirmation
+// automatique construite ici (V2, ADR-089/FINANCIAL_PARTNER, aucune intégration
+// Money Context payout n'existe dans ce repo). cash/bank_transfer/credit_on_account
+// sont des attestations immédiates du staff (même principe que
+// recordCashPayment()/recordBankTransferPayment(), C1/C3) : "completed" dès la
+// création, jamais "pending".
+model Refund {
+  id          String       @id @default(uuid())
+  creditNoteId String      @map("credit_note_id")
+  invoiceId   String       @map("invoice_id")
+  amount      BigInt // centimes GNF
+  method      RefundMethod
+  providerRef String?      @map("provider_ref")
+  status      RefundStatus @default(pending)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  completedAt DateTime?    @map("completed_at")
+
+  creditNote CreditNote @relation(fields: [creditNoteId], references: [id])
+  invoice    Invoice    @relation(fields: [invoiceId], references: [id])
+
+  @@map("refund")
 }
 
 model InvoiceEvent {

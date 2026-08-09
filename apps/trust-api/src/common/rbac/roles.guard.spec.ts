@@ -6,7 +6,7 @@ import { ROLES_KEY } from "./roles.decorator";
 // idSource undefined par défaut : simule l'absence du décorateur @OrganizationIdSource
 // sur toutes les routes existantes — RolesGuard doit alors retomber sur "invoice"
 // (E8), la seule résolution qui existait avant ce décorateur.
-function createReflector(roles: string[] | undefined, idSource?: "invoice" | "organization") {
+function createReflector(roles: string[] | undefined, idSource?: "invoice" | "organization" | "credit-note") {
   return {
     getAllAndOverride: vi.fn((key: string) => (key === ROLES_KEY ? roles : idSource)),
   } as any;
@@ -138,6 +138,36 @@ describe("RolesGuard", () => {
     };
     const guard = new RolesGuard(createReflector(["owner"], "organization"), prisma);
     const context = buildContext({ user: { id: "user-1" }, params: { id: "org-inconnue" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout params.id comme un AVOIR (CreditNote) avec @OrganizationIdSource(\"credit-note\") (C13)", async () => {
+    const prisma: any = {
+      creditNote: { findUnique: vi.fn().mockResolvedValue({ id: "cn-1", invoice: { organizationId: "org-1" } }) },
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"], "credit-note"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "cn-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.creditNote.findUnique).toHaveBeenCalledWith({
+      where: { id: "cn-1" },
+      include: { invoice: true },
+    });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("refuse (404) proprement quand l'avoir pointé par :id n'existe pas (C13) — jamais un 500 brut", async () => {
+    const prisma: any = {
+      creditNote: { findUnique: vi.fn().mockResolvedValue(null) },
+      organizationMember: { findUnique: vi.fn() },
+    };
+    const guard = new RolesGuard(createReflector(["owner"], "credit-note"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "cn-inconnu" } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
