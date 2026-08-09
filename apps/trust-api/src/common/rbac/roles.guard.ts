@@ -32,10 +32,9 @@ export class RolesGuard implements CanActivate {
     // Défaut "invoice" : rétrocompatible avec toutes les routes existantes qui ne
     // déclarent pas @OrganizationIdSource() (issue/void/...).
     const idSource =
-      this.reflector.getAllAndOverride<"invoice" | "organization" | "credit-note" | "customer" | undefined>(
-        ORGANIZATION_ID_SOURCE_KEY,
-        [context.getHandler(), context.getClass()],
-      ) ?? "invoice";
+      this.reflector.getAllAndOverride<
+        "invoice" | "organization" | "credit-note" | "customer" | "branch" | undefined
+      >(ORGANIZATION_ID_SOURCE_KEY, [context.getHandler(), context.getClass()]) ?? "invoice";
 
     const request = context.switchToHttp().getRequest();
     const organizationId = await this.resolveOrganizationId(request, idSource);
@@ -56,7 +55,7 @@ export class RolesGuard implements CanActivate {
   // (C13, refunds) selon @OrganizationIdSource() (défaut "invoice", rétrocompatible).
   private async resolveOrganizationId(
     request: any,
-    idSource: "invoice" | "organization" | "credit-note" | "customer",
+    idSource: "invoice" | "organization" | "credit-note" | "customer" | "branch",
   ): Promise<string> {
     if (request.body?.organizationId) {
       return request.body.organizationId;
@@ -87,6 +86,13 @@ export class RolesGuard implements CanActivate {
           throw new NotFoundException(`Client ${request.params.id} introuvable`);
         }
         return customer.organizationId;
+      }
+      if (idSource === "branch") {
+        const branch = await this.prisma.branch.findUnique({ where: { id: request.params.id } });
+        if (!branch) {
+          throw new NotFoundException(`Succursale ${request.params.id} introuvable`);
+        }
+        return branch.organizationId;
       }
       const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
       if (!invoice) {

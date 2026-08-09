@@ -5,9 +5,10 @@
 // Référence : Desktop/facture.gn/V/ERD-facture-gn.md (26/07/2026).
 //
 // Divergences assumées vis-à-vis de l'ERD complet (27 entités) :
-// - branch_id, customer_id, product_id, recurring_template_id, financed_by_partner_id
-//   sur INVOICE / INVOICE_LINE sont des colonnes scalaires SANS relation FK tant que
-//   BRANCH, CUSTOMER, PRODUCT, RECURRING_INVOICE_TEMPLATE, FINANCIAL_PARTNER n'existent pas.
+// - product_id, recurring_template_id, financed_by_partner_id sur INVOICE /
+//   INVOICE_LINE sont des colonnes scalaires SANS relation FK tant que PRODUCT,
+//   RECURRING_INVOICE_TEMPLATE, FINANCIAL_PARTNER n'existent pas. customer_id
+//   (C6) et branch_id (E1) sont désormais de vraies relations FK.
 // - InvoiceSequence est un ajout (absent de l'ERD) pour garantir number sans trou
 //   par organisation/année sous concurrence (voir Registre-ADR, Article 23 OHADA).
 // - Colonnes en snake_case en base (@map), camelCase côté client Prisma.
@@ -26,6 +27,13 @@ enum PreferredLanguage {
   pular
   malinke
   soussou
+}
+
+enum BranchType {
+  boutique
+  entrepot
+  agence
+  en_ligne
 }
 
 enum RegimeFiscal {
@@ -266,6 +274,7 @@ model Organization {
   assistedSessions AssistedSession[]
   mandates         Mandate[]
   customers        Customer[]
+  branches         Branch[]
 
   @@map("organization")
 }
@@ -301,6 +310,23 @@ model InvoiceSequence {
 
   @@unique([organizationId, year])
   @@map("invoice_sequence")
+}
+
+// E1, ADR-037 — "branch sous organization, number jamais par branche" :
+// InvoiceSequence reste clé par [organizationId, year] uniquement, jamais par
+// branche — aucun changement requis là, cet invariant est déjà natif.
+model Branch {
+  id             String     @id @default(uuid())
+  organizationId String     @map("organization_id")
+  name           String
+  type           BranchType
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  invoices     Invoice[]
+
+  @@map("branch")
 }
 
 // C6, ADR-039 — "credit_limit/running_balance (calculé sur amount_due),
@@ -393,6 +419,7 @@ model Invoice {
   createdAt DateTime  @default(now()) @map("created_at")
 
   organization  Organization   @relation(fields: [organizationId], references: [id])
+  branch        Branch?        @relation(fields: [branchId], references: [id])
   customer      Customer?      @relation(fields: [customerId], references: [id])
   convertedFrom Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
   convertedInto Invoice[]      @relation("InvoiceConversion")
