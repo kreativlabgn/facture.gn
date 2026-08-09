@@ -70,3 +70,60 @@ describe("OrganizationsService", () => {
     });
   });
 });
+
+function createFakePrismaForVerifyDgi(organization: any) {
+  return {
+    organization: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(organization),
+      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...organization, ...data })),
+    },
+  };
+}
+
+describe("OrganizationsService — vérification DGI (B2)", () => {
+  it("refuse de vérifier une organisation qui n'a jamais fourni NIF ni eTax — ADR-035, jamais un 500 brut", async () => {
+    const prisma = createFakePrismaForVerifyDgi({
+      id: "org-1",
+      nif: null,
+      etaxNumber: null,
+      dgiVerificationStatus: "unverified",
+    });
+    const service = new OrganizationsService(prisma as any);
+
+    await expect(service.verifyDgi("org-1")).rejects.toThrow(/NIF/);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it("passe une organisation avec NIF+eTax de unverified à verified", async () => {
+    const prisma = createFakePrismaForVerifyDgi({
+      id: "org-1",
+      nif: "GN12345678",
+      etaxNumber: "ETAX-001",
+      dgiVerificationStatus: "unverified",
+    });
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.verifyDgi("org-1");
+
+    expect(result.dgiVerificationStatus).toBe("verified");
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { dgiVerificationStatus: "verified" },
+    });
+  });
+
+  it("est idempotent sur une organisation déjà vérifiée — un second appel ne casse rien", async () => {
+    const prisma = createFakePrismaForVerifyDgi({
+      id: "org-1",
+      nif: "GN12345678",
+      etaxNumber: "ETAX-001",
+      dgiVerificationStatus: "verified",
+    });
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.verifyDgi("org-1");
+
+    expect(result.dgiVerificationStatus).toBe("verified");
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+});

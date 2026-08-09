@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -6,6 +6,8 @@ import type { CreateOrganizationDto } from "./dto/create-organization.dto";
 
 @Injectable()
 export class OrganizationsService {
+  private readonly logger = new Logger(OrganizationsService.name);
+
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
   // Le créateur devient owner dans la même transaction — aucune organisation ne
@@ -34,5 +36,36 @@ export class OrganizationsService {
       }
       throw error;
     }
+  }
+
+  // "En tant que système" (B2, backlog) — aucun rôle organisationnel ne peut
+  // déclencher ceci (voir DgiVerificationAuthGuard) : une organisation ne peut pas
+  // s'auto-certifier vérifiée DGI, ça viderait la vérification de son sens.
+  async verifyDgi(organizationId: string) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+    });
+
+    if (!organization.nif || !organization.etaxNumber) {
+      throw new ConflictException(
+        "Impossible de vérifier une organisation sans NIF ni eTax — les deux sont exigés conjointement (ADR-035)",
+      );
+    }
+
+    if (organization.dgiVerificationStatus === "verified") {
+      return organization;
+    }
+
+    const verified = await this.prisma.organization.update({
+      where: { id: organizationId },
+      data: { dgiVerificationStatus: "verified" },
+    });
+
+    // Traçabilité (revue sécurité B2) : seule trace de qui/quand une organisation a
+    // été élevée à verified — jamais de NIF/eTax ici, uniquement l'id, déjà non
+    // sensible seul (UUID opaque).
+    this.logger.log(`Organisation ${organizationId} vérifiée DGI (dgi_verification_status → verified)`);
+
+    return verified;
   }
 }
