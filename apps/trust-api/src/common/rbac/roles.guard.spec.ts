@@ -6,7 +6,10 @@ import { ROLES_KEY } from "./roles.decorator";
 // idSource undefined par défaut : simule l'absence du décorateur @OrganizationIdSource
 // sur toutes les routes existantes — RolesGuard doit alors retomber sur "invoice"
 // (E8), la seule résolution qui existait avant ce décorateur.
-function createReflector(roles: string[] | undefined, idSource?: "invoice" | "organization" | "credit-note") {
+function createReflector(
+  roles: string[] | undefined,
+  idSource?: "invoice" | "organization" | "credit-note" | "customer",
+) {
   return {
     getAllAndOverride: vi.fn((key: string) => (key === ROLES_KEY ? roles : idSource)),
   } as any;
@@ -168,6 +171,33 @@ describe("RolesGuard", () => {
     };
     const guard = new RolesGuard(createReflector(["owner"], "credit-note"), prisma);
     const context = buildContext({ user: { id: "user-1" }, params: { id: "cn-inconnu" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout params.id comme un CLIENT avec @OrganizationIdSource(\"customer\") (C6)", async () => {
+    const prisma: any = {
+      customer: { findUnique: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1" }) },
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"], "customer"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "cust-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("refuse (404) proprement quand le client pointé par :id n'existe pas (C6) — jamais un 500 brut", async () => {
+    const prisma: any = {
+      customer: { findUnique: vi.fn().mockResolvedValue(null) },
+      organizationMember: { findUnique: vi.fn() },
+    };
+    const guard = new RolesGuard(createReflector(["owner"], "customer"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "cust-inconnu" } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();

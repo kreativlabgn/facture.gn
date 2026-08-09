@@ -28,6 +28,18 @@ export class InvoicesService {
     });
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
 
+    // C6 — requête déclenchée UNIQUEMENT si customerId est fourni : jamais un
+    // appel inconditionnel (protège les appelants sans client, la grande
+    // majorité, d'une dépendance à un modèle Customer qu'ils n'utilisent pas).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
+      if (!customer || customer.organizationId !== dto.organizationId) {
+        throw new ConflictException(
+          `Client ${dto.customerId} introuvable pour cette organisation`,
+        );
+      }
+    }
+
     const totalTtcBrut = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
     // Remise globale (E2) appliquée AVANT le calcul HT/TVA — convention TTC-first
     // (C4) : la remise réduit le montant TTC brut, la ventilation HT/TVA est
@@ -40,6 +52,7 @@ export class InvoicesService {
       data: {
         organizationId: dto.organizationId,
         documentType: dto.documentType,
+        customerId: dto.customerId,
         status: "draft",
         totalTtc,
         totalHt,
