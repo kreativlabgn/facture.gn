@@ -70,4 +70,39 @@ export class MandatesService {
       data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
   }
+
+  // F6, ADR-069 — "Révocation par cabinet = tous les collaborateurs perdent
+  // l'accès." Un seul acteur : practice_admin, même garde en ligne que create()
+  // (F5). Seul un mandat active peut être révoqué — un pending n'a aucun accès à
+  // perdre (laisser pending sans action reste le mécanisme d'abandon de F1),
+  // revoked/expired sont déjà terminaux. grantedBy/grantedAt ne sont jamais
+  // effacés : trace historique de qui avait accepté, conservée après révocation.
+  async revoke(practiceId: string, mandateId: string, requesterUserId: string) {
+    const member = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!member || member.role !== "practice_admin") {
+      throw new ForbiddenException(
+        "Seul un practice_admin du cabinet peut révoquer un mandat au nom de celui-ci",
+      );
+    }
+
+    const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
+    // Même mandat introuvable si le mandat existe mais est détenu par une autre
+    // practice — jamais confirmer l'existence d'un mandat hors périmètre.
+    if (!mandate || mandate.practiceId !== practiceId) {
+      throw new NotFoundException(`Mandat ${mandateId} introuvable pour la practice ${practiceId}`);
+    }
+
+    if (mandate.status !== "active") {
+      throw new ConflictException(
+        `Seul un mandat active peut être révoqué (statut actuel : ${mandate.status})`,
+      );
+    }
+
+    return this.prisma.mandate.update({
+      where: { id: mandateId },
+      data: { status: "revoked", revokedAt: new Date() },
+    });
+  }
 }
