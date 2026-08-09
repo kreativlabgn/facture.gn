@@ -32,10 +32,10 @@ export class RolesGuard implements CanActivate {
     // Défaut "invoice" : rétrocompatible avec toutes les routes existantes qui ne
     // déclarent pas @OrganizationIdSource() (issue/void/...).
     const idSource =
-      this.reflector.getAllAndOverride<"invoice" | "organization" | undefined>(ORGANIZATION_ID_SOURCE_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? "invoice";
+      this.reflector.getAllAndOverride<"invoice" | "organization" | "credit-note" | undefined>(
+        ORGANIZATION_ID_SOURCE_KEY,
+        [context.getHandler(), context.getClass()],
+      ) ?? "invoice";
 
     const request = context.switchToHttp().getRequest();
     const organizationId = await this.resolveOrganizationId(request, idSource);
@@ -52,9 +52,12 @@ export class RolesGuard implements CanActivate {
   }
 
   // organizationId direct dans le body à la création, ou résolu depuis params.id —
-  // soit une facture (issue/void/...), soit directement une organisation (E8,
-  // trust-score) selon @OrganizationIdSource() (défaut "invoice", rétrocompatible).
-  private async resolveOrganizationId(request: any, idSource: "invoice" | "organization"): Promise<string> {
+  // une facture (issue/void/...), une organisation (E8, trust-score) ou un avoir
+  // (C13, refunds) selon @OrganizationIdSource() (défaut "invoice", rétrocompatible).
+  private async resolveOrganizationId(
+    request: any,
+    idSource: "invoice" | "organization" | "credit-note",
+  ): Promise<string> {
     if (request.body?.organizationId) {
       return request.body.organizationId;
     }
@@ -67,6 +70,16 @@ export class RolesGuard implements CanActivate {
           throw new NotFoundException(`Organisation ${request.params.id} introuvable`);
         }
         return organization.id;
+      }
+      if (idSource === "credit-note") {
+        const creditNote = await this.prisma.creditNote.findUnique({
+          where: { id: request.params.id },
+          include: { invoice: true },
+        });
+        if (!creditNote) {
+          throw new NotFoundException(`Avoir ${request.params.id} introuvable`);
+        }
+        return creditNote.invoice.organizationId;
       }
       const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
       if (!invoice) {
