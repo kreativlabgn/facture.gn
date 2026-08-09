@@ -10,6 +10,7 @@ import { CreditNotesModule } from "./credit-notes/credit-notes.module";
 import { RefundsModule } from "./refunds/refunds.module";
 import { PracticesModule } from "./practices/practices.module";
 import { MandatesModule } from "./mandates/mandates.module";
+import { FecModule } from "./fec/fec.module";
 import { VerificationModule } from "./verification/verification.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
@@ -28,6 +29,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     RefundsModule,
     PracticesModule,
     MandatesModule,
+    FecModule,
     VerificationModule,
   ],
   providers: [
