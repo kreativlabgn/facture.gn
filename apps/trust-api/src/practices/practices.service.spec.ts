@@ -54,3 +54,86 @@ describe("PracticesService", () => {
     });
   });
 });
+
+const PRACTICE_ID = "practice-1";
+const ADMIN_ID = "admin-1";
+const INVITED_MSISDN = "+224612345678";
+
+function createFakePrismaForInviteMember(
+  overrides: { requesterMember?: any; userPhone?: any; existingMembership?: any } = {},
+) {
+  const prisma: any = {
+    practiceMember: {
+      findFirst: vi.fn().mockImplementation(({ where }: any) => {
+        // Distingue l'appel "vérifie que le demandeur est practice_admin" du
+        // 2e appel "vérifie si l'invité est déjà membre" via userId.
+        if (where.userId === ADMIN_ID) {
+          return Promise.resolve(
+            overrides.requesterMember !== undefined
+              ? overrides.requesterMember
+              : { id: "member-admin", role: "practice_admin" },
+          );
+        }
+        return Promise.resolve(overrides.existingMembership ?? null);
+      }),
+      create: vi.fn().mockResolvedValue({ id: "member-2", role: "accountant_external" }),
+    },
+    userPhone: {
+      findUnique: vi.fn().mockResolvedValue(
+        overrides.userPhone !== undefined ? overrides.userPhone : { userId: "invited-1", msisdn: INVITED_MSISDN },
+      ),
+    },
+  };
+  return prisma;
+}
+
+describe("PracticesService — inviter un collaborateur (F8, ADR-068)", () => {
+  it("ajoute un collaborateur déjà inscrit avec role accountant_external", async () => {
+    const prisma = createFakePrismaForInviteMember();
+    const service = new PracticesService(prisma as any);
+
+    await service.inviteMember(PRACTICE_ID, { msisdn: INVITED_MSISDN, role: "accountant_external" }, ADMIN_ID);
+
+    expect(prisma.practiceMember.create).toHaveBeenCalledWith({
+      data: { practiceId: PRACTICE_ID, userId: "invited-1", role: "accountant_external" },
+    });
+  });
+
+  it("refuse si l'appelant n'est pas practice_admin de la practice ciblée", async () => {
+    const prisma = createFakePrismaForInviteMember({ requesterMember: null });
+    const service = new PracticesService(prisma as any);
+
+    await expect(
+      service.inviteMember(PRACTICE_ID, { msisdn: INVITED_MSISDN, role: "accountant_external" }, ADMIN_ID),
+    ).rejects.toThrow(/practice_admin/);
+  });
+
+  it("refuse (404) si le msisdn n'est associé à aucun compte", async () => {
+    const prisma = createFakePrismaForInviteMember({ userPhone: null });
+    const service = new PracticesService(prisma as any);
+
+    await expect(
+      service.inviteMember(PRACTICE_ID, { msisdn: INVITED_MSISDN, role: "accountant_external" }, ADMIN_ID),
+    ).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (409) si l'utilisateur est déjà membre actif de cette practice", async () => {
+    const prisma = createFakePrismaForInviteMember({
+      existingMembership: { id: "member-existing", userId: "invited-1", leftAt: null },
+    });
+    const service = new PracticesService(prisma as any);
+
+    await expect(
+      service.inviteMember(PRACTICE_ID, { msisdn: INVITED_MSISDN, role: "accountant_external" }, ADMIN_ID),
+    ).rejects.toThrow(/déjà membre/);
+  });
+
+  it("accepte un ré-ajout si le seul membership existant a leftAt renseigné", async () => {
+    const prisma = createFakePrismaForInviteMember({ existingMembership: null });
+    const service = new PracticesService(prisma as any);
+
+    await expect(
+      service.inviteMember(PRACTICE_ID, { msisdn: INVITED_MSISDN, role: "accountant_external" }, ADMIN_ID),
+    ).resolves.toEqual({ id: "member-2", role: "accountant_external" });
+  });
+});
