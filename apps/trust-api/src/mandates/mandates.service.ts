@@ -1,0 +1,48 @@
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import type { PrismaClient } from "@facture-gn/db";
+import { PRISMA_CLIENT } from "../common/prisma.module";
+import type { CreateMandateDto } from "./dto/create-mandate.dto";
+
+@Injectable()
+export class MandatesService {
+  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
+
+  // Un mandat est une action PRACTICE-scopée, pas organisation-scopée (ADR-068) —
+  // RolesGuard ne s'applique pas (il résout exclusivement une organisation via
+  // OrganizationMember). Autorisation vérifiée en ligne, même précédent que
+  // OrganizationsService.createAssisted() (isFieldAgent relu depuis la DB).
+  // F5 se limite à la CRÉATION de la demande (status: pending) — l'acceptation
+  // (pending → active) et la révocation (F6) sont des stories séparées, aucune
+  // transition de status n'est construite ici.
+  async create(practiceId: string, dto: CreateMandateDto, requesterUserId: string) {
+    const member = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!member || member.role !== "practice_admin") {
+      throw new ForbiddenException(
+        "Seul un practice_admin du cabinet peut demander un mandat au nom de celui-ci",
+      );
+    }
+
+    const organization = await this.prisma.organization.findUnique({ where: { id: dto.organizationId } });
+    if (!organization) {
+      throw new NotFoundException(`Organisation ${dto.organizationId} introuvable`);
+    }
+
+    // Garde anti-doublon applicative (même précédent que C7/C13) — un mandat
+    // revoked/expired ne bloque jamais une nouvelle demande, seuls pending/active
+    // représentent une relation encore en cours.
+    const existing = await this.prisma.mandate.findFirst({
+      where: { practiceId, organizationId: dto.organizationId, status: { in: ["pending", "active"] } },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Un mandat ${existing.status} existe déjà entre ce cabinet et l'organisation ${dto.organizationId}`,
+      );
+    }
+
+    return this.prisma.mandate.create({
+      data: { practiceId, organizationId: dto.organizationId, grantedRole: dto.grantedRole },
+    });
+  }
+}

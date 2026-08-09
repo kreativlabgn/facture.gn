@@ -140,11 +140,11 @@ enum InvoiceEventType {
 }
 
 model User {
-  id                 String            @id @default(uuid())
-  name               String
-  passwordHash       String?           @map("password_hash")
-  preferredLanguage  PreferredLanguage @default(fr) @map("preferred_language")
-  createdAt          DateTime          @default(now()) @map("created_at")
+  id                String            @id @default(uuid())
+  name              String
+  passwordHash      String?           @map("password_hash")
+  preferredLanguage PreferredLanguage @default(fr) @map("preferred_language")
+  createdAt         DateTime          @default(now()) @map("created_at")
 
   // ADR-045, B5 — flag plateforme, indépendant de tout OrganizationRole (les 7 rôles
   // existants sont tous scopés à une organisation). Accordé exclusivement via un
@@ -152,13 +152,14 @@ model User {
   // avec MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY).
   isFieldAgent Boolean @default(false) @map("is_field_agent")
 
-  phones        UserPhone[]
-  invoiceEvents InvoiceEvent[]
-  memberships   OrganizationMember[]
+  phones                   UserPhone[]
+  invoiceEvents            InvoiceEvent[]
+  memberships              OrganizationMember[]
   recoveryRequestsMade     AccountRecoveryRequest[] @relation("RecoveryRequester")
   recoveryRequestsResolved AccountRecoveryRequest[] @relation("RecoveryResolver")
   assistedSessions         AssistedSession[]
   practiceMemberships      PracticeMember[]
+  mandatesGranted          Mandate[]
 
   @@map("user")
 }
@@ -181,12 +182,12 @@ enum OrganizationRole {
 // résolu ici à la requête, pour qu'une révocation (revokedAt) soit effective
 // immédiatement plutôt qu'à l'expiration du token.
 model OrganizationMember {
-  id             String            @id @default(uuid())
-  organizationId String            @map("organization_id")
-  userId         String            @map("user_id")
+  id             String           @id @default(uuid())
+  organizationId String           @map("organization_id")
+  userId         String           @map("user_id")
   role           OrganizationRole
-  createdAt      DateTime          @default(now()) @map("created_at")
-  revokedAt      DateTime?         @map("revoked_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  revokedAt      DateTime?        @map("revoked_at")
 
   organization Organization @relation(fields: [organizationId], references: [id])
   user         User         @relation(fields: [userId], references: [id])
@@ -218,51 +219,52 @@ enum RecoveryStatus {
 // dédié, n'importe quel OrganizationMember owner/admin non révoqué de
 // l'organisation ciblée joue ce rôle au moment de la résolution.
 model AccountRecoveryRequest {
-  id             String         @id @default(uuid())
-  userId         String         @map("user_id")
-  organizationId String         @map("organization_id")
-  status         RecoveryStatus @default(pending)
-  requestedAt    DateTime       @default(now()) @map("requested_at")
-  resolvedAt     DateTime?      @map("resolved_at")
-  resolvedByUserId String?      @map("resolved_by_user_id")
+  id               String         @id @default(uuid())
+  userId           String         @map("user_id")
+  organizationId   String         @map("organization_id")
+  status           RecoveryStatus @default(pending)
+  requestedAt      DateTime       @default(now()) @map("requested_at")
+  resolvedAt       DateTime?      @map("resolved_at")
+  resolvedByUserId String?        @map("resolved_by_user_id")
 
-  user           User          @relation("RecoveryRequester", fields: [userId], references: [id])
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  resolvedByUser User?         @relation("RecoveryResolver", fields: [resolvedByUserId], references: [id])
+  user           User         @relation("RecoveryRequester", fields: [userId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  resolvedByUser User?        @relation("RecoveryResolver", fields: [resolvedByUserId], references: [id])
 
   @@map("account_recovery_request")
 }
 
 model Organization {
-  id                          String                 @id @default(uuid())
-  name                        String
-  regimeFiscal                RegimeFiscal           @map("regime_fiscal")
-  legalForm                   LegalForm              @map("legal_form")
+  id                         String                @id @default(uuid())
+  name                       String
+  regimeFiscal               RegimeFiscal          @map("regime_fiscal")
+  legalForm                  LegalForm             @map("legal_form")
   // Nullable : NIF optionnel à l'inscription (ADR-035, story B4 — self-service
   // jamais bloqué par une information que la PME n'a pas encore). Plusieurs
   // organisations sans NIF n'entrent jamais en conflit : Postgres autorise
   // plusieurs NULL sur une colonne @unique (même pattern qu'Invoice.number).
-  nif                         String?                @unique
-  etaxNumber                  String?                @map("etax_number")
-  rccm                        String?
-  registrationSource          RegistrationSource     @default(organic) @map("registration_source")
-  dgiVerificationStatus       DgiVerificationStatus  @default(unverified) @map("dgi_verification_status")
-  bankAccountDetails          Json?                  @map("bank_account_details")
-  preferredLanguage           PreferredLanguage      @default(fr) @map("preferred_language")
-  chiffreAffairesBrutDeclare  BigInt                 @default(0) @map("chiffre_affaires_brut_declare")
-  paymentLinkAutoSend         Boolean                @default(true) @map("payment_link_auto_send")
-  commercialTier              CommercialTier         @default(freemium) @map("commercial_tier")
-  createdAt                   DateTime               @default(now()) @map("created_at")
+  nif                        String?               @unique
+  etaxNumber                 String?               @map("etax_number")
+  rccm                       String?
+  registrationSource         RegistrationSource    @default(organic) @map("registration_source")
+  dgiVerificationStatus      DgiVerificationStatus @default(unverified) @map("dgi_verification_status")
+  bankAccountDetails         Json?                 @map("bank_account_details")
+  preferredLanguage          PreferredLanguage     @default(fr) @map("preferred_language")
+  chiffreAffairesBrutDeclare BigInt                @default(0) @map("chiffre_affaires_brut_declare")
+  paymentLinkAutoSend        Boolean               @default(true) @map("payment_link_auto_send")
+  commercialTier             CommercialTier        @default(freemium) @map("commercial_tier")
+  createdAt                  DateTime              @default(now()) @map("created_at")
   // Nullable : seules les organisations inscrites via le Chemin B (assisté, B5)
   // en ont un — ADR-046/047, 8 caractères Base32, vérification de collision à la
   // génération (voir organizations.service.ts:createAssisted).
-  accountCode                 String?                @unique @map("account_code")
+  accountCode                String?               @unique @map("account_code")
 
-  invoices          Invoice[]
-  sequences         InvoiceSequence[]
-  members           OrganizationMember[]
-  recoveryRequests  AccountRecoveryRequest[]
-  assistedSessions  AssistedSession[]
+  invoices         Invoice[]
+  sequences        InvoiceSequence[]
+  members          OrganizationMember[]
+  recoveryRequests AccountRecoveryRequest[]
+  assistedSessions AssistedSession[]
+  mandates         Mandate[]
 
   @@map("organization")
 }
@@ -318,9 +320,9 @@ model Invoice {
   // Nullable tant que la facture n'est pas issued (pas de draft certifié).
   certificationId String? @unique @map("certification_id")
 
-  documentType InvoiceDocumentType @default(invoice) @map("document_type")
-  status       InvoiceStatus       @default(draft)
-  disputeStatus DisputeStatus      @default(none) @map("dispute_status")
+  documentType  InvoiceDocumentType @default(invoice) @map("document_type")
+  status        InvoiceStatus       @default(draft)
+  disputeStatus DisputeStatus       @default(none) @map("dispute_status")
 
   validatedByAdministration Boolean @default(false) @map("validated_by_administration")
 
@@ -359,14 +361,14 @@ model Invoice {
   issuedAt  DateTime? @map("issued_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
-  organization      Organization   @relation(fields: [organizationId], references: [id])
-  convertedFrom     Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
-  convertedInto     Invoice[]      @relation("InvoiceConversion")
-  lines             InvoiceLine[]
-  events            InvoiceEvent[]
-  payments          Payment[]
-  creditNotes       CreditNote[]
-  refunds           Refund[]
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  convertedFrom Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
+  convertedInto Invoice[]      @relation("InvoiceConversion")
+  lines         InvoiceLine[]
+  events        InvoiceEvent[]
+  payments      Payment[]
+  creditNotes   CreditNote[]
+  refunds       Refund[]
 
   @@unique([organizationId, number])
   @@map("invoice")
@@ -387,11 +389,11 @@ model Payment {
   platformFeeAmount BigInt @default(0) @map("platform_fee_amount")
   gatewayFeeAmount  BigInt @default(0) @map("gateway_fee_amount")
 
-  method             PaymentMethod  @default(cash)
-  providerSubMethod  String?        @map("provider_sub_method")
-  depositType        DepositType?   @map("deposit_type")
-  providerRef        String?        @map("provider_ref")
-  status             PaymentStatus  @default(pending)
+  method            PaymentMethod @default(cash)
+  providerSubMethod String?       @map("provider_sub_method")
+  depositType       DepositType?  @map("deposit_type")
+  providerRef       String?       @map("provider_ref")
+  status            PaymentStatus @default(pending)
 
   // Contrainte unique = mécanisme d'idempotence (header Idempotency-Key, ADR-016) —
   // pas de Redis dans ce repo, un replay renvoie ce paiement plutôt que d'en recréer un.
@@ -400,10 +402,10 @@ model Payment {
   // Preuve obligatoire au-delà de cash_proof_threshold_gnf (DAT §config, 1M GNF) —
   // référence à un objet déjà uploadé côté client (MinIO WORM hors scope de ce plan,
   // pas encore scaffoldé dans ce repo), jamais de gestion d'upload ici.
-  proofPhotoUrl   String? @map("proof_photo_url")
-  proofGpsLat     Float?  @map("proof_gps_lat")
-  proofGpsLng     Float?  @map("proof_gps_lng")
-  proofSignature  String? @map("proof_signature")
+  proofPhotoUrl  String? @map("proof_photo_url")
+  proofGpsLat    Float?  @map("proof_gps_lat")
+  proofGpsLng    Float?  @map("proof_gps_lng")
+  proofSignature String? @map("proof_signature")
 
   collectedAt DateTime @default(now()) @map("collected_at")
 
@@ -491,15 +493,15 @@ enum RefundStatus {
 // recordCashPayment()/recordBankTransferPayment(), C1/C3) : "completed" dès la
 // création, jamais "pending".
 model Refund {
-  id          String       @id @default(uuid())
-  creditNoteId String      @map("credit_note_id")
-  invoiceId   String       @map("invoice_id")
-  amount      BigInt // centimes GNF
-  method      RefundMethod
-  providerRef String?      @map("provider_ref")
-  status      RefundStatus @default(pending)
-  createdAt   DateTime     @default(now()) @map("created_at")
-  completedAt DateTime?    @map("completed_at")
+  id           String       @id @default(uuid())
+  creditNoteId String       @map("credit_note_id")
+  invoiceId    String       @map("invoice_id")
+  amount       BigInt // centimes GNF
+  method       RefundMethod
+  providerRef  String?      @map("provider_ref")
+  status       RefundStatus @default(pending)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  completedAt  DateTime?    @map("completed_at")
 
   creditNote CreditNote @relation(fields: [creditNoteId], references: [id])
   invoice    Invoice    @relation(fields: [invoiceId], references: [id])
@@ -635,25 +637,69 @@ model ProfessionalPractice {
   email              String?
   createdAt          DateTime                 @default(now()) @map("created_at")
 
-  members PracticeMember[]
+  members  PracticeMember[]
+  mandates Mandate[]
 
   @@map("professional_practice")
 }
 
 model PracticeMember {
-  id                  String    @id @default(uuid())
-  practiceId          String    @map("practice_id")
-  userId              String    @map("user_id")
+  id                  String             @id @default(uuid())
+  practiceId          String             @map("practice_id")
+  userId              String             @map("user_id")
   role                PracticeMemberRole
-  permissionsOverride Json?     @map("permissions_override")
-  joinedAt            DateTime  @default(now()) @map("joined_at")
+  permissionsOverride Json?              @map("permissions_override")
+  joinedAt            DateTime           @default(now()) @map("joined_at")
   // Nullable — peuplé quand le membre quitte (ERD) ; aucun mécanisme de départ
   // construit dans cette story (F4 se limite à la création), le champ existe pour
   // une story future.
-  leftAt              DateTime? @map("left_at")
+  leftAt              DateTime?          @map("left_at")
 
   practice ProfessionalPractice @relation(fields: [practiceId], references: [id])
   user     User                 @relation(fields: [userId], references: [id])
 
   @@map("practice_member")
+}
+
+// ===== Mandat (F5/F1/F6, ADR-069) =====
+// "Mandat (practice → organization) remplace membership individuelle. Accordé à
+// l'entité cabinet, pas à un individu." Cette story (F5) ne construit QUE la
+// création de la demande (status: pending) — l'acceptation (pending → active,
+// grantedBy/grantedAt renseignés, F1/une story dédiée) et la révocation (F6) sont
+// hors scope, aucune transition de status n'est construite ici.
+
+enum MandateStatus {
+  pending
+  active
+  revoked
+  expired
+}
+
+// business_manager reste V1 (ADR-070) — scaffoldé fidèlement depuis l'ERD, mais
+// create-mandate.dto.ts ne l'accepte pas encore côté client.
+enum MandateGrantedRole {
+  accountant_external
+  business_manager
+}
+
+model Mandate {
+  id                  String             @id @default(uuid())
+  practiceId          String             @map("practice_id")
+  organizationId      String             @map("organization_id")
+  status              MandateStatus      @default(pending)
+  grantedRole         MandateGrantedRole @map("granted_role")
+  permissionsOverride Json?              @map("permissions_override")
+  // Nullable — peuplé seulement à l'acceptation (owner/admin qui a accepté),
+  // jamais par cette story (F5 ne fait que créer la demande).
+  grantedBy           String?            @map("granted_by")
+  requestedAt         DateTime           @default(now()) @map("requested_at")
+  grantedAt           DateTime?          @map("granted_at")
+  expiresAt           DateTime?          @map("expires_at")
+  revokedAt           DateTime?          @map("revoked_at")
+
+  practice     ProfessionalPractice @relation(fields: [practiceId], references: [id])
+  organization Organization         @relation(fields: [organizationId], references: [id])
+  granter      User?                @relation(fields: [grantedBy], references: [id])
+
+  @@map("mandate")
 }
