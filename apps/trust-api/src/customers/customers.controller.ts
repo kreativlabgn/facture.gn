@@ -4,6 +4,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { createCustomerSchema, type CreateCustomerDto } from "./dto/create-customer.dto";
+import { mergeCustomerSchema, type MergeCustomerDto } from "./dto/merge-customer.dto";
 import { CustomersService } from "./customers.service";
 
 @ApiTags("customers")
@@ -26,5 +27,14 @@ export class CustomersController {
   @OrganizationIdSource("customer")
   findOne(@Param("id") id: string) {
     return this.customersService.findOneWithBalance(id);
+  }
+
+  // E4, ADR-038 — "admin/owner uniquement, jamais cashier ni field_agent"
+  // (bullet backlog exact) : trio restreint, contrairement à create()/findOne().
+  @Post(":id/merge")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("customer")
+  merge(@Param("id") id: string, @Body(new ZodValidationPipe(mergeCustomerSchema)) dto: MergeCustomerDto) {
+    return this.customersService.merge(id, dto.duplicateCustomerId);
   }
 }

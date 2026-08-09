@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
@@ -32,5 +32,30 @@ export class CustomersService {
     });
 
     return { ...customer, runningBalance: aggregate._sum.amountDue ?? 0n };
+  }
+
+  // E4, ADR-038 — "jamais de fusion automatique, résolution manuelle" : cette
+  // méthode EST la résolution manuelle (un admin/owner choisit explicitement les
+  // deux fiches). Organisation vérifiée par comparaison directe des deux
+  // organizationId chargés, jamais un paramètre transmis par l'appelant.
+  async merge(canonicalCustomerId: string, duplicateCustomerId: string) {
+    if (canonicalCustomerId === duplicateCustomerId) {
+      throw new ConflictException("Impossible de fusionner un client avec lui-même");
+    }
+
+    const canonical = await this.prisma.customer.findUniqueOrThrow({ where: { id: canonicalCustomerId } });
+    const duplicate = await this.prisma.customer.findUnique({ where: { id: duplicateCustomerId } });
+    if (!duplicate || duplicate.organizationId !== canonical.organizationId) {
+      throw new ConflictException(`Client ${duplicateCustomerId} introuvable pour cette organisation`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.invoice.updateMany({
+        where: { customerId: duplicateCustomerId },
+        data: { customerId: canonicalCustomerId },
+      });
+      await tx.customer.delete({ where: { id: duplicateCustomerId } });
+      return tx.customer.findUniqueOrThrow({ where: { id: canonicalCustomerId } });
+    });
   }
 }
