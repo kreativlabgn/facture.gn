@@ -196,7 +196,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
   });
 
   it("écrit un InvoiceEvent client_amount_loop au 3e paiement identique pour le même client", async () => {
-    const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" }, 2);
+    const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" }, 3);
     const service = new PaymentsService(prisma as any);
 
     await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-loop");
@@ -229,6 +229,23 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
     const result = await service.recordCashPayment("inv-1", cashDto, "idem-key-normal");
 
     expect(result).toBeDefined();
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("un paiement cash légitime réussit même si la détection d'anomalie échoue — meilleur effort, jamais couplé (revue sécurité)", async () => {
+    const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" });
+    prisma.payment.count = vi.fn().mockRejectedValue(new Error("panne DB inattendue sur la détection"));
+    const service = new PaymentsService(prisma as any);
+
+    const result = await service.recordCashPayment(
+      "inv-1",
+      { amount: 123_456n, method: "cash" as const },
+      "idem-key-detection-failure",
+    );
+
+    expect(result).toBeDefined();
+    const invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountPaid).toBe(123_456n);
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 });
