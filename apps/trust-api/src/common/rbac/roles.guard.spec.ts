@@ -8,7 +8,7 @@ import { ROLES_KEY } from "./roles.decorator";
 // (E8), la seule résolution qui existait avant ce décorateur.
 function createReflector(
   roles: string[] | undefined,
-  idSource?: "invoice" | "organization" | "credit-note" | "customer",
+  idSource?: "invoice" | "organization" | "credit-note" | "customer" | "branch",
 ) {
   return {
     getAllAndOverride: vi.fn((key: string) => (key === ROLES_KEY ? roles : idSource)),
@@ -198,6 +198,33 @@ describe("RolesGuard", () => {
     };
     const guard = new RolesGuard(createReflector(["owner"], "customer"), prisma);
     const context = buildContext({ user: { id: "user-1" }, params: { id: "cust-inconnu" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout params.id comme une SUCCURSALE avec @OrganizationIdSource(\"branch\") (E1)", async () => {
+    const prisma: any = {
+      branch: { findUnique: vi.fn().mockResolvedValue({ id: "branch-1", organizationId: "org-1" }) },
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"], "branch"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "branch-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: "branch-1" } });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("refuse (404) proprement quand la succursale pointée par :id n'existe pas (E1) — jamais un 500 brut", async () => {
+    const prisma: any = {
+      branch: { findUnique: vi.fn().mockResolvedValue(null) },
+      organizationMember: { findUnique: vi.fn() },
+    };
+    const guard = new RolesGuard(createReflector(["owner"], "branch"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "branch-inconnue" } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();

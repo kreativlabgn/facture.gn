@@ -17,6 +17,9 @@ export const createInvoiceSchema = z
     // Validé côté service (appartient à la même organizationId), jamais fait
     // confiance au client sur ce point.
     customerId: z.string().uuid().optional(),
+    // E1 — succursale, optionnel (une organisation mono-site n'en a jamais).
+    // Même discipline de validation que customerId.
+    branchId: z.string().uuid().optional(),
     lines: z.array(invoiceLineSchema).min(1),
     // Remise globale en pourcentage (E2) — défaut 0, cohérent avec le défaut DB
     // (Invoice.discountPct @default(0)), jamais un défaut serveur différent.

@@ -40,6 +40,17 @@ export class InvoicesService {
       }
     }
 
+    // E1 — même discipline que customerId : requête déclenchée UNIQUEMENT si
+    // branchId est fourni, jamais un appel inconditionnel.
+    if (dto.branchId) {
+      const branch = await this.prisma.branch.findUnique({ where: { id: dto.branchId } });
+      if (!branch || branch.organizationId !== dto.organizationId) {
+        throw new ConflictException(
+          `Succursale ${dto.branchId} introuvable pour cette organisation`,
+        );
+      }
+    }
+
     const totalTtcBrut = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
     // Remise globale (E2) appliquée AVANT le calcul HT/TVA — convention TTC-first
     // (C4) : la remise réduit le montant TTC brut, la ventilation HT/TVA est
@@ -53,6 +64,7 @@ export class InvoicesService {
         organizationId: dto.organizationId,
         documentType: dto.documentType,
         customerId: dto.customerId,
+        branchId: dto.branchId,
         status: "draft",
         totalTtc,
         totalHt,
