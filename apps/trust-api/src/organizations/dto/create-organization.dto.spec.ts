@@ -7,6 +7,7 @@ describe("createOrganizationSchema", () => {
       name: "Boutique Aissatou",
       legalForm: "commercial",
       nif: "GN12345678",
+      etaxNumber: "ETAX-001",
     });
 
     expect(result.success).toBe(false);
@@ -18,6 +19,7 @@ describe("createOrganizationSchema", () => {
       regimeFiscal: "tpu",
       legalForm: "commercial",
       nif: "GN12345678",
+      etaxNumber: "ETAX-001",
     });
 
     expect(result.success).toBe(true);
@@ -29,8 +31,55 @@ describe("createOrganizationSchema", () => {
       regimeFiscal: "exoneree_invente",
       legalForm: "commercial",
       nif: "GN12345678",
+      etaxNumber: "ETAX-001",
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("createOrganizationSchema — NIF/eTax optionnels à l'inscription (B1/B4, ADR-035)", () => {
+  it("accepte une inscription sans NIF ni eTax — Chemin A self-service, TTV < 5 min", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Boutique Aissatou",
+      regimeFiscal: "tpu",
+      legalForm: "commercial",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejette un NIF fourni sans eTax — exigés conjointement (ADR-035)", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Boutique Aissatou",
+      regimeFiscal: "tpu",
+      legalForm: "commercial",
+      nif: "GN12345678",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejette un eTax fourni sans NIF — exigés conjointement (ADR-035)", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Boutique Aissatou",
+      regimeFiscal: "tpu",
+      legalForm: "commercial",
+      etaxNumber: "ETAX-001",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepte NIF et eTax fournis ensemble", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Boutique Aissatou",
+      regimeFiscal: "tpu",
+      legalForm: "commercial",
+      nif: "GN12345678",
+      etaxNumber: "ETAX-001",
+    });
+
+    expect(result.success).toBe(true);
   });
 });

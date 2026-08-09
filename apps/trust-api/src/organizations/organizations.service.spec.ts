@@ -58,4 +58,15 @@ describe("OrganizationsService", () => {
       ),
     ).rejects.toThrow(/NIF/);
   });
+
+  it("crée une organisation sans NIF ni eTax — inscription self-service jamais bloquée (B1/B4)", async () => {
+    const prisma = createFakePrisma();
+    const service = new OrganizationsService(prisma as any);
+
+    await service.create({ name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial" }, "user-1");
+
+    expect(prisma.organization.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ nif: undefined, etaxNumber: undefined }),
+    });
+  });
 });
