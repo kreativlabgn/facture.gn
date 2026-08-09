@@ -104,6 +104,16 @@ export class PaymentsService {
         },
       });
     } catch (error) {
+      // Course concurrente sur DEUX requêtes avec des Idempotency-Key différentes
+      // (pas le cas déjà couvert par resolveIdempotencyRace, qui ne concerne qu'un
+      // replay de la MÊME clé) : le garde applicatif findFirst ci-dessus laisse une
+      // fenêtre de course, seul l'index unique partiel payment_one_arrhes_per_invoice
+      // tranche côté DB — vérifié empiriquement, Prisma rapporte
+      // meta.target=["invoice_id"], jamais "idempotency_key", donc jamais intercepté
+      // par resolveIdempotencyRace seul.
+      if (isUniqueConstraintViolation(error, "invoice_id")) {
+        throw new ConflictException(`Proforma ${proformaId} a déjà une arrhes enregistrée`);
+      }
       return this.resolveIdempotencyRace(error, idempotencyKey);
     }
   }

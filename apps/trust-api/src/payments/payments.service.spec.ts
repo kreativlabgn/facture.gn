@@ -233,6 +233,25 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-4"),
     ).rejects.toThrow(ConflictException);
   });
+
+  it("refuse proprement (jamais un 500 brut) une course concurrente détectée par l'index unique payment_one_arrhes_per_invoice, pas seulement par le lookup idempotency_key", async () => {
+    // Reproduction exacte de la violation P2002 réelle observée contre Postgres :
+    // deux requêtes avec des Idempotency-Key DIFFÉRENTES passent toutes deux le
+    // lookup idempotency_key et le findFirst applicatif avant que l'une des deux ne
+    // committe — seul l'index unique partiel (invoice_id WHERE deposit_type='arrhes')
+    // tranche, avec meta.target=["invoice_id"], jamais "idempotency_key".
+    const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["invoice_id"] },
+    });
+    const prisma = createFakePrismaForDeposit();
+    prisma.payment.create = vi.fn().mockRejectedValue(uniqueViolation);
+    const service = new PaymentsService(prisma as any);
+
+    await expect(
+      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-race"),
+    ).rejects.toThrow(ConflictException);
+  });
 });
 
 describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, appelé par money-api)", () => {
