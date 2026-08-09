@@ -895,6 +895,72 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
   });
 });
 
+describe("InvoicesService — envoi du lien de paiement immédiat ou différé (C20, ERD payment_link_auto_send)", () => {
+  const draftInvoice = {
+    id: "inv-1",
+    status: "draft",
+    documentType: "invoice",
+    organizationId: "org-1",
+    totalTtc: 1_500_000n,
+  };
+  const resolvedLink = {
+    paymentLinkUrl: "https://stub.djomy.africa/pay/djomy-stub-inv-1",
+    providerRef: "djomy-stub-inv-1",
+    expiresAt: new Date("2026-09-07T00:00:00.000Z"),
+  };
+
+  it("ne génère PAS de lien à l'émission quand paymentLinkAutoSend est explicitement false — envoi différé", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "org-1",
+          commercialTier: "freemium",
+          paymentLinkAutoSend: false,
+        }),
+      },
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(resolvedLink);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect(paymentLinkClient.tryGenerate).not.toHaveBeenCalled();
+    expect(result.status).toBe("issued");
+    expect(result.paymentLinkUrl).toBeUndefined();
+  });
+
+  it("génère le lien normalement quand paymentLinkAutoSend est explicitement true — comportement inchangé", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "org-1",
+          commercialTier: "freemium",
+          paymentLinkAutoSend: true,
+        }),
+      },
+    });
+    const paymentLinkClient = createFakePaymentLinkClient(resolvedLink);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeCertification() as any,
+      paymentLinkClient as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect(paymentLinkClient.tryGenerate).toHaveBeenCalled();
+    expect(result.paymentLinkUrl).toBe(resolvedLink.paymentLinkUrl);
+  });
+});
+
 function createFakePrismaForRegeneratePaymentLink(invoice: any, organization: any = {}) {
   const prisma: any = {
     invoice: {

@@ -179,6 +179,14 @@ export class InvoicesService {
     // de paiement < 3s") — une panne Money Context ne doit jamais faire échouer
     // l'émission (Parcours Fanta : cash et lien ne s'excluent jamais l'un l'autre ;
     // C18 permet de régénérer un lien absent plus tard).
+    // C20, ERD payment_link_auto_send (@default(true)) — !== false (pas un
+    // falsy-check) : une organisation réelle n'a jamais cette valeur à undefined
+    // (colonne non-nullable), seul un mock de test pourrait l'omettre, auquel cas
+    // le comportement par défaut (génération immédiate) doit rester inchangé.
+    if (organization.paymentLinkAutoSend === false) {
+      return issuedInvoice;
+    }
+
     // amountGnf majoré de la commission (ADR-074, grille 5 paliers) — jamais le
     // total_ttc seul : ADR-059 exige que la commission soit portée par le payeur,
     // jamais prélevée sur le marchand (qui reçoit toujours le montant certifié
