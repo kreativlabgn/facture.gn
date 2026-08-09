@@ -364,6 +364,7 @@ model Invoice {
   lines             InvoiceLine[]
   events            InvoiceEvent[]
   payments          Payment[]
+  creditNotes       CreditNote[]
 
   @@unique([organizationId, number])
   @@map("invoice")
@@ -421,9 +422,47 @@ model InvoiceLine {
 
   costPriceAtTime BigInt? @map("cost_price_at_time")
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  invoice         Invoice          @relation(fields: [invoiceId], references: [id])
+  creditNoteLines CreditNoteLine[]
 
   @@map("invoice_line")
+}
+
+// ADR-040, C7 — mécanisme de correction d'une facture déjà émise, jamais une
+// mutation directe (Invoice reste immuable après issue()). amount est un total
+// unique (pas de ventilation HT/TVA par ligne, cf. ERD) calculé côté serveur à
+// l'émission — jamais une valeur de confiance du client (même principe que
+// taxRateBps, C4). N'affecte JAMAIS Invoice.totalTtc/amountDue/amountPaid : bucket
+// financier délibérément séparé, même précédent que les arrhes (Payment.depositType
+// = "arrhes", C5). refundMultiplier (1 ou 2) référence ADR-034 (arrhes + annulation
+// professionnelle) sans intégration avec forfeitDeposit() à ce stade.
+model CreditNote {
+  id               String   @id @default(uuid())
+  invoiceId        String   @map("invoice_id")
+  amount           BigInt // centimes GNF
+  refundMultiplier Int      @default(1) @map("refund_multiplier")
+  reason           String
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  invoice Invoice          @relation(fields: [invoiceId], references: [id])
+  lines   CreditNoteLine[]
+
+  @@map("credit_note")
+}
+
+// quantity_returned est une QUANTITÉ, pas un montant (cf. ERD) — la trace du
+// "niveau ligne" d'ADR-040 sert à savoir quelles lignes et combien d'unités ont été
+// créditées, la ventilation monétaire reste un total unique sur CreditNote.amount.
+model CreditNoteLine {
+  id               String @id @default(uuid())
+  creditNoteId     String @map("credit_note_id")
+  invoiceLineId    String @map("invoice_line_id")
+  quantityReturned Int    @map("quantity_returned")
+
+  creditNote  CreditNote  @relation(fields: [creditNoteId], references: [id])
+  invoiceLine InvoiceLine @relation(fields: [invoiceLineId], references: [id])
+
+  @@map("credit_note_line")
 }
 
 model InvoiceEvent {
