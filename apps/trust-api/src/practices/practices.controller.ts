@@ -4,6 +4,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { MandatesService } from "../mandates/mandates.service";
 import { createPracticeSchema, type CreatePracticeDto } from "./dto/create-practice.dto";
+import { inviteMemberSchema, type InviteMemberDto } from "./dto/invite-member.dto";
 import { PracticesService } from "./practices.service";
 
 @ApiTags("practices")
@@ -25,6 +26,19 @@ export class PracticesController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.practicesService.create(dto, user.id);
+  }
+
+  // F8, ADR-068 — aucun @Roles() (practice_admin n'est pas un OrganizationRole),
+  // autorisation en ligne dans le service. Pipe scopé au paramètre @Body() —
+  // jamais @UsePipes() au niveau méthode ici (échouerait @CurrentUser() contre
+  // le même schéma, piège documenté dans ZodValidationPipe, F2).
+  @Post(":id/members")
+  inviteMember(
+    @Param("id") practiceId: string,
+    @Body(new ZodValidationPipe(inviteMemberSchema)) dto: InviteMemberDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.practicesService.inviteMember(practiceId, dto, user.id);
   }
 
   // F7, ADR-070 — donnée source d'un sélecteur "switch organisation" côté client
