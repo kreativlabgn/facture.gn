@@ -152,3 +152,31 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     await expect(service.merge("cust-1", "cust-inconnu")).rejects.toThrow(/introuvable pour cette organisation/);
   });
 });
+
+describe("findAllByOrganization", () => {
+  it("liste les clients de l'organisation, paginés avec une limite par défaut", async () => {
+    const prisma: any = {
+      customer: { findMany: vi.fn().mockResolvedValue([{ id: "cust-1" }, { id: "cust-2" }]) },
+    };
+    const service = new CustomersService(prisma as any);
+
+    const result = await service.findAllByOrganization("org-1", {});
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1" },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      skip: 0,
+    });
+    expect(result).toEqual([{ id: "cust-1" }, { id: "cust-2" }]);
+  });
+
+  it("plafonne take à 100 quel que soit ce que le client demande", async () => {
+    const prisma: any = { customer: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new CustomersService(prisma as any);
+
+    await service.findAllByOrganization("org-1", { take: 500 });
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+  });
+});

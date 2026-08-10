@@ -67,4 +67,24 @@ export class OrganizationsController {
   getTrustScore(@Param("id") organizationId: string) {
     return this.organizationsService.getVerifiedPaymentRatio(organizationId);
   }
+
+  // Point d'entrée manquant jusqu'ici : après login, rien ne permettait à un
+  // client de découvrir à quelle(s) organisation(s) l'utilisateur appartient
+  // (CurrentUser ne porte que { id }). Aucun @Roles() : il n'y a pas encore
+  // d'organisation ciblée à ce stade, le filtrage se fait entièrement dans le
+  // service à partir de user.id — JwtAuthGuard suffit (même principe que
+  // PracticesController.findAllByType()).
+  @Get()
+  listMine(@CurrentUser() user: CurrentUserPayload) {
+    return this.organizationsService.listMine(user.id);
+  }
+
+  // Détail organisation (paramètres) — même trio owner/admin que trust-score
+  // ci-dessus, sensibilité de champs comparable.
+  @Get(":id")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  findOne(@Param("id") organizationId: string) {
+    return this.organizationsService.findOneDetail(organizationId);
+  }
 }

@@ -10,6 +10,9 @@ import { InvoiceNumberingService } from "./invoice-numbering.service";
 import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
 
+const DEFAULT_LIST_PAGE_SIZE = 50;
+const MAX_LIST_PAGE_SIZE = 100;
+
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
@@ -451,6 +454,21 @@ export class InvoicesService {
   // a déjà résolu et 404-é la facture avant d'arriver ici.
   async findOne(invoiceId: string) {
     return this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  }
+
+  // "Factures récentes" (dashboard) — aucun endpoint de liste n'existait jusqu'ici
+  // (seul findOne() par id). take plafonné à MAX_LIST_PAGE_SIZE quelle que soit la
+  // valeur demandée par le client : le DAT cible 1M factures/mois, une réponse non
+  // bornée n'est jamais acceptable (dev-code-reviewer, Agent 4).
+  async findAllByOrganization(organizationId: string, pagination: { take?: number; skip?: number }) {
+    const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
+    const skip = pagination.skip ?? 0;
+    return this.prisma.invoice.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: "desc" },
+      take,
+      skip,
+    });
   }
 
   // voided réservé aux factures sans aucun paiement (PRD §4.2).

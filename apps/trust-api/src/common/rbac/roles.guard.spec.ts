@@ -15,8 +15,8 @@ function createReflector(
   } as any;
 }
 
-function buildContext({ user, body = {}, params = {} }: any) {
-  const request: any = { user, body, params };
+function buildContext({ user, body = {}, params = {}, query = {} }: any) {
+  const request: any = { user, body, params, query };
   const context: any = {
     switchToHttp: () => ({ getRequest: () => request }),
     getHandler: () => ({}),
@@ -101,6 +101,85 @@ describe("RolesGuard", () => {
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout l'organisation depuis query.organizationId pour les routes de liste (GET, ni body ni :id)", async () => {
+    const prisma: any = {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"]), prisma);
+    const context = buildContext({ user: { id: "user-1" }, query: { organizationId: "org-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("FAILLE CRITIQUE (corrigée) : params.id prime TOUJOURS sur un organizationId de body usurpé — un attaquant ne peut pas faire passer la vérification de rôle contre SA PROPRE organisation pour agir sur la ressource d'un AUTRE pointée par :id", async () => {
+    const prisma: any = {
+      invoice: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-victime" }) },
+      organizationMember: {
+        // Le membership de l'attaquant existe bel et bien — sur SA PROPRE
+        // organisation. S'il était consulté, il passerait la vérification de rôle.
+        findUnique: vi.fn().mockImplementation(({ where }: any) => {
+          if (where.organizationId_userId.organizationId === "org-attaquant") {
+            return Promise.resolve({ role: "owner", revokedAt: null });
+          }
+          return Promise.resolve(null);
+        }),
+      },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin", "cashier"]), prisma);
+    const context = buildContext({
+      user: { id: "attaquant-1" },
+      params: { id: "invoice-victime" },
+      body: { organizationId: "org-attaquant" },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    expect(prisma.invoice.findUnique).toHaveBeenCalledWith({ where: { id: "invoice-victime" } });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-victime", userId: "attaquant-1" } },
+    });
+  });
+
+  it("FAILLE CRITIQUE (corrigée) : params.id prime TOUJOURS sur un organizationId de query usurpé (même attaque via ?organizationId=)", async () => {
+    const prisma: any = {
+      invoice: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-victime" }) },
+      organizationMember: {
+        findUnique: vi.fn().mockImplementation(({ where }: any) => {
+          if (where.organizationId_userId.organizationId === "org-attaquant") {
+            return Promise.resolve({ role: "owner", revokedAt: null });
+          }
+          return Promise.resolve(null);
+        }),
+      },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin", "cashier"]), prisma);
+    const context = buildContext({
+      user: { id: "attaquant-1" },
+      params: { id: "invoice-victime" },
+      query: { organizationId: "org-attaquant" },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-victime", userId: "attaquant-1" } },
+    });
+  });
+
+  it("body reste la source légitime en l'absence de params.id (création — organizationId fait partie de ce qui est créé)", async () => {
+    const prisma: any = {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner"]), prisma);
+    const context = buildContext({ user: { id: "user-1" }, body: { organizationId: "org-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
   });
 
   it("résout params.id comme une FACTURE par défaut, en l'absence de @OrganizationIdSource (E8, non-régression)", async () => {

@@ -390,4 +390,55 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     expect(signingKeyService.provisionRootKey).not.toHaveBeenCalled();
   });
+
+  describe("listMine", () => {
+    it("retourne les organisations dont l'utilisateur est membre actif, avec son rôle sur chacune", async () => {
+      const prisma: any = {
+        organizationMember: {
+          findMany: vi.fn().mockResolvedValue([
+            { role: "owner", organization: { id: "org-1", name: "Boutique Aissatou" } },
+            { role: "cashier", organization: { id: "org-2", name: "Restaurant Le Damier" } },
+          ]),
+        },
+      };
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      const result = await service.listMine("user-1");
+
+      expect(prisma.organizationMember.findMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", revokedAt: null },
+        include: { organization: true },
+      });
+      expect(result).toEqual([
+        { id: "org-1", name: "Boutique Aissatou", role: "owner" },
+        { id: "org-2", name: "Restaurant Le Damier", role: "cashier" },
+      ]);
+    });
+
+    it("ne retourne jamais un membership révoqué (filtré côté requête, pas côté application)", async () => {
+      const prisma: any = { organizationMember: { findMany: vi.fn().mockResolvedValue([]) } };
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      const result = await service.listMine("user-1");
+
+      expect(result).toEqual([]);
+      expect(prisma.organizationMember.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ revokedAt: null }) }),
+      );
+    });
+  });
+
+  describe("findOneDetail", () => {
+    it("retourne l'organisation demandée par id", async () => {
+      const prisma: any = {
+        organization: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", name: "Boutique Aissatou" }) },
+      };
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      const result = await service.findOneDetail("org-1");
+
+      expect(prisma.organization.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: "org-1" } });
+      expect(result).toEqual({ id: "org-1", name: "Boutique Aissatou" });
+    });
+  });
 });
