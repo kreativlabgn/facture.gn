@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* Charte graphique facture.gn — direction créative posée sur la page de
+   vérification publique (premier écran, verify.facture.gn/:certificationId).
+   Jamais les couleurs du drapeau guinéen (rouge/jaune/vert) : facture.gn est
+   un tiers de confiance PRIVÉ, jamais un registre d'État — le choix de
+   palette doit rester lisiblement distinct de toute identité gouvernementale.
+   Indigo profond = sérieux/confiance (documents légaux, banque). Émeraude =
+   authenticité confirmée. Ambre = réservé au sceau de certification
+   uniquement, jamais une couleur d'interface générale. */
+:root {
+  --color-ink-950: #0b1220;
+  --color-ink-900: #101a30;
+  --color-ink-700: #2c3a5c;
+  --color-ink-500: #5b6b8c;
+  --color-ink-300: #a3aec6;
+  --color-ink-100: #e8ebf2;
+  --color-ink-50: #f5f6fa;
+
+  --color-trust-700: #1b2a4a;
+  --color-trust-600: #24365e;
+  --color-trust-500: #2f4574;
+
+  --color-verified-700: #0a7a4f;
+  --color-verified-600: #0f9d63;
+  --color-verified-100: #e3f6ec;
+
+  --color-alert-700: #a3241f;
+  --color-alert-600: #c8302a;
+  --color-alert-100: #fbeaea;
+
+  --color-seal-600: #a9812f;
+  --color-seal-100: #f7efdc;
+
+  --background: var(--color-ink-50);
+  --foreground: var(--color-ink-950);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-ink-950: var(--color-ink-950);
+  --color-ink-900: var(--color-ink-900);
+  --color-ink-700: var(--color-ink-700);
+  --color-ink-500: var(--color-ink-500);
+  --color-ink-300: var(--color-ink-300);
+  --color-ink-100: var(--color-ink-100);
+  --color-ink-50: var(--color-ink-50);
+
+  --color-trust-700: var(--color-trust-700);
+  --color-trust-600: var(--color-trust-600);
+  --color-trust-500: var(--color-trust-500);
+
+  --color-verified-700: var(--color-verified-700);
+  --color-verified-600: var(--color-verified-600);
+  --color-verified-100: var(--color-verified-100);
+
+  --color-alert-700: var(--color-alert-700);
+  --color-alert-600: var(--color-alert-600);
+  --color-alert-100: var(--color-alert-100);
+
+  --color-seal-600: var(--color-seal-600);
+  --color-seal-100: var(--color-seal-100);
+
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
