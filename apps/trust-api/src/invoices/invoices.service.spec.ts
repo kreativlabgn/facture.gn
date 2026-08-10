@@ -1524,3 +1524,43 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
     await expect(service.findOne("inv-inconnue")).rejects.toThrow(/introuvable/);
   });
 });
+
+describe("findAllByOrganization", () => {
+  it("liste les factures de l'organisation, plus récentes d'abord, paginées avec une limite par défaut", async () => {
+    const prisma: any = {
+      invoice: { findMany: vi.fn().mockResolvedValue([{ id: "inv-2" }, { id: "inv-1" }]) },
+    };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.findAllByOrganization("org-1", {});
+
+    expect(prisma.invoice.findMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1" },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      skip: 0,
+    });
+    expect(result).toEqual([{ id: "inv-2" }, { id: "inv-1" }]);
+  });
+
+  it("respecte take/skip explicites, plafonnés à 100 pour éviter une réponse non bornée (DAT, 1M factures/mois)", async () => {
+    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", { take: 500, skip: 20 });
+
+    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 100, skip: 20 }),
+    );
+  });
+});

@@ -4,10 +4,26 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 
 const OUTSTANDING_INVOICE_STATUSES = ["issued", "partially_paid"] as const;
+const DEFAULT_LIST_PAGE_SIZE = 50;
+const MAX_LIST_PAGE_SIZE = 100;
 
 @Injectable()
 export class CustomersService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
+
+  // Sélecteur client (émission de facture) + section "liste des clients"
+  // (dashboard) — même plafonnement défensif que InvoicesService.findAllByOrganization,
+  // aucun endpoint de liste n'existait jusqu'ici (seul findOne() par id).
+  async findAllByOrganization(organizationId: string, pagination: { take?: number; skip?: number }) {
+    const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
+    const skip = pagination.skip ?? 0;
+    return this.prisma.customer.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: "desc" },
+      take,
+      skip,
+    });
+  }
 
   async create(dto: CreateCustomerDto) {
     return this.prisma.customer.create({

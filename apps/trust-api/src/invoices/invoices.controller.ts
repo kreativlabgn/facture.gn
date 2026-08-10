@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Param, Post, UsePipes } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UsePipes } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
+import {
+  organizationScopedListQuerySchema,
+  type OrganizationScopedListQueryDto,
+} from "../common/dto/organization-scoped-list-query.dto";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { forfeitDepositSchema, type ForfeitDepositDto } from "./dto/forfeit-deposit.dto";
 import { InvoicesService } from "./invoices.service";
@@ -33,6 +37,19 @@ export class InvoicesController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.invoicesService.createAssisted(dto, user.id);
+  }
+
+  // "Factures récentes" (dashboard) — aucun endpoint de liste n'existait jusqu'ici.
+  // Même trio élargi que POST /invoices : voir les factures d'une organisation est
+  // une action de suivi courant, pas une action financière en soi. organizationId
+  // résolu depuis la query par RolesGuard (aucun idSource params.id à déclarer ici).
+  @Get()
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
+  findAll(@Query(new ZodValidationPipe(organizationScopedListQuerySchema)) query: OrganizationScopedListQueryDto) {
+    return this.invoicesService.findAllByOrganization(query.organizationId, {
+      take: query.take,
+      skip: query.skip,
+    });
   }
 
   // C10 — même trio élargi que POST /invoices : suivre le statut (paiement,

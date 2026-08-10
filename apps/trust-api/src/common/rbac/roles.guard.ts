@@ -60,6 +60,11 @@ export class RolesGuard implements CanActivate {
     if (request.body?.organizationId) {
       return request.body.organizationId;
     }
+    // Routes de liste (GET /invoices?organizationId=, GET /customers?organizationId=) —
+    // aucun body ni :id à résoudre, l'organisation est directement le filtre demandé.
+    if (request.query?.organizationId) {
+      return request.query.organizationId;
+    }
     if (request.params?.id) {
       // findUnique + 404 explicite plutôt que findUniqueOrThrow : une NotFoundError
       // Prisma non interceptée fuiterait en 500 brut plutôt qu'une réponse propre.

@@ -216,4 +216,24 @@ export class OrganizationsService {
       throw error;
     }
   }
+
+  // Aucun endpoint n'exposait jusqu'ici "à quelle(s) organisation(s) appartient
+  // l'utilisateur connecté" — CurrentUser ne porte que { id } (JWT { sub }), et
+  // toutes les routes RBAC existantes exigent déjà de connaître l'organisation
+  // ciblée. Filtré côté requête (revokedAt: null), jamais côté application —
+  // même discipline que RolesGuard.
+  async listMine(userId: string) {
+    const memberships = await this.prisma.organizationMember.findMany({
+      where: { userId, revokedAt: null },
+      include: { organization: true },
+    });
+    return memberships.map((membership) => ({ ...membership.organization, role: membership.role }));
+  }
+
+  // Détail organisation (paramètres) — même trio owner/admin que trust-score
+  // (E8, organizations.controller.ts:64) : ces deux routes exposent des champs
+  // de sensibilité comparable (bankAccountDetails, chiffreAffairesBrutDeclare).
+  async findOneDetail(organizationId: string) {
+    return this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+  }
 }

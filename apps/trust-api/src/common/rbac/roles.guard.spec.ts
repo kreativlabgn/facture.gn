@@ -15,8 +15,8 @@ function createReflector(
   } as any;
 }
 
-function buildContext({ user, body = {}, params = {} }: any) {
-  const request: any = { user, body, params };
+function buildContext({ user, body = {}, params = {}, query = {} }: any) {
+  const request: any = { user, body, params, query };
   const context: any = {
     switchToHttp: () => ({ getRequest: () => request }),
     getHandler: () => ({}),
@@ -101,6 +101,36 @@ describe("RolesGuard", () => {
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout l'organisation depuis query.organizationId pour les routes de liste (GET, ni body ni :id)", async () => {
+    const prisma: any = {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"]), prisma);
+    const context = buildContext({ user: { id: "user-1" }, query: { organizationId: "org-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("préfère le body à la query quand les deux sont présents (non-régression, aucune route existante n'envoie les deux)", async () => {
+    const prisma: any = {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner"]), prisma);
+    const context = buildContext({
+      user: { id: "user-1" },
+      body: { organizationId: "org-body" },
+      query: { organizationId: "org-query" },
+    });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-body", userId: "user-1" } },
+    });
   });
 
   it("résout params.id comme une FACTURE par défaut, en l'absence de @OrganizationIdSource (E8, non-régression)", async () => {
