@@ -2,9 +2,8 @@ import { ConflictException, ForbiddenException, Inject, Injectable, Logger } fro
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
-import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import { resolveNifForCertification } from "../certification/certification.service";
-import type { CertificationService } from "../certification/certification.service";
+import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { computePlatformFee } from "../common/commission-grid";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
@@ -18,7 +17,11 @@ export class InvoicesService {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly numbering: InvoiceNumberingService,
-    @Inject(CERTIFICATION_SERVICE) private readonly certification: CertificationService,
+    // A3, ADR-026 — jamais la clé globale légataire pour une NOUVELLE facture,
+    // toujours la clé racine de l'organisation émettrice (voir
+    // certification.module.ts pour la seule route qui utilise encore la clé
+    // globale : vérifier les factures signées avant cette story).
+    private readonly certification: OrganizationSigningKeyService,
     private readonly paymentLinkClient: PaymentLinkClient,
   ) {}
 
@@ -153,7 +156,7 @@ export class InvoicesService {
       orderBy: { issuedAt: "desc" },
     });
 
-    const certification = this.certification.certify({
+    const certification = await this.certification.certifyForOrganization(invoice.organizationId, {
       invoiceId: invoice.id,
       organizationNif: resolveNifForCertification(organization.nif),
       number,
@@ -172,6 +175,7 @@ export class InvoicesService {
           hash: certification.hash,
           previousHash: certification.previousHash,
           signature: Buffer.from(certification.signature, "hex"),
+          signingKeyId: certification.signingKeyId,
           status: "issued",
           issuedAt,
           amountDue: invoice.totalTtc,

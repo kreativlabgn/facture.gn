@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import { resolveNifForCertification } from "../certification/certification.service";
 import type { CertificationService } from "../certification/certification.service";
+import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 
 export interface PublicInvoiceVerification {
   certificationId: string;
@@ -25,7 +26,12 @@ export interface PublicInvoiceVerification {
 export class VerificationService {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
+    // A3, ADR-026 — clé globale légataire, UNIQUEMENT pour les factures signées
+    // avant cette story (signingKeyId === null) — jamais utilisée pour une
+    // facture signée par la clé propre de son organisation (voir branche
+    // ci-dessous). Ne jamais migrer une facture existante de l'un vers l'autre.
     @Inject(CERTIFICATION_SERVICE) private readonly certification: CertificationService,
+    private readonly signingKeyService: OrganizationSigningKeyService,
   ) {}
 
   // Recherche exclusivement par certification_id (jamais par l'id UUID interne, qui
@@ -45,14 +51,20 @@ export class VerificationService {
     // certify() est déterministe (même payload + même clé ⇒ même hash + même signature,
     // Ed25519 RFC 8032) : le recalcul depuis les champs actuellement stockés permet de
     // détecter une altération en base après signature, pas seulement une ligne absente.
-    const recomputed = this.certification.certify({
+    // A3, ADR-026 — signingKeyId null : facture signée avant cette story, la clé
+    // globale légataire reste la seule référence valide (jamais retouchée).
+    // Non-null : recalcul avec la clé propre de l'organisation référencée.
+    const payload = {
       invoiceId: invoice.id,
       organizationNif: resolveNifForCertification(invoice.organization.nif),
       number: invoice.number,
       totalTtc: invoice.totalTtc,
       issuedAt: invoice.issuedAt.toISOString(),
       previousHash: invoice.previousHash ?? "GENESIS",
-    });
+    };
+    const recomputed = invoice.signingKeyId
+      ? await this.signingKeyService.verifyWithKey(invoice.signingKeyId, payload)
+      : this.certification.certify(payload);
 
     const integrityValid =
       recomputed.hash === invoice.hash &&
