@@ -45,7 +45,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Échec du backfill :", error);
-  process.exit(1);
-});
+// Garde d'entrée : ce script gère de la génération de clé cryptographique,
+// jamais un effet de bord acceptable au simple import (ex. IDE auto-import
+// accidentel) — n'exécute main() QUE si ce fichier est lancé directement
+// (node dist/scripts/...), jamais depuis un require()/import() indirect.
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("Échec du backfill :", error);
+    process.exit(1);
+  });
+}
