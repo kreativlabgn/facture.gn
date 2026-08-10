@@ -1,28 +1,39 @@
-const STATUS_LABELS: Record<string, { label: string; tone: "neutral" | "verified" | "seal" | "alert" }> = {
-  draft: { label: "Brouillon", tone: "neutral" },
-  issued: { label: "Émise", tone: "neutral" },
-  partially_paid: { label: "Partiellement payée", tone: "seal" },
-  paid: { label: "Payée", tone: "verified" },
-  voided: { label: "Annulée", tone: "alert" },
-  converted: { label: "Convertie", tone: "neutral" },
-  expired: { label: "Expirée", tone: "neutral" },
+// Pastilles ".pill" de la maquette de référence (Écran 04, charte v1.3) :
+// JetBrains Mono 700, glyphe plein/mi-plein avant le libellé, fond teinté
+// 12% + texte assombri (voir globals.css — la teinte brute de la charte ne
+// passe pas WCAG AA sur son propre fond à cette taille).
+const STATUS_LABELS: Record<string, { label: string; glyph: string; tone: "green" | "amber" | "blue" | "navy" }> = {
+  draft: { label: "Brouillon", glyph: "○", tone: "navy" },
+  issued: { label: "En attente", glyph: "●", tone: "amber" },
+  partially_paid: { label: "Partiel", glyph: "◐", tone: "blue" },
+  paid: { label: "Payée", glyph: "●", tone: "green" },
+  voided: { label: "Annulée", glyph: "○", tone: "navy" },
+  converted: { label: "Convertie", glyph: "○", tone: "navy" },
+  expired: { label: "Expirée", glyph: "○", tone: "navy" },
 };
 
-const DISPUTE_LABELS: Record<string, { label: string; tone: "neutral" | "verified" | "seal" | "alert" }> = {
-  disputed: { label: "Contestée", tone: "alert" },
-  resolved: { label: "Litige résolu", tone: "seal" },
+const DISPUTE_LABELS: Record<string, { label: string; glyph: string; tone: "green" | "amber" | "blue" | "navy" | "red" }> = {
+  disputed: { label: "Contestée", glyph: "●", tone: "red" },
+  resolved: { label: "Litige résolu", glyph: "●", tone: "green" },
 };
 
 const TONE_CLASSES: Record<string, string> = {
-  neutral: "bg-ink-100 text-ink-700",
-  verified: "bg-verified-100 text-verified-700",
-  seal: "bg-seal-100 text-seal-600",
-  alert: "bg-alert-100 text-alert-700",
+  green: "bg-green-bg text-green-text",
+  amber: "bg-amber-bg text-amber-text",
+  blue: "bg-blue-bg text-blue-text",
+  red: "bg-red-bg text-red-text",
+  navy: "bg-navy-50 text-navy-400",
 };
 
+const PILL_CLASSES = "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] font-bold";
+
 export function StatusPill({ status }: { status: string }) {
-  const entry = STATUS_LABELS[status] ?? { label: status, tone: "neutral" as const };
-  return <span className={`rounded-full px-3 py-1 text-xs font-medium ${TONE_CLASSES[entry.tone]}`}>{entry.label}</span>;
+  const entry = STATUS_LABELS[status] ?? { label: status, glyph: "○", tone: "navy" as const };
+  return (
+    <span className={`${PILL_CLASSES} ${TONE_CLASSES[entry.tone]}`}>
+      {entry.glyph} {entry.label}
+    </span>
+  );
 }
 
 // dispute_status "none" n'affiche jamais de pastille — un litige inexistant
@@ -31,6 +42,10 @@ export function DisputeStatusPill({ disputeStatus }: { disputeStatus: string }) 
   if (disputeStatus === "none") {
     return null;
   }
-  const entry = DISPUTE_LABELS[disputeStatus] ?? { label: disputeStatus, tone: "neutral" as const };
-  return <span className={`rounded-full px-3 py-1 text-xs font-medium ${TONE_CLASSES[entry.tone]}`}>{entry.label}</span>;
+  const entry = DISPUTE_LABELS[disputeStatus] ?? { label: disputeStatus, glyph: "○", tone: "navy" as const };
+  return (
+    <span className={`${PILL_CLASSES} ${TONE_CLASSES[entry.tone]}`}>
+      {entry.glyph} {entry.label}
+    </span>
+  );
 }

@@ -1,70 +1,77 @@
 @import "tailwindcss";
 
-/* Charte graphique facture.gn — direction créative posée sur la page de
-   vérification publique (premier écran, verify.facture.gn/:certificationId).
-   Jamais les couleurs du drapeau guinéen (rouge/jaune/vert) : facture.gn est
-   un tiers de confiance PRIVÉ, jamais un registre d'État — le choix de
-   palette doit rester lisiblement distinct de toute identité gouvernementale.
-   Indigo profond = sérieux/confiance (documents légaux, banque). Émeraude =
-   authenticité confirmée. Ambre = réservé au sceau de certification
-   uniquement, jamais une couleur d'interface générale. */
+/* Charte graphique facture.gn v1.3 (verrouillée) — Navy Autorité + Jaune
+   Fatoora, jamais les couleurs du drapeau guinéen. Tokens recopiés depuis la
+   charte et la maquette de référence (Desktop/facture.gn/V/), ÉCRAN 04
+   Vérification. Les teintes de texte des pastilles de statut (*-pill-text)
+   sont assombries de 2 à 24% par rapport à la couleur sémantique brute de la
+   charte — celle-ci ne passe pas WCAG AA (4.5:1) sur son propre fond teinté
+   à 12% ; même famille de teinte, juste plus foncée pour rester lisible. */
 :root {
-  --color-ink-950: #0b1220;
-  --color-ink-900: #101a30;
-  --color-ink-700: #2c3a5c;
-  --color-ink-500: #5b6b8c;
-  --color-ink-300: #a3aec6;
-  --color-ink-100: #e8ebf2;
-  --color-ink-50: #f5f6fa;
+  --color-navy-950: #0b1d3a;
+  --color-navy-800: #132447;
+  --color-navy-700: rgba(11, 29, 58, 0.88);
+  --color-navy-600: rgba(11, 29, 58, 0.66);
+  --color-navy-400: rgba(11, 29, 58, 0.44);
+  --color-navy-200: rgba(11, 29, 58, 0.22);
+  --color-navy-100: rgba(11, 29, 58, 0.12);
+  --color-navy-50: rgba(11, 29, 58, 0.08);
 
-  --color-trust-700: #1b2a4a;
-  --color-trust-600: #24365e;
-  --color-trust-500: #2f4574;
+  --color-yellow: #f2b705;
+  --color-grey: #f5f7f9;
 
-  --color-verified-700: #0a7a4f;
-  --color-verified-600: #0f9d63;
-  --color-verified-100: #e3f6ec;
+  --color-green: #16a34a;
+  --color-green-text: #117c38;
+  --color-green-bg: rgba(22, 163, 74, 0.12);
 
-  --color-alert-700: #a3241f;
-  --color-alert-600: #c8302a;
-  --color-alert-100: #fbeaea;
+  --color-amber: #d97706;
+  --color-amber-text: #a55a05;
+  --color-amber-bg: rgba(217, 119, 6, 0.12);
 
-  --color-seal-600: #a9812f;
-  --color-seal-100: #f7efdc;
+  --color-blue: #2563eb;
+  --color-blue-text: #2461e6;
+  --color-blue-bg: rgba(37, 99, 235, 0.12);
 
-  --background: var(--color-ink-50);
-  --foreground: var(--color-ink-950);
+  --color-red: #dc2626;
+  --color-red-text: #ca2323;
+  --color-red-bg: rgba(220, 38, 38, 0.12);
+
+  --background: var(--color-grey);
+  --foreground: var(--color-navy-950);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
-  --color-ink-950: var(--color-ink-950);
-  --color-ink-900: var(--color-ink-900);
-  --color-ink-700: var(--color-ink-700);
-  --color-ink-500: var(--color-ink-500);
-  --color-ink-300: var(--color-ink-300);
-  --color-ink-100: var(--color-ink-100);
-  --color-ink-50: var(--color-ink-50);
+  --color-navy-950: var(--color-navy-950);
+  --color-navy-800: var(--color-navy-800);
+  --color-navy-700: var(--color-navy-700);
+  --color-navy-600: var(--color-navy-600);
+  --color-navy-400: var(--color-navy-400);
+  --color-navy-200: var(--color-navy-200);
+  --color-navy-100: var(--color-navy-100);
+  --color-navy-50: var(--color-navy-50);
 
-  --color-trust-700: var(--color-trust-700);
-  --color-trust-600: var(--color-trust-600);
-  --color-trust-500: var(--color-trust-500);
+  --color-yellow: var(--color-yellow);
+  --color-grey: var(--color-grey);
 
-  --color-verified-700: var(--color-verified-700);
-  --color-verified-600: var(--color-verified-600);
-  --color-verified-100: var(--color-verified-100);
-
-  --color-alert-700: var(--color-alert-700);
-  --color-alert-600: var(--color-alert-600);
-  --color-alert-100: var(--color-alert-100);
-
-  --color-seal-600: var(--color-seal-600);
-  --color-seal-100: var(--color-seal-100);
+  --color-green: var(--color-green);
+  --color-green-text: var(--color-green-text);
+  --color-green-bg: var(--color-green-bg);
+  --color-amber: var(--color-amber);
+  --color-amber-text: var(--color-amber-text);
+  --color-amber-bg: var(--color-amber-bg);
+  --color-blue: var(--color-blue);
+  --color-blue-text: var(--color-blue-text);
+  --color-blue-bg: var(--color-blue-bg);
+  --color-red: var(--color-red);
+  --color-red-text: var(--color-red-text);
+  --color-red-bg: var(--color-red-bg);
 
   --font-sans: var(--font-inter);
-  --font-mono: var(--font-mono);
+  --font-display: var(--font-poppins);
+  --font-mono: var(--font-jetbrains-mono);
 }
 
 body {

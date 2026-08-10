@@ -1,14 +1,28 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Poppins, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-// Une seule police (Inter) — jamais une seconde police décorative : légèreté
-// du bundle cohérente avec le contexte data mobile coûteuse en Guinée (DAT),
-// excellent support du français, lisibilité neutre appropriée à un document
-// de certification.
+// Système typographique verrouillé par la Charte Graphique v1.3 : Poppins
+// (marque, titres — jamais en dessous de 12px), Inter (texte courant),
+// JetBrains Mono (identifiants vérifiables — certification ID, montants,
+// hash — chasse fixe pour lever toute ambiguïté 0/O, 1/l).
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const poppins = Poppins({
+  variable: "--font-poppins",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
   display: "swap",
 });
 
@@ -21,8 +35,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="fr" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-ink-50 text-ink-950">{children}</body>
+    <html lang="fr" className={`${inter.variable} ${poppins.variable} ${jetbrainsMono.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col bg-grey text-navy-950">{children}</body>
     </html>
   );
 }

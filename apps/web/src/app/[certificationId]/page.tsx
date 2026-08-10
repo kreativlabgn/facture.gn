@@ -19,7 +19,7 @@ export default async function VerificationPage({ params }: { params: Promise<Par
   return (
     <div className="flex min-h-full flex-col">
       <SiteHeader />
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-10 sm:px-6">
+      <main className="mx-auto w-full max-w-[520px] flex-1 px-4 py-12 sm:px-6">
         {invoice ? (
           <>
             <TrustSeal valid={invoice.integrityValid} />
@@ -36,13 +36,15 @@ export default async function VerificationPage({ params }: { params: Promise<Par
 
 // Distinct d'un échec d'intégrité (TrustSeal, valid=false) : un identifiant
 // inconnu n'est PAS une preuve d'altération, seulement une absence de
-// correspondance (faute de frappe, lien erroné) — jamais le même ton alarmant.
+// correspondance (faute de frappe, lien erroné) — jamais le même ton
+// alarmant, donc jamais la couleur rouge sémantique de la charte (R-12,
+// réservée aux échecs réels).
 function NotFound({ certificationId }: { certificationId: string }) {
   return (
-    <div className="flex flex-col items-center gap-4 rounded-2xl border border-ink-100 bg-white px-8 py-10 text-center">
-      <p className="text-lg font-semibold text-ink-950">Aucune facture ne correspond à cet identifiant</p>
-      <p className="max-w-md text-sm text-ink-500">
-        Vérifiez que l&apos;identifiant <span className="font-mono text-ink-700">{certificationId}</span> a été
+    <div className="rounded-2xl border border-navy-100 bg-white p-8 text-center">
+      <p className="font-display text-lg font-bold text-navy-950">Aucune facture ne correspond à cet identifiant</p>
+      <p className="mx-auto mt-3 max-w-sm text-sm text-navy-600">
+        Vérifiez que l&apos;identifiant <span className="font-mono text-navy-950">{certificationId}</span> a été
         copié intégralement, sans espace ni caractère manquant.
       </p>
     </div>

@@ -1,55 +1,38 @@
-// Le pixel le plus important de toute la page — le signal de confiance doit
-// être compris en un coup d'œil, sans lire une seule ligne de texte
-// (scénario réel : quelqu'un scanne un QR code et regarde son téléphone 2
-// secondes). Jamais de jargon technique ("intégrité cryptographique") dans le
-// texte visible — "authentique" / "n'a pas pu être authentifiée" seulement.
+// Reproduit ".verify-check" de la maquette de référence (Écran 04, charte
+// v1.3) : cercle plein 72px, icône blanche 32px, PAS de fond teinté ni de
+// second texte de sous-titre — la maquette de référence ne montre que l'état
+// succès ; l'état échec d'intégrité (rouge) est une extrapolation cohérente
+// avec la palette sémantique de la charte (R-12/R-13), jamais montrée dans
+// la maquette elle-même.
 export function TrustSeal({ valid }: { valid: boolean }) {
-  if (valid) {
-    return (
-      <div className="flex flex-col items-center gap-4 rounded-2xl bg-verified-100 px-8 py-10 text-center">
-        <SealIcon className="h-16 w-16 text-verified-700" checkmark />
-        <div>
-          <p className="text-2xl font-semibold text-verified-700">Facture certifiée authentique</p>
-          <p className="mt-1 text-sm text-ink-700">Aucune altération détectée depuis son émission.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col items-center gap-4 rounded-2xl bg-alert-100 px-8 py-10 text-center">
-      <SealIcon className="h-16 w-16 text-alert-700" checkmark={false} />
-      <div>
-        <p className="text-2xl font-semibold text-alert-700">Cette facture n&apos;a pas pu être authentifiée</p>
-        <p className="mt-1 text-sm text-ink-700">
+    <div className="flex flex-col items-center text-center">
+      <div
+        className={`mb-[18px] flex h-[72px] w-[72px] items-center justify-center rounded-full ${
+          valid ? "bg-green" : "bg-red"
+        }`}
+      >
+        <SealIcon checkmark={valid} />
+      </div>
+      <p className="font-display text-[19px] font-bold text-navy-950">
+        {valid ? "Facture authentique" : "Facture non authentifiée"}
+      </p>
+      {!valid ? (
+        <p className="mt-1 max-w-sm text-sm text-navy-600">
           Les données enregistrées ne correspondent plus à la signature d&apos;origine.
         </p>
-      </div>
+      ) : null}
     </div>
   );
 }
 
-function SealIcon({ className, checkmark }: { className?: string; checkmark: boolean }) {
+function SealIcon({ checkmark }: { checkmark: boolean }) {
   return (
-    <svg viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
-      <circle cx="24" cy="24" r="21" stroke="currentColor" strokeWidth="2.5" />
-      <circle cx="24" cy="24" r="15" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 3" />
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       {checkmark ? (
-        <path
-          d="M16 24.5l5.5 5.5L33 18"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        <path d="M20 6L9 17l-5-5" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
-        <path
-          d="M18 18l12 12M30 18l-12 12"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        <path d="M7 7l10 10M17 7L7 17" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
       )}
     </svg>
   );
