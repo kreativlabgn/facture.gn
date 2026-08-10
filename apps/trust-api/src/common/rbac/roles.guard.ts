@@ -50,21 +50,29 @@ export class RolesGuard implements CanActivate {
     return true;
   }
 
-  // organizationId direct dans le body à la création, ou résolu depuis params.id —
-  // une facture (issue/void/...), une organisation (E8, trust-score) ou un avoir
-  // (C13, refunds) selon @OrganizationIdSource() (défaut "invoice", rétrocompatible).
+  // FAILLE CRITIQUE corrigée ici (découverte en E2E réel pendant la revue de ce
+  // diff, PRÉEXISTANTE à ce diff — voir historique) : quand la requête cible une
+  // ressource déjà existante (params.id présent — issue/void/trust-score/refunds/
+  // merge client/...), organizationId résolu depuis params.id doit TOUJOURS
+  // primer sur body/query, jamais l'inverse. body/query sont fournis par
+  // l'appelant et n'ont AUCUNE valeur probante sur l'organisation réelle de la
+  // ressource ciblée — un attaquant authentifié sur SA PROPRE organisation
+  // pouvait mentir sur organizationId (body OU, depuis ce diff, query) pour
+  // faire passer la vérification de rôle contre son propre membership légitime,
+  // puis le SERVICE (issue(), void(), ...) opérait quand même sur la VRAIE
+  // ressource ciblée par params.id, jamais revérifiée contre l'organizationId
+  // effectivement autorisé — vérifié en E2E réel : un attaquant B (owner de sa
+  // propre organisation B) a réussi à ÉMETTRE (signature Ed25519 réelle) une
+  // facture appartenant à l'organisation A, sans aucun membership sur A, en
+  // envoyant `{"organizationId": "<org B>"}` dans le body (préexistant) ou
+  // `?organizationId=<org B>` en query (introduit par ce diff). Seul un
+  // organizationId direct au CORPS d'une création (aucun params.id, la
+  // ressource n'existe pas encore — POST /invoices, etc.) est légitimement
+  // fourni par l'appelant, jamais quand une ressource pré-existante est ciblée.
   private async resolveOrganizationId(
     request: any,
     idSource: "invoice" | "organization" | "credit-note" | "customer" | "branch",
   ): Promise<string> {
-    if (request.body?.organizationId) {
-      return request.body.organizationId;
-    }
-    // Routes de liste (GET /invoices?organizationId=, GET /customers?organizationId=) —
-    // aucun body ni :id à résoudre, l'organisation est directement le filtre demandé.
-    if (request.query?.organizationId) {
-      return request.query.organizationId;
-    }
     if (request.params?.id) {
       // findUnique + 404 explicite plutôt que findUniqueOrThrow : une NotFoundError
       // Prisma non interceptée fuiterait en 500 brut plutôt qu'une réponse propre.
@@ -104,6 +112,16 @@ export class RolesGuard implements CanActivate {
         throw new NotFoundException(`Facture ${request.params.id} introuvable`);
       }
       return invoice.organizationId;
+    }
+    // Atteint uniquement en l'absence de params.id — une création (POST /invoices,
+    // organizationId fait partie de CE QUI EST CRÉÉ, rien à usurper) ou une route
+    // de liste (GET /invoices?organizationId=, aucune ressource pré-existante à
+    // résoudre autrement que par le filtre explicitement demandé).
+    if (request.body?.organizationId) {
+      return request.body.organizationId;
+    }
+    if (request.query?.organizationId) {
+      return request.query.organizationId;
     }
     throw new ForbiddenException("Impossible de déterminer l'organisation ciblée par cette requête");
   }
