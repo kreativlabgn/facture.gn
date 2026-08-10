@@ -5,6 +5,7 @@ import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
 import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organization.dto";
+import type { CreateFromApipDto } from "./dto/create-from-apip.dto";
 
 const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
 
@@ -162,5 +163,38 @@ export class OrganizationsService {
     const ratio = totalAmount > 0n ? Number(verifiedAmount) / Number(totalAmount) : null;
 
     return { totalAmount, verifiedAmount, ratio };
+  }
+
+  // F11, ADR-077 — auto-création depuis un webhook APIP signé (voir
+  // PartnerWebhookAuthGuard). AUCUN OrganizationMember créé : personne ne s'est
+  // encore inscrite pour revendiquer cette organisation (mécanisme de
+  // réclamation hors scope, non scaffoldé) — contrairement à create()/
+  // createAssisted(), qui créent toujours un owner dans la même transaction.
+  // commercialTier/dgiVerificationStatus déjà "freemium"/"unverified" par
+  // défaut du schema, jamais redondants ici.
+  //
+  // Idempotence : Organization.nif est déjà @unique — une redélivraison webhook
+  // (même NIF, ADR-016) percute nativement cette contrainte. Plutôt qu'un
+  // stockage de clés d'idempotence dédié, on capture la collision et on
+  // retourne l'organisation existante — sémantique idempotente correcte (même
+  // entrée → même résultat, jamais une erreur), sans nouvelle infrastructure.
+  async createFromApip(dto: CreateFromApipDto) {
+    try {
+      return await this.prisma.organization.create({
+        data: {
+          name: dto.name,
+          regimeFiscal: dto.regimeFiscal,
+          legalForm: dto.legalForm,
+          nif: dto.nif,
+          rccm: dto.rccm,
+          registrationSource: "apip",
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error, "nif")) {
+        return this.prisma.organization.findUniqueOrThrow({ where: { nif: dto.nif } });
+      }
+      throw error;
+    }
   }
 }

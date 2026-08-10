@@ -271,3 +271,65 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
     );
   });
 });
+
+const APIP_DTO = {
+  name: "Boutique Kaloum SARL",
+  regimeFiscal: "normal_tva" as const,
+  legalForm: "commercial" as const,
+  nif: "GN99887766",
+  rccm: "GC-KAL-2026-A-001",
+};
+
+function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>) {
+  const prisma: any = {
+    organization: {
+      create: createImpl ?? vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
+    },
+  };
+  return prisma;
+}
+
+describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)", () => {
+  it("crée l'organisation avec registrationSource apip, aucun OrganizationMember", async () => {
+    const prisma = createFakePrismaForCreateFromApip();
+    const service = new OrganizationsService(prisma as any);
+
+    await service.createFromApip(APIP_DTO);
+
+    expect(prisma.organization.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: APIP_DTO.name,
+        regimeFiscal: APIP_DTO.regimeFiscal,
+        legalForm: APIP_DTO.legalForm,
+        nif: APIP_DTO.nif,
+        rccm: APIP_DTO.rccm,
+        registrationSource: "apip",
+      }),
+    });
+    expect(prisma.organizationMember).toBeUndefined();
+  });
+
+  it("idempotent : une redélivraison webhook (même NIF) retourne l'organisation existante, jamais une erreur", async () => {
+    const createImpl = vi.fn().mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["nif"] },
+    });
+    const prisma = createFakePrismaForCreateFromApip(createImpl);
+
+    const service = new OrganizationsService(prisma as any);
+
+    const result = await service.createFromApip(APIP_DTO);
+
+    expect(prisma.organization.findUniqueOrThrow).toHaveBeenCalledWith({ where: { nif: APIP_DTO.nif } });
+    expect(result.id).toBe("org-1");
+  });
+
+  it("propage toute autre erreur inattendue (pas une collision NIF)", async () => {
+    const createImpl = vi.fn().mockRejectedValue(new Error("panne DB inattendue"));
+    const prisma = createFakePrismaForCreateFromApip(createImpl);
+    const service = new OrganizationsService(prisma as any);
+
+    await expect(service.createFromApip(APIP_DTO)).rejects.toThrow(/panne DB inattendue/);
+  });
+});
