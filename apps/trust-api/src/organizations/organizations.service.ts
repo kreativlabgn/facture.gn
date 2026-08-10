@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, Inject, Injectable, Logger } fro
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
 import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organization.dto";
@@ -13,7 +14,10 @@ const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
 export class OrganizationsService {
   private readonly logger = new Logger(OrganizationsService.name);
 
-  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
+    private readonly signingKeyService: OrganizationSigningKeyService,
+  ) {}
 
   // Le créateur devient owner dans la même transaction — aucune organisation ne
   // doit exister sans au moins un membre pouvant en gérer les accès.
@@ -33,6 +37,9 @@ export class OrganizationsService {
         await tx.organizationMember.create({
           data: { organizationId: organization.id, userId: creatorUserId, role: "owner" },
         });
+        // A3, ADR-026 — "identité cryptographique unique" par organisation, jamais
+        // une organisation sans clé : provisionnée dans la MÊME transaction.
+        await this.signingKeyService.provisionRootKey(organization.id, tx);
         return organization;
       });
     } catch (error) {
@@ -125,6 +132,10 @@ export class OrganizationsService {
             data: { fieldAgentUserId, organizationId: organization.id, consentRecordedAt: new Date() },
           });
 
+          // A3, ADR-026 — même discipline que create() : jamais une organisation
+          // sans clé, provisionnée dans la même transaction.
+          await this.signingKeyService.provisionRootKey(organization.id, tx);
+
           return organization;
         });
       } catch (error) {
@@ -180,15 +191,23 @@ export class OrganizationsService {
   // entrée → même résultat, jamais une erreur), sans nouvelle infrastructure.
   async createFromApip(dto: CreateFromApipDto) {
     try {
-      return await this.prisma.organization.create({
-        data: {
-          name: dto.name,
-          regimeFiscal: dto.regimeFiscal,
-          legalForm: dto.legalForm,
-          nif: dto.nif,
-          rccm: dto.rccm,
-          registrationSource: "apip",
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const organization = await tx.organization.create({
+          data: {
+            name: dto.name,
+            regimeFiscal: dto.regimeFiscal,
+            legalForm: dto.legalForm,
+            nif: dto.nif,
+            rccm: dto.rccm,
+            registrationSource: "apip",
+          },
+        });
+        // A3, ADR-026 — même discipline que create()/createAssisted(). Jamais sur
+        // la branche idempotente ci-dessous : provisionner une 2e clé pour une
+        // organisation qui en a déjà une violerait la contrainte @unique et
+        // casserait la redélivraison webhook (ADR-016).
+        await this.signingKeyService.provisionRootKey(organization.id, tx);
+        return organization;
       });
     } catch (error) {
       if (isUniqueConstraintViolation(error, "nif")) {

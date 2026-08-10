@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { OrganizationsService } from "./organizations.service";
 
+// A3 — partagé par tous les tests de ce fichier (règle des 3, même discipline
+// que les autres helpers de fixture) : les 3 chemins de création provisionnent
+// une clé racine, mais la plupart des tests existants ne portent pas sur CE
+// comportement — un double par défaut minimal suffit.
+function createFakeSigningKeyService() {
+  return { provisionRootKey: vi.fn().mockResolvedValue({ id: "signing-key-1", publicKey: "pubkey-hex" }) };
+}
+
 function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
   const prisma: any = {
     organization: {
@@ -17,7 +25,7 @@ function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
 describe("OrganizationsService", () => {
   it("persiste le régime fiscal fourni par le client, jamais un défaut serveur", async () => {
     const prisma = createFakePrisma();
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.create(
       { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
@@ -31,7 +39,7 @@ describe("OrganizationsService", () => {
 
   it("crée automatiquement le créateur comme owner de la nouvelle organisation", async () => {
     const prisma = createFakePrisma();
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.create(
       { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
@@ -49,7 +57,7 @@ describe("OrganizationsService", () => {
       meta: { target: ["nif"] },
     });
     const prisma = createFakePrisma(vi.fn().mockRejectedValue(uniqueViolation));
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
       service.create(
@@ -61,13 +69,26 @@ describe("OrganizationsService", () => {
 
   it("crée une organisation sans NIF ni eTax — inscription self-service jamais bloquée (B1/B4)", async () => {
     const prisma = createFakePrisma();
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.create({ name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial" }, "user-1");
 
     expect(prisma.organization.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ nif: undefined, etaxNumber: undefined }),
     });
+  });
+
+  it("provisionne une clé racine Ed25519 pour la nouvelle organisation, dans la même transaction (A3, ADR-026)", async () => {
+    const prisma = createFakePrisma();
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+
+    await service.create(
+      { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
+      "user-1",
+    );
+
+    expect(signingKeyService.provisionRootKey).toHaveBeenCalledWith("org-1", expect.anything());
   });
 });
 
@@ -88,7 +109,7 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
       etaxNumber: null,
       dgiVerificationStatus: "unverified",
     });
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(service.verifyDgi("org-1")).rejects.toThrow(/NIF/);
     expect(prisma.organization.update).not.toHaveBeenCalled();
@@ -101,7 +122,7 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
       etaxNumber: "ETAX-001",
       dgiVerificationStatus: "unverified",
     });
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.verifyDgi("org-1");
 
@@ -119,7 +140,7 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
       etaxNumber: "ETAX-001",
       dgiVerificationStatus: "verified",
     });
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.verifyDgi("org-1");
 
@@ -174,7 +195,7 @@ const ASSISTED_DTO = {
 describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
   it("refuse si l'appelant n'a pas le statut agent terrain (isFieldAgent=false)", async () => {
     const prisma = createFakePrismaForAssisted({ isFieldAgent: false });
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(service.createAssisted("agent-1", ASSISTED_DTO)).rejects.toThrow(/agent terrain/);
     expect(prisma.organization.create).not.toHaveBeenCalled();
@@ -182,7 +203,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
   it("crée le marchand comme owner — jamais de membership pour l'agent terrain lui-même", async () => {
     const prisma = createFakePrismaForAssisted();
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -196,7 +217,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
   it("enregistre une AssistedSession traçant l'agent, l'organisation et le consentement horodaté", async () => {
     const prisma = createFakePrismaForAssisted();
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -211,12 +232,22 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
   it("réessaie la génération du code-compte jusqu'à 3 tentatives en cas de collision", async () => {
     const prisma = createFakePrismaForAssisted({ accountCodeCollisions: 2 });
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.createAssisted("agent-1", ASSISTED_DTO);
 
     expect(result).toEqual({ id: "org-1" });
     expect(prisma.organization.create).toHaveBeenCalledTimes(3);
+  });
+
+  it("provisionne une clé racine pour l'organisation créée en inscription assistée (A3, ADR-026)", async () => {
+    const prisma = createFakePrismaForAssisted();
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+
+    await service.createAssisted("agent-1", ASSISTED_DTO);
+
+    expect(signingKeyService.provisionRootKey).toHaveBeenCalledWith("org-1", expect.anything());
   });
 });
 
@@ -235,7 +266,7 @@ function createFakePrismaForVerifiedPaymentRatio(totalSum: bigint | null, verifi
 describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
   it("calcule le ratio paiements vérifiés / total des encaissements", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(500_000n, 300_000n);
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.getVerifiedPaymentRatio("org-1");
 
@@ -244,7 +275,7 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
 
   it("renvoie ratio:null pour une organisation sans aucun paiement — jamais un faux 0%", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(null, null);
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.getVerifiedPaymentRatio("org-1");
 
@@ -253,7 +284,7 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
 
   it("renvoie ratio:1 quand 100% des encaissements sont réglés par lien de paiement", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(400_000n, 400_000n);
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.getVerifiedPaymentRatio("org-1");
 
@@ -262,7 +293,7 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
 
   it("exclut toujours les arrhes des deux totaux — bucket financier distinct (C5)", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(500_000n, 300_000n);
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.getVerifiedPaymentRatio("org-1");
 
@@ -286,6 +317,9 @@ function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>
       create: createImpl ?? vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
     },
+    // A3 — atomicité création+provisionnement, même précédent que create()/
+    // createAssisted() : jamais une organisation sans clé.
+    $transaction: vi.fn((callback: any) => callback(prisma)),
   };
   return prisma;
 }
@@ -293,7 +327,7 @@ function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>
 describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)", () => {
   it("crée l'organisation avec registrationSource apip, aucun OrganizationMember", async () => {
     const prisma = createFakePrismaForCreateFromApip();
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await service.createFromApip(APIP_DTO);
 
@@ -317,7 +351,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
     });
     const prisma = createFakePrismaForCreateFromApip(createImpl);
 
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     const result = await service.createFromApip(APIP_DTO);
 
@@ -328,8 +362,32 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
   it("propage toute autre erreur inattendue (pas une collision NIF)", async () => {
     const createImpl = vi.fn().mockRejectedValue(new Error("panne DB inattendue"));
     const prisma = createFakePrismaForCreateFromApip(createImpl);
-    const service = new OrganizationsService(prisma as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(service.createFromApip(APIP_DTO)).rejects.toThrow(/panne DB inattendue/);
+  });
+
+  it("provisionne une clé racine pour une création fraîche (A3, ADR-026)", async () => {
+    const prisma = createFakePrismaForCreateFromApip();
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+
+    await service.createFromApip(APIP_DTO);
+
+    expect(signingKeyService.provisionRootKey).toHaveBeenCalledWith("org-1", expect.anything());
+  });
+
+  it("ne provisionne JAMAIS de 2e clé sur une redélivraison idempotente — violerait la contrainte @unique", async () => {
+    const createImpl = vi.fn().mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["nif"] },
+    });
+    const prisma = createFakePrismaForCreateFromApip(createImpl);
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+
+    await service.createFromApip(APIP_DTO);
+
+    expect(signingKeyService.provisionRootKey).not.toHaveBeenCalled();
   });
 });

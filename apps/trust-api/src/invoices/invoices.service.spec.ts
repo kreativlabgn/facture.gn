@@ -42,15 +42,18 @@ function createFakeNumbering(number = "FG-2026-000001") {
   return { nextNumber: vi.fn().mockResolvedValue(number) };
 }
 
-function createFakeCertification() {
+// A3, ADR-026 — remplace le CertificationService global légataire injecté :
+// InvoicesService ne signe plus jamais avec la clé unique de la plateforme,
+// toujours avec la clé racine (déchiffrée) de l'organisation émettrice.
+function createFakeSigningKeyService() {
   return {
-    certify: vi.fn().mockReturnValue({
+    certifyForOrganization: vi.fn().mockResolvedValue({
       hash: "a".repeat(64),
       previousHash: "GENESIS",
       certificationId: "GN-GN123456-2026-ABCDEF",
       signature: "b".repeat(128),
+      signingKeyId: "signing-key-1",
     }),
-    verify: vi.fn().mockReturnValue(true),
   };
 }
 
@@ -78,7 +81,7 @@ describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -98,7 +101,7 @@ describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -117,7 +120,7 @@ describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -137,7 +140,7 @@ describe("InvoicesService — remise globale à la création (E2)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -159,7 +162,7 @@ describe("InvoicesService — remise globale à la création (E2)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -181,7 +184,7 @@ describe("InvoicesService — montant de référence en devise étrangère (I3, 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -206,7 +209,7 @@ describe("InvoicesService — montant de référence en devise étrangère (I3, 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -254,7 +257,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -269,7 +272,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -291,7 +294,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -313,7 +316,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -347,7 +350,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -382,7 +385,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -409,7 +412,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -439,7 +442,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -477,7 +480,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -494,7 +497,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -518,7 +521,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -536,7 +539,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -556,7 +559,7 @@ describe("InvoicesService — immutabilité post-émission", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -572,7 +575,7 @@ describe("InvoicesService — immutabilité post-émission", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -599,7 +602,7 @@ describe("InvoicesService — machine à états", () => {
       },
     });
     const numbering = createFakeNumbering();
-    const certification = createFakeCertification();
+    const certification = createFakeSigningKeyService();
     const service = new InvoicesService(
       prisma as any,
       numbering as any,
@@ -610,11 +613,36 @@ describe("InvoicesService — machine à états", () => {
     const result = await service.issue("inv-1");
 
     expect(numbering.nextNumber).toHaveBeenCalledWith("org-1", expect.any(Number));
-    expect(certification.certify).toHaveBeenCalledWith(
+    expect(certification.certifyForOrganization).toHaveBeenCalledWith(
+      "org-1",
       expect.objectContaining({ previousHash: "GENESIS" }),
     );
     expect(result.status).toBe("issued");
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
+  });
+
+  it("persiste signingKeyId — la facture référence la clé racine de son organisation, jamais la clé globale légataire (A3, ADR-026)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect(result.signingKeyId).toBe("signing-key-1");
   });
 
   it("émet une facture pour une organisation sans NIF avec le placeholder de certification (B1/B4)", async () => {
@@ -632,7 +660,7 @@ describe("InvoicesService — machine à états", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: null, commercialTier: "freemium" }),
       },
     });
-    const certification = createFakeCertification();
+    const certification = createFakeSigningKeyService();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -642,7 +670,8 @@ describe("InvoicesService — machine à états", () => {
 
     await service.issue("inv-1");
 
-    expect(certification.certify).toHaveBeenCalledWith(
+    expect(certification.certifyForOrganization).toHaveBeenCalledWith(
+      "org-1",
       expect.objectContaining({ organizationNif: "UNVERIFI" }),
     );
   });
@@ -656,7 +685,7 @@ describe("InvoicesService — machine à états", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -672,7 +701,7 @@ describe("InvoicesService — machine à états", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -690,7 +719,7 @@ describe("InvoicesService — machine à états", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -717,7 +746,7 @@ describe("InvoicesService — machine à états", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -744,7 +773,7 @@ describe("InvoicesService — machine à états", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -774,7 +803,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -802,7 +831,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -833,7 +862,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -852,7 +881,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -864,7 +893,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
   });
 
   it("certifie la facture strictement à l'identique, que le lien de paiement réussisse ou échoue", async () => {
-    const certification = createFakeCertification();
+    const certification = createFakeSigningKeyService();
 
     const prismaSucces = createFakePrisma({
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
@@ -924,7 +953,7 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -950,7 +979,7 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -981,7 +1010,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1001,7 +1030,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1020,7 +1049,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1039,7 +1068,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1073,7 +1102,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1093,7 +1122,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1112,7 +1141,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1131,7 +1160,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1181,7 +1210,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
@@ -1203,7 +1232,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
@@ -1225,7 +1254,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
@@ -1245,7 +1274,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(null) as any,
     );
 
@@ -1263,7 +1292,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
@@ -1280,7 +1309,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const serviceVoided = new InvoicesService(
       prismaVoided as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
     await expect(serviceVoided.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
@@ -1294,7 +1323,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const servicePaid = new InvoicesService(
       prismaPaid as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
     await expect(servicePaid.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
@@ -1311,7 +1340,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
@@ -1332,7 +1361,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       paymentLinkClient as any,
     );
 
@@ -1397,7 +1426,7 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1413,7 +1442,7 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1425,7 +1454,7 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1438,7 +1467,7 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1464,7 +1493,7 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 
@@ -1488,7 +1517,7 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
-      createFakeCertification() as any,
+      createFakeSigningKeyService() as any,
       createFakePaymentLinkClient() as any,
     );
 

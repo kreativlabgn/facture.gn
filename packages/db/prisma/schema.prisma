@@ -302,8 +302,31 @@ model Organization {
   mandates         Mandate[]
   customers        Customer[]
   branches         Branch[]
+  signingKey       OrganizationSigningKey?
 
   @@map("organization")
+}
+
+// A3, ADR-026 — "clé racine Ed25519 en HSM, jamais exportée". Une seule clé par
+// organisation pour cette story (organizationId @unique) — le schéma reste
+// rotation-safe (Invoice.signingKeyId référence CETTE clé précise, jamais
+// "la clé courante de l'organisation") mais aucun mécanisme de rotation actif
+// n'est construit ici. encryptedPrivateKey : chiffrement enveloppe AES-256-GCM
+// (envelope-encryption.ts) avec CERTIFICATION_MASTER_KEY — jamais en clair au
+// repos, jamais journalisé. Approximation MVP honnête d'un vrai HSM cloud
+// (aucun SDK Vault/KMS dans ce repo) — même posture déjà documentée pour
+// CERTIFICATION_PRIVATE_KEY (TODO ADR-026/A3 dans certification.module.ts).
+model OrganizationSigningKey {
+  id                  String   @id @default(uuid())
+  organizationId      String   @unique @map("organization_id")
+  publicKey           String   @map("public_key")
+  encryptedPrivateKey String   @map("encrypted_private_key")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  invoices     Invoice[]
+
+  @@map("organization_signing_key")
 }
 
 // ADR-045, B5 — trace de l'inscription assistée. Jamais de membership pour l'agent
@@ -441,13 +464,20 @@ model Invoice {
   hash         String?
   previousHash String? @map("previous_hash")
   signature    Bytes?
+  // A3 — null = signée avec l'ancienne clé globale légataire (toutes les
+  // factures émises avant cette story, jamais retouchées, jamais re-vérifiées
+  // différemment). Non-null = signée avec la clé racine propre à l'organisation
+  // référencée. Ne JAMAIS migrer une facture existante vers l'autre valeur —
+  // un système de confiance ne peut jamais invalider une certification déjà émise.
+  signingKeyId String? @map("signing_key_id")
 
   issuedAt  DateTime? @map("issued_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
-  organization  Organization   @relation(fields: [organizationId], references: [id])
-  branch        Branch?        @relation(fields: [branchId], references: [id])
-  customer      Customer?      @relation(fields: [customerId], references: [id])
+  organization  Organization            @relation(fields: [organizationId], references: [id])
+  branch        Branch?                 @relation(fields: [branchId], references: [id])
+  customer      Customer?               @relation(fields: [customerId], references: [id])
+  signingKey    OrganizationSigningKey? @relation(fields: [signingKeyId], references: [id])
   convertedFrom Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
   convertedInto Invoice[]      @relation("InvoiceConversion")
   lines         InvoiceLine[]
