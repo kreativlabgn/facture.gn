@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* Charte graphique facture.gn v1.3 (verrouillée) — Navy Autorité + Jaune
+   Fatoora, jamais les couleurs du drapeau guinéen. Tokens recopiés depuis la
+   charte et la maquette de référence (Desktop/facture.gn/V/), ÉCRAN 04
+   Vérification. Les teintes de texte des pastilles de statut (*-pill-text)
+   sont assombries de 2 à 24% par rapport à la couleur sémantique brute de la
+   charte — celle-ci ne passe pas WCAG AA (4.5:1) sur son propre fond teinté
+   à 12% ; même famille de teinte, juste plus foncée pour rester lisible. */
+:root {
+  --color-navy-950: #0b1d3a;
+  --color-navy-800: #132447;
+  --color-navy-700: rgba(11, 29, 58, 0.88);
+  --color-navy-600: rgba(11, 29, 58, 0.66);
+  --color-navy-400: rgba(11, 29, 58, 0.44);
+  --color-navy-200: rgba(11, 29, 58, 0.22);
+  --color-navy-100: rgba(11, 29, 58, 0.12);
+  --color-navy-50: rgba(11, 29, 58, 0.08);
+
+  --color-yellow: #f2b705;
+  --color-grey: #f5f7f9;
+
+  --color-green: #16a34a;
+  --color-green-text: #117c38;
+  --color-green-bg: rgba(22, 163, 74, 0.12);
+
+  --color-amber: #d97706;
+  --color-amber-text: #a55a05;
+  --color-amber-bg: rgba(217, 119, 6, 0.12);
+
+  --color-blue: #2563eb;
+  --color-blue-text: #2461e6;
+  --color-blue-bg: rgba(37, 99, 235, 0.12);
+
+  --color-red: #dc2626;
+  --color-red-text: #ca2323;
+  --color-red-bg: rgba(220, 38, 38, 0.12);
+
+  --background: var(--color-grey);
+  --foreground: var(--color-navy-950);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-navy-950: var(--color-navy-950);
+  --color-navy-800: var(--color-navy-800);
+  --color-navy-700: var(--color-navy-700);
+  --color-navy-600: var(--color-navy-600);
+  --color-navy-400: var(--color-navy-400);
+  --color-navy-200: var(--color-navy-200);
+  --color-navy-100: var(--color-navy-100);
+  --color-navy-50: var(--color-navy-50);
+
+  --color-yellow: var(--color-yellow);
+  --color-grey: var(--color-grey);
+
+  --color-green: var(--color-green);
+  --color-green-text: var(--color-green-text);
+  --color-green-bg: var(--color-green-bg);
+  --color-amber: var(--color-amber);
+  --color-amber-text: var(--color-amber-text);
+  --color-amber-bg: var(--color-amber-bg);
+  --color-blue: var(--color-blue);
+  --color-blue-text: var(--color-blue-text);
+  --color-blue-bg: var(--color-blue-bg);
+  --color-red: var(--color-red);
+  --color-red-text: var(--color-red-text);
+  --color-red-bg: var(--color-red-bg);
+
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-poppins);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
