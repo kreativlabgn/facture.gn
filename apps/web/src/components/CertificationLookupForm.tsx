@@ -8,6 +8,10 @@ import { useId, useState } from "react";
 // SemiBold visible au-dessus (pas seulement aria-label — un placeholder seul
 // ne suffit pas en plein soleil sur un écran d'entrée de gamme, DAT
 // accessibilité). Bouton "primary" : fond Navy, texte blanc, radius 10px.
+// Texte du champ en Inter (pas JetBrains Mono) — la maquette de référence
+// fixe explicitement `.field input{font-family:'Inter'}`, le mono de la
+// charte est réservé à l'AFFICHAGE d'identifiants déjà certifiés, pas à la
+// saisie utilisateur.
 export function CertificationLookupForm() {
   const router = useRouter();
   const [value, setValue] = useState("");
@@ -33,7 +37,7 @@ export function CertificationLookupForm() {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="GN-XXXXXXXX-2026-XXXXXX"
-          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 font-mono text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
+          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
         />
       </div>
       <button

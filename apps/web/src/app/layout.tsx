@@ -4,11 +4,18 @@ import "./globals.css";
 
 // Système typographique verrouillé par la Charte Graphique v1.3 : Poppins
 // (marque, titres — jamais en dessous de 12px), Inter (texte courant),
-// JetBrains Mono (identifiants vérifiables — certification ID, montants,
-// hash — chasse fixe pour lever toute ambiguïté 0/O, 1/l).
+// JetBrains Mono (identifiants vérifiables déjà certifiés — certification
+// ID, montants, hash, jamais la saisie utilisateur — chasse fixe pour lever
+// toute ambiguïté 0/O, 1/l). Poids restreints aux poids RÉELLEMENT utilisés
+// par les composants (vérifié par grep sur tout apps/web/src), pas une
+// gamme large par défaut — chaque poids chargé est un aller-retour réseau
+// de plus sur une connexion mobile guinéenne coûteuse (DAT). La charte ne
+// définit d'ailleurs qu'UN SEUL poids mono ("code" = Bold, 700) — aucun
+// poids intermédiaire mono ne devrait donc jamais être introduit ici.
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+  weight: ["400", "600"],
   display: "swap",
 });
 
@@ -22,7 +29,7 @@ const poppins = Poppins({
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["700"],
   display: "swap",
 });
 

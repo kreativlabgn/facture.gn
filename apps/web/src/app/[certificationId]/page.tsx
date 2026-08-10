@@ -44,7 +44,7 @@ function NotFound({ certificationId }: { certificationId: string }) {
     <div className="rounded-2xl border border-navy-100 bg-white p-8 text-center">
       <p className="font-display text-lg font-bold text-navy-950">Aucune facture ne correspond à cet identifiant</p>
       <p className="mx-auto mt-3 max-w-sm text-sm text-navy-600">
-        Vérifiez que l&apos;identifiant <span className="font-mono text-navy-950">{certificationId}</span> a été
+        Vérifiez que l&apos;identifiant <span className="font-mono font-bold text-navy-950">{certificationId}</span> a été
         copié intégralement, sans espace ni caractère manquant.
       </p>
     </div>
