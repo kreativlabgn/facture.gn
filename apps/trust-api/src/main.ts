@@ -11,7 +11,12 @@ import { AppModule } from "./app.module";
 };
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true (F11, ADR-082) — expose request.rawBody (Buffer) SANS affecter
+  // le parsing JSON normal des autres routes. Requis par PartnerWebhookAuthGuard
+  // pour vérifier HMAC-SHA256 sur le corps EXACTEMENT tel que reçu — un
+  // JSON.stringify(request.body) reconstruit ne serait pas bit-à-bit identique
+  // au corps réellement signé par l'expéditeur (ordre des clés, espacement).
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   const config = new DocumentBuilder()
     .setTitle("facture.gn — Trust API")

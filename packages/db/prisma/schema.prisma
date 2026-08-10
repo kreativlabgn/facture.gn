@@ -56,6 +56,33 @@ enum RegistrationSource {
   partner_3ae
 }
 
+// F11, ADR-077/078/082 — "APIP en premier lieu", seul type avec une intégration
+// technique réelle (webhook signé). fodip/partner_3ae scaffoldés pour cohérence
+// ERD mais "restent hors plateforme... aucune intégration technique" (ADR-078) —
+// jamais de webhook réel pour ces deux-là dans cette story.
+enum PartnerType {
+  apip
+  fodip
+  partner_3ae
+}
+
+enum PartnerStatus {
+  active
+  suspended
+  expired
+}
+
+model Partner {
+  id            String        @id @default(uuid())
+  type          PartnerType
+  name          String
+  conventionRef String?       @map("convention_ref")
+  status        PartnerStatus @default(active)
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@map("partner")
+}
+
 enum DgiVerificationStatus {
   unverified
   pending
