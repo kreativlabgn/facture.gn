@@ -51,6 +51,16 @@ export class PracticesController {
     return this.mandatesService.listAccessibleOrganizations(practiceId, user.id);
   }
 
+  // Point d'entrée manquant jusqu'ici : après login, rien ne permettait de
+  // découvrir à quelle(s) practice(s) l'utilisateur appartient (même gap déjà
+  // comblé côté organisations, OrganizationsController.listMine()). Distinct
+  // de GET /practices ci-dessous (liste TOUTES les CGA de la plateforme).
+  // Aucun @Roles() : filtrage entièrement dans le service via CurrentUser.
+  @Get("mine")
+  listMine(@CurrentUser() user: CurrentUserPayload) {
+    return this.practicesService.listMine(user.id);
+  }
+
   // F12, ADR-078 — "liste des CGA actifs" pour le bouton « Adhérer à un CGA ».
   // "cga" hardcodé, JAMAIS un paramètre client (finding sécurité corrigé avant
   // merge, dev-security-reviewer) : accepter un type arbitraire exposerait

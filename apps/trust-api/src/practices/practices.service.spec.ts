@@ -138,6 +138,43 @@ describe("PracticesService — inviter un collaborateur (F8, ADR-068)", () => {
   });
 });
 
+describe("PracticesService — lister les practices dont je suis membre", () => {
+  it("retourne les practices dont l'utilisateur est membre actif, avec son rôle sur chacune", async () => {
+    const prisma: any = {
+      practiceMember: {
+        findMany: vi.fn().mockResolvedValue([
+          { role: "practice_admin", practice: { id: "practice-1", name: "Cabinet Mamadou & Associés", type: "cabinet_comptable" } },
+          { role: "accountant_external", practice: { id: "practice-2", name: "CGA Kaloum", type: "cga" } },
+        ]),
+      },
+    };
+    const service = new PracticesService(prisma as any);
+
+    const result = await service.listMine("user-1");
+
+    expect(prisma.practiceMember.findMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", leftAt: null },
+      include: { practice: true },
+    });
+    expect(result).toEqual([
+      { id: "practice-1", name: "Cabinet Mamadou & Associés", type: "cabinet_comptable", role: "practice_admin" },
+      { id: "practice-2", name: "CGA Kaloum", type: "cga", role: "accountant_external" },
+    ]);
+  });
+
+  it("ne retourne jamais un membership quitté (leftAt renseigné) — filtré côté requête", async () => {
+    const prisma: any = { practiceMember: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new PracticesService(prisma as any);
+
+    const result = await service.listMine("user-1");
+
+    expect(result).toEqual([]);
+    expect(prisma.practiceMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ leftAt: null }) }),
+    );
+  });
+});
+
 describe("PracticesService — lister par type (F12, ADR-078)", () => {
   it("liste les practices du type demandé", async () => {
     const prisma: any = {

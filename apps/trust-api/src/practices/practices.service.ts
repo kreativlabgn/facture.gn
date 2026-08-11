@@ -71,4 +71,18 @@ export class PracticesService {
   async findAllByType(type: ProfessionalPracticeType) {
     return this.prisma.professionalPractice.findMany({ where: { type } });
   }
+
+  // Distinct de findAllByType("cga") ci-dessus (liste TOUTES les CGA de la
+  // plateforme, pour en rejoindre une) — ici, uniquement les practices dont
+  // l'utilisateur connecté est DÉJÀ membre (tout type), pour le dashboard
+  // cabinet/CGA. Même gap que celui déjà comblé côté organisations
+  // (OrganizationsService.listMine()) : rien n'exposait jusqu'ici "à
+  // quelle(s) practice(s) appartient l'utilisateur connecté".
+  async listMine(userId: string) {
+    const memberships = await this.prisma.practiceMember.findMany({
+      where: { userId, leftAt: null },
+      include: { practice: true },
+    });
+    return memberships.map((membership) => ({ ...membership.practice, role: membership.role }));
+  }
 }
