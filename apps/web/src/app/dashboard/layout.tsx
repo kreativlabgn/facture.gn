@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireSessionToken } from "@/lib/session";
 import { listMyOrganizations } from "@/lib/trust-api";
+import { Wordmark } from "@/components/Wordmark";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Accueil" },
@@ -22,11 +23,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex min-h-full flex-col">
       <header className="border-b border-navy-100 bg-white">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <Link href="/dashboard" className="flex items-baseline font-display text-xl font-extrabold tracking-tight text-navy-950" aria-label="facture.gn — Accueil">
-            facture
-            <span aria-hidden="true" className="mx-[2px] mb-[3px] inline-block h-[7px] w-[7px] rounded-full bg-yellow" />
-            gn
-          </Link>
+          <Wordmark href="/dashboard" ariaLabel="facture.gn — Accueil" />
           <nav className="flex flex-wrap gap-1 text-sm">
             {NAV_ITEMS.map((item) => (
               <Link

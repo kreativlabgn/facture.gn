@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { requireSessionToken } from "@/lib/session";
 import { listMyPractices } from "@/lib/trust-api";
+import { Wordmark } from "@/components/Wordmark";
 
 const PRACTICE_TYPE_LABELS: Record<string, string> = {
   cabinet_comptable: "Cabinet comptable",
@@ -24,11 +24,7 @@ export default async function CabinetLayout({ children }: { children: React.Reac
     <div className="flex min-h-full flex-col">
       <header className="border-b border-navy-100 bg-white">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <Link href="/cabinet" className="flex items-baseline font-display text-xl font-extrabold tracking-tight text-navy-950" aria-label="facture.gn — Accueil cabinet">
-            facture
-            <span aria-hidden="true" className="mx-[2px] mb-[3px] inline-block h-[7px] w-[7px] rounded-full bg-yellow" />
-            gn
-          </Link>
+          <Wordmark href="/cabinet" ariaLabel="facture.gn — Accueil cabinet" />
           {practice ? (
             <span className="text-sm text-navy-600">
               <span className="font-semibold text-navy-950">{practice.name}</span>
