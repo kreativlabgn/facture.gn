@@ -222,6 +222,45 @@ export async function issueInvoice(token: string, invoiceId: string): Promise<In
   return response.json();
 }
 
+// Mirroir de la forme aplatie retournée par GET /practices/mine
+// (practices.service.ts:listMine — practice + role du user connecté).
+export interface PracticeSummary {
+  id: string;
+  name: string;
+  type: string;
+  tier: string;
+  role: string;
+}
+
+export async function listMyPractices(token: string): Promise<PracticeSummary[]> {
+  const response = await authenticatedFetch("/practices/mine", token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les cabinets", response.status);
+  }
+  return response.json();
+}
+
+// Mirroir de GET /practices/:id/organizations — mandats actifs uniquement
+// (mandates.service.ts:listAccessibleOrganizations), organisation imbriquée
+// limitée à id+name (c'est tout ce que l'endpoint sélectionne côté trust-api).
+export interface AccessibleOrganizationMandate {
+  id: string;
+  organizationId: string;
+  grantedRole: string;
+  organization: { id: string; name: string };
+}
+
+export async function listAccessibleOrganizations(
+  token: string,
+  practiceId: string,
+): Promise<AccessibleOrganizationMandate[]> {
+  const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/organizations`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les organisations clientes", response.status);
+  }
+  return response.json();
+}
+
 export async function fetchInvoiceVerification(
   certificationId: string,
 ): Promise<PublicInvoiceVerification | null> {
