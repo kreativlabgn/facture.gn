@@ -81,6 +81,27 @@ export async function listMyOrganizations(token: string): Promise<OrganizationSu
   return response.json();
 }
 
+// Mirroir de GET /organizations/:id — champs affichés sur la page paramètres
+// uniquement (pas un mirroir exhaustif du modèle Organization complet).
+export interface OrganizationDetail {
+  id: string;
+  name: string;
+  regimeFiscal: string;
+  legalForm: string;
+  nif: string | null;
+  rccm: string | null;
+  commercialTier: string;
+  dgiVerificationStatus: string;
+}
+
+export async function getOrganization(token: string, organizationId: string): Promise<OrganizationDetail> {
+  const response = await authenticatedFetch(`/organizations/${encodeURIComponent(organizationId)}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger l'organisation", response.status);
+  }
+  return response.json();
+}
+
 // Champs consommés par le dashboard uniquement (pas un mirroir exhaustif du
 // modèle Invoice complet — bien plus large côté trust-api, non pertinent ici).
 export interface InvoiceListItem {
@@ -104,6 +125,99 @@ export async function listInvoices(
   const response = await authenticatedFetch(`/invoices?${params.toString()}`, token);
   if (!response.ok) {
     throw new TrustApiError("Impossible de charger les factures", response.status);
+  }
+  return response.json();
+}
+
+// Champs consommés par le sélecteur client de l'émission de facture et la
+// section "liste des clients" — pas un mirroir exhaustif de Customer.
+export interface CustomerListItem {
+  id: string;
+  name: string;
+  phone: string | null;
+  nif: string | null;
+}
+
+export async function listCustomers(
+  token: string,
+  organizationId: string,
+  pagination: { take?: number } = {},
+): Promise<CustomerListItem[]> {
+  const params = new URLSearchParams({ organizationId });
+  if (pagination.take) {
+    params.set("take", String(pagination.take));
+  }
+  const response = await authenticatedFetch(`/customers?${params.toString()}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les clients", response.status);
+  }
+  return response.json();
+}
+
+export interface CreateCustomerInput {
+  organizationId: string;
+  name: string;
+  phone?: string;
+  nif?: string;
+}
+
+export async function createCustomer(token: string, input: CreateCustomerInput): Promise<CustomerListItem> {
+  const response = await authenticatedFetch("/customers", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Création du client impossible", response.status);
+  }
+  return response.json();
+}
+
+export interface CreateInvoiceLineInput {
+  description: string;
+  quantity: number;
+  // Centimes GNF (convention repo — voir schema.prisma), jamais des GNF
+  // directs : la conversion ×100 se fait dans le Server Action appelant,
+  // jamais côté formulaire client (l'utilisateur saisit des GNF naturels).
+  unitPrice: string;
+}
+
+export interface CreateInvoiceInput {
+  organizationId: string;
+  documentType: "invoice" | "proforma" | "quote";
+  customerId?: string;
+  lines: CreateInvoiceLineInput[];
+}
+
+export interface InvoiceDetail {
+  id: string;
+  number: string | null;
+  status: string;
+  totalTtc: string;
+  certificationId: string | null;
+}
+
+export async function createInvoice(token: string, input: CreateInvoiceInput): Promise<InvoiceDetail> {
+  const response = await authenticatedFetch("/invoices", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Création de la facture impossible", response.status);
+  }
+  return response.json();
+}
+
+export async function issueInvoice(token: string, invoiceId: string): Promise<InvoiceDetail> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/issue`, token, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Émission de la facture impossible", response.status);
   }
   return response.json();
 }
