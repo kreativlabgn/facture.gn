@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireSessionToken } from "@/lib/session";
 import { listAccessibleOrganizations, listMyPractices } from "@/lib/trust-api";
 
@@ -43,6 +44,12 @@ export default async function CabinetHomePage() {
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-green-bg px-2.5 py-1 font-mono text-[11px] font-bold text-green-text">
                   ● Actif
                 </span>
+                <Link
+                  href={`/cabinet/organizations/${mandate.organization.id}`}
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-navy-600 transition hover:bg-navy-50 hover:text-navy-950"
+                >
+                  Voir
+                </Link>
               </div>
             </div>
           ))

@@ -261,6 +261,26 @@ export async function listAccessibleOrganizations(
   return response.json();
 }
 
+// Mirroir de GET /organizations/:id/invoices et GET /organizations/:id/customers
+// (cabinet-view.controller.ts) — routes distinctes de listInvoices()/listCustomers()
+// ci-dessus : celles-ci acceptent un accès par mandat actif (cabinet/CGA), pas
+// seulement OrganizationMember (voir OrganizationAccessService).
+export async function listOrganizationInvoicesForCabinet(token: string, organizationId: string): Promise<InvoiceListItem[]> {
+  const response = await authenticatedFetch(`/organizations/${encodeURIComponent(organizationId)}/invoices`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les factures de cette organisation", response.status);
+  }
+  return response.json();
+}
+
+export async function listOrganizationCustomersForCabinet(token: string, organizationId: string): Promise<CustomerListItem[]> {
+  const response = await authenticatedFetch(`/organizations/${encodeURIComponent(organizationId)}/customers`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les clients de cette organisation", response.status);
+  }
+  return response.json();
+}
+
 export async function fetchInvoiceVerification(
   certificationId: string,
 ): Promise<PublicInvoiceVerification | null> {
