@@ -13,6 +13,15 @@ const PIN_FORMAT = /^\d{4}$/;
 const MSISDN_FORMAT = /^\+224\d{8,9}$/;
 const AMOUNT_FORMAT = /^[1-9]\d*$/;
 
+// §5 Spec USSD — *620*1*MONTANT# (émission anonyme), *620*2*IDENTIFIANT#
+// (vérification directe). Numérotation propre aux raccourcis, distincte du
+// menu principal.
+const ANONYMOUS_EMISSION_SHORTCUT = /^1\*([1-9]\d*)$/;
+const VERIFICATION_SHORTCUT = /^2\*(.+)$/;
+// ADR-054 — "facture anonyme plafonnée T0/acte, indépendant du palier" :
+// rejet immédiat au-delà, jamais un plafonnement silencieux.
+const ANONYMOUS_EMISSION_MAX_GNF = 500_000n;
+
 export interface UssdResponse {
   continue: boolean;
   text: string;
@@ -155,6 +164,19 @@ export class UssdSessionService {
       return { continue: true, text: ROOT_MENU };
     }
 
+    // §5 Spec USSD — numérotation des raccourcis distincte du menu principal
+    // (le "1" ici n'est ni l'option 1 ni l'option 4), vérifiée AVANT toute
+    // autre branche pour ne jamais être confondue avec un choix de menu.
+    const anonymousEmissionMatch = input.match(ANONYMOUS_EMISSION_SHORTCUT);
+    if (anonymousEmissionMatch) {
+      return this.handleAnonymousEmissionShortcut(session, anonymousEmissionMatch[1]);
+    }
+
+    const verificationShortcutMatch = input.match(VERIFICATION_SHORTCUT);
+    if (verificationShortcutMatch) {
+      return this.handleVerifyReceipt(verificationShortcutMatch[1]);
+    }
+
     if (input === "2") {
       await this.setState(session.id, "verify_awaiting_code", {});
       return { continue: true, text: "Entrez l'identifiant de vérification :" };
@@ -171,6 +193,31 @@ export class UssdSessionService {
     }
 
     return this.startPinFlow(session.id, "auth_pin", { pendingOption: input, authUserId: identity.userId }, identity.hasPin);
+  }
+
+  // §5 Spec USSD — même sous-flux d'authentification que les options
+  // normales (3.1 téléphone reconnu / 3.2 code compte), montant déjà connu
+  // donc stocké dès maintenant dans le contexte (aucune collecte ultérieure,
+  // "anonyme" exclut tout client identifié — jamais de resolveOrCreateCustomer).
+  private async handleAnonymousEmissionShortcut(session: UssdSessionRow, amountGnf: string): Promise<UssdResponse> {
+    const amount = BigInt(amountGnf);
+    if (amount > ANONYMOUS_EMISSION_MAX_GNF) {
+      return { continue: false, text: "Une facture anonyme est plafonnée à 500 000 GNF (ADR-054)." };
+    }
+
+    const emitAmountCentimes = (amount * 100n).toString();
+    const identity = await this.ussdAuth.resolveByPhone(session.phone);
+    if (!identity) {
+      await this.setState(session.id, "auth_account_code", { pendingOption: "anon_emit", emitAmountCentimes });
+      return { continue: true, text: "Numéro non reconnu. Entrez votre code compte :" };
+    }
+
+    return this.startPinFlow(
+      session.id,
+      "auth_pin",
+      { pendingOption: "anon_emit", authUserId: identity.userId, emitAmountCentimes },
+      identity.hasPin,
+    );
   }
 
   private async handleAccountCode(
@@ -243,6 +290,30 @@ export class UssdSessionService {
   }
 
   private async completeAuthentication(sessionId: string, context: SessionContext): Promise<UssdResponse> {
+    // §5 Spec USSD — raccourci d'émission anonyme : montant déjà connu
+    // (stocké dès handleAnonymousEmissionShortcut), jamais de collecte de
+    // téléphone client (anonyme), jamais de resolveOrCreateCustomer.
+    if (context.pendingOption === "anon_emit") {
+      const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
+        context.authUserId as string,
+        context.authOrganizationId,
+      );
+      if (!organizationId) {
+        return { continue: false, text: "Aucune organisation habilitée à émettre n'a été trouvée pour ce compte." };
+      }
+
+      const amountCentimes = BigInt(context.emitAmountCentimes as string);
+      try {
+        const invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, undefined);
+        return { continue: false, text: `Facture ${invoice.number} émise.` };
+      } catch (error) {
+        if (error instanceof ForbiddenException) {
+          return { continue: false, text: error.message };
+        }
+        throw error;
+      }
+    }
+
     // Options 1 (payer, D3) et 4 (émettre, D1) câblées ici — 3/5 restent le
     // stub générique, remplacé tâche par tâche par la suite de la feuille de
     // route USSD.

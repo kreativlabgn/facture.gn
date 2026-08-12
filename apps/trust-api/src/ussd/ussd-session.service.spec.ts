@@ -830,3 +830,83 @@ describe("UssdSessionService — option 5, gérer mon compte (§2.5 Spec USSD)",
     });
   });
 });
+
+describe("UssdSessionService — raccourcis directs (§5 Spec USSD)", () => {
+  describe("émission anonyme (*620*1*MONTANT#)", () => {
+    it("montant valide, téléphone reconnu avec PIN → entre dans l'authentification (même sous-flux que les options normales)", async () => {
+      const prisma = createFakePrisma({ existingSession: existingSession() });
+      const ussdAuth = createFakeUssdAuth({ resolveByPhone: vi.fn().mockResolvedValue({ userId: USER_ID, hasPin: true }) });
+      const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "1*250000");
+
+      expect(result).toEqual({ continue: true, text: "Entrez votre PIN :" });
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: "auth_pin",
+            contextData: expect.objectContaining({ pendingOption: "anon_emit", emitAmountCentimes: "25000000" }),
+          }),
+        }),
+      );
+    });
+
+    it("montant au-delà de 500 000 GNF → refus immédiat, jamais d'authentification tentée (ADR-054)", async () => {
+      const prisma = createFakePrisma({ existingSession: existingSession() });
+      const ussdAuth = createFakeUssdAuth();
+      const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "1*600000");
+
+      expect(result).toEqual({ continue: false, text: "Une facture anonyme est plafonnée à 500 000 GNF (ADR-054)." });
+      expect(ussdAuth.resolveByPhone).not.toHaveBeenCalled();
+    });
+
+    it("authentification aboutie → émet sans client attaché (customerId undefined, jamais anonyme identifié)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "auth_pin",
+          contextData: { pendingOption: "anon_emit", authUserId: USER_ID, emitAmountCentimes: "25000000" },
+        }),
+      });
+      const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
+      const ussdInvoice = createFakeUssdInvoice();
+      const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 25_000_000n, undefined);
+      expect(result.continue).toBe(false);
+      expect(result.text).toContain("FG-2026-000001");
+    });
+  });
+
+  describe("vérification directe (*620*2*IDENTIFIANT#)", () => {
+    it("délègue directement à la vérification, en un seul échange, sans état intermédiaire", async () => {
+      const prisma = createFakePrisma({ existingSession: existingSession() });
+      const verification = createFakeVerification({
+        verifyByCertificationId: vi.fn().mockResolvedValue({
+          certificationId: "GN-GN123456-2026-ABCDEF",
+          number: "FG-2026-000001",
+          organizationName: "Boutique Aissatou",
+          organizationNif: "GN12345678",
+          totalTtc: "150000000",
+          issuedAt: "2026-08-01T00:00:00.000Z",
+          status: "issued",
+          disputeStatus: "none",
+          validatedByAdministration: false,
+          integrityValid: true,
+        }),
+      });
+      const ussdAuth = createFakeUssdAuth();
+      const service = new UssdSessionService(prisma as any, ussdAuth as any, verification as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "2*A8K2P9Q1");
+
+      expect(verification.verifyByCertificationId).toHaveBeenCalledWith("A8K2P9Q1");
+      expect(result.continue).toBe(false);
+      expect(result.text).toContain("FG-2026-000001");
+      expect(ussdAuth.resolveByPhone).not.toHaveBeenCalled();
+    });
+  });
+});
