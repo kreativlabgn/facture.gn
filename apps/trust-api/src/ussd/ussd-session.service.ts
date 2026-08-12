@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { VerificationService } from "../verification/verification.service";
 import { UssdAuthService } from "./ussd-auth.service";
 import { UssdInvoiceService } from "./ussd-invoice.service";
+import { UssdPaymentService } from "./ussd-payment.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
 const PIN_FORMAT = /^\d{4}$/;
@@ -21,6 +22,8 @@ interface SessionContext {
   authOrganizationId?: string;
   pendingPin?: string;
   emitAmountCentimes?: string;
+  payInvoiceId?: string;
+  payInvoiceNumber?: string;
 }
 
 type UssdSessionRow = {
@@ -59,6 +62,7 @@ export class UssdSessionService {
     private readonly ussdAuth: UssdAuthService,
     private readonly verification: VerificationService,
     private readonly ussdInvoice: UssdInvoiceService,
+    private readonly ussdPayment: UssdPaymentService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -105,6 +109,10 @@ export class UssdSessionService {
         return this.handleEmitAmount(session, input);
       case "emit_awaiting_customer_phone":
         return this.handleEmitCustomerPhone(session, context, input);
+      case "pay_awaiting_invoice_number":
+        return this.handlePayInvoiceNumber(session, input);
+      case "pay_awaiting_confirmation":
+        return this.handlePayConfirmation(session, context, input);
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -203,8 +211,9 @@ export class UssdSessionService {
   }
 
   private async completeAuthentication(sessionId: string, context: SessionContext): Promise<UssdResponse> {
-    // Option 4 (émettre, D1) câblée ici — 1/3/5 restent le stub générique,
-    // remplacé tâche par tâche par la suite de la feuille de route USSD.
+    // Options 1 (payer, D3) et 4 (émettre, D1) câblées ici — 3/5 restent le
+    // stub générique, remplacé tâche par tâche par la suite de la feuille de
+    // route USSD.
     if (context.pendingOption === "4") {
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
@@ -216,6 +225,19 @@ export class UssdSessionService {
         },
       });
       return { continue: true, text: "Montant de la facture (GNF) :" };
+    }
+
+    if (context.pendingOption === "1") {
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "pay_awaiting_invoice_number",
+          userId: context.authUserId,
+          organizationId: context.authOrganizationId,
+          contextData: {},
+        },
+      });
+      return { continue: true, text: "Numéro de facture :" };
     }
 
     await this.prisma.ussdSession.update({
@@ -279,6 +301,54 @@ export class UssdSessionService {
     // est renseigné — le message reflète fidèlement ce qui a réellement eu lieu.
     const smsNote = customerId ? " Lien de paiement envoyé par SMS." : "";
     return { continue: false, text: `Facture ${invoice.number} émise.${smsNote}` };
+  }
+
+  // D3, §2.1 Spec USSD — amount_due (jamais totalTtc, C11) + frais affichés
+  // séparément AVANT confirmation.
+  private async handlePayInvoiceNumber(session: UssdSessionRow, input: string): Promise<UssdResponse> {
+    const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
+      session.userId as string,
+      session.organizationId ?? undefined,
+    );
+    if (!organizationId) {
+      return { continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." };
+    }
+
+    const invoice = await this.ussdPayment.findPayableInvoice(organizationId, input);
+    if (!invoice) {
+      return { continue: false, text: "Aucune facture payable ne correspond à ce numéro." };
+    }
+
+    const fee = await this.ussdPayment.previewFee(organizationId, invoice.amountDue);
+    const total = invoice.amountDue + fee;
+    await this.setState(session.id, "pay_awaiting_confirmation", {
+      payInvoiceId: invoice.id,
+      payInvoiceNumber: invoice.number as string,
+    });
+
+    return {
+      continue: true,
+      text: [
+        `Facture ${invoice.number}`,
+        `Montant dû : ${formatGnfPlainText(invoice.amountDue.toString())}`,
+        `Frais : ${formatGnfPlainText(fee.toString())}`,
+        `Total : ${formatGnfPlainText(total.toString())}`,
+        "Confirmer ? (1 = Oui)",
+      ].join("\n"),
+    };
+  }
+
+  private async handlePayConfirmation(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    if (input !== "1") {
+      return { continue: false, text: "Paiement annulé." };
+    }
+
+    await this.ussdPayment.confirmPayment(context.payInvoiceId as string, session.userId as string);
+    return { continue: false, text: `Lien de paiement envoyé pour la facture ${context.payInvoiceNumber}.` };
   }
 
   // §2.2 Spec USSD — aucune authentification requise, statut de contestation
