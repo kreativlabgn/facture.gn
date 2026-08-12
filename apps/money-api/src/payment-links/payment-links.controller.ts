@@ -1,23 +1,32 @@
-import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { InternalAuthGuard } from "../common/internal-auth.guard";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { createPaymentLinkSchema, type CreatePaymentLinkDto } from "./dto/create-payment-link.dto";
 import { PaymentLinksService } from "./payment-links.service";
 
-// Authentification inter-service (C2 Phase 2a) — appelant légitime : trust-api
-// uniquement, jamais un client final. Clé partagée, jamais mTLS (pas d'infra de
-// certificats), jamais HMAC (pas un webhook tiers non fiable, ADR-082 ne s'applique
-// pas ici).
 @ApiTags("payment-links")
-@ApiSecurity("internal-api-key")
-@UseGuards(InternalAuthGuard)
 @Controller("payment-links")
 export class PaymentLinksController {
   constructor(private readonly paymentLinksService: PaymentLinksService) {}
 
+  // Authentification inter-service (C2 Phase 2a) — appelant légitime : trust-api
+  // uniquement, jamais un client final. Clé partagée, jamais mTLS (pas d'infra de
+  // certificats), jamais HMAC (pas un webhook tiers non fiable, ADR-082 ne
+  // s'applique pas ici). Guard au niveau méthode (pas classe) depuis C19 : cette
+  // route reste interne, GET :invoiceId/checkout ci-dessous est publique.
+  @ApiSecurity("internal-api-key")
+  @UseGuards(InternalAuthGuard)
   @Post()
   create(@Body(new ZodValidationPipe(createPaymentLinkSchema)) dto: CreatePaymentLinkDto) {
     return this.paymentLinksService.createPaymentLink(dto.invoiceId, dto.organizationId, dto.amountGnf);
+  }
+
+  // C19 — page de pré-checkout publique (apps/web/src/app/pay/[invoiceId]) :
+  // montant + frais gateway AVANT de rediriger le payeur vers le provider.
+  // Aucun guard : le payeur n'est jamais un client authentifié de facture.gn.
+  @Get(":invoiceId/checkout")
+  getPublicCheckout(@Param("invoiceId") invoiceId: string) {
+    return this.paymentLinksService.getPublicCheckout(invoiceId);
   }
 }

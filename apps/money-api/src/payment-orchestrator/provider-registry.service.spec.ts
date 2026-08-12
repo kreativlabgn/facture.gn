@@ -67,6 +67,31 @@ describe("PaymentProviderRegistryService", () => {
     expect(moneroo.createPaymentLink).not.toHaveBeenCalled();
   });
 
+  it("persiste paymentLinkUrl et expiresAt sur une tentative réussie (C19, checkout public)", async () => {
+    const djomy = createProvider("djomy", "success");
+    const moneroo = createProvider("moneroo", "success");
+    const prisma = createFakePrisma();
+    const registry = new PaymentProviderRegistryService(
+      prisma as any,
+      new CircuitBreakerService(),
+      djomy,
+      moneroo,
+      SHORT_TIMEOUT_MS,
+    );
+
+    const result = await registry.resolve(request);
+
+    expect(prisma.paymentProviderAttempt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "success",
+          paymentLinkUrl: result.paymentLinkUrl,
+          expiresAt: result.expiresAt,
+        }),
+      }),
+    );
+  });
+
   it("bascule vers Moneroo quand Djomy timeout, et trace la tentative Djomy en statut timeout", async () => {
     const djomy = createProvider("djomy", "timeout");
     const moneroo = createProvider("moneroo", "success");

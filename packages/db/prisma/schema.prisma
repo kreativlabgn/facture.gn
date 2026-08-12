@@ -679,6 +679,11 @@ model PaymentProviderAttempt {
   amountGnf   BigInt  @map("amount_gnf")
   feeGateway  BigInt  @default(0) @map("fee_gateway")
   feePlatform BigInt  @default(0) @map("fee_platform")
+  // Transitoires dans CreatePaymentLinkResult jusqu'ici, jamais persistés — requis
+  // pour que le checkout public (C19) réponde seul, sans traverser vers trust-api
+  // depuis le frontend (voir plan public-checkout-page).
+  paymentLinkUrl String?   @map("payment_link_url")
+  expiresAt      DateTime? @map("expires_at")
 
   createdAt DateTime  @default(now()) @map("created_at")
   settledAt DateTime? @map("settled_at")
