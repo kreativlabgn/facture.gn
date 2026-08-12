@@ -37,13 +37,29 @@ function createFakeVerification(overrides: { verifyByCertificationId?: ReturnTyp
   };
 }
 
-function existingSession(overrides: { state?: string; contextData?: any; expiresInMs?: number } = {}) {
+function createFakeUssdInvoice(overrides: {
+  resolveOrganizationForEmission?: ReturnType<typeof vi.fn>;
+  resolveOrCreateCustomer?: ReturnType<typeof vi.fn>;
+  emitInvoice?: ReturnType<typeof vi.fn>;
+} = {}) {
+  return {
+    resolveOrganizationForEmission: overrides.resolveOrganizationForEmission ?? vi.fn().mockResolvedValue(ORG_ID),
+    resolveOrCreateCustomer: overrides.resolveOrCreateCustomer ?? vi.fn().mockResolvedValue(undefined),
+    emitInvoice: overrides.emitInvoice ?? vi.fn().mockResolvedValue({ id: "inv-1", number: "FG-2026-000001" }),
+  };
+}
+
+function existingSession(
+  overrides: { state?: string; contextData?: any; expiresInMs?: number; userId?: string; organizationId?: string } = {},
+) {
   return {
     id: "session-row-1",
     sessionId: SESSION_ID,
     phone: PHONE,
     state: overrides.state ?? "root",
     contextData: overrides.contextData ?? null,
+    userId: overrides.userId ?? null,
+    organizationId: overrides.organizationId ?? null,
     expiresAt: new Date(Date.now() + (overrides.expiresInMs ?? 60_000)),
   };
 }
@@ -51,7 +67,7 @@ function existingSession(overrides: { state?: string; contextData?: any; expires
 describe("UssdSessionService — menu racine (§1 Spec USSD)", () => {
   it("crée une session neuve à l'état root et affiche le menu canonique quand sessionId est inconnu", async () => {
     const prisma = createFakePrisma();
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "");
 
@@ -65,7 +81,7 @@ describe("UssdSessionService — menu racine (§1 Spec USSD)", () => {
 
   it("recharge une session existante par sessionId au lieu d'en recréer une", async () => {
     const prisma = createFakePrisma({ existingSession: existingSession() });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     await service.handleRequest(SESSION_ID, PHONE, "");
 
@@ -74,7 +90,7 @@ describe("UssdSessionService — menu racine (§1 Spec USSD)", () => {
 
   it("recrée une session neuve si la précédente a expiré, jamais une erreur", async () => {
     const prisma = createFakePrisma({ existingSession: existingSession({ expiresInMs: -60_000 }) });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "");
 
@@ -88,7 +104,7 @@ describe("UssdSessionService — option 2, vérifier un reçu (§2.2 Spec USSD, 
   it("demande l'identifiant de vérification, aucune authentification déclenchée", async () => {
     const prisma = createFakePrisma({ existingSession: existingSession() });
     const ussdAuth = createFakeUssdAuth();
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "2");
 
@@ -112,7 +128,7 @@ describe("UssdSessionService — option 2, vérifier un reçu (§2.2 Spec USSD, 
         integrityValid: true,
       }),
     });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, verification as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, verification as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "GN-GN123456-2026-ABCDEF");
 
@@ -139,7 +155,7 @@ describe("UssdSessionService — option 2, vérifier un reçu (§2.2 Spec USSD, 
         integrityValid: true,
       }),
     });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, verification as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, verification as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "GN-GN123456-2026-ABCDEF");
 
@@ -148,7 +164,7 @@ describe("UssdSessionService — option 2, vérifier un reçu (§2.2 Spec USSD, 
 
   it("identifiant invalide → message d'échec, termine la session", async () => {
     const prisma = createFakePrisma({ existingSession: existingSession({ state: "verify_awaiting_code" }) });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "INCONNU");
 
@@ -162,7 +178,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     const ussdAuth = createFakeUssdAuth({
       resolveByPhone: vi.fn().mockResolvedValue({ userId: USER_ID, hasPin: true }),
     });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "4");
 
@@ -172,19 +188,34 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     );
   });
 
-  it("PIN correct → authentifie et répond pour l'option demandée", async () => {
+  it("PIN correct, option non encore construite → authentifie et répond le stub générique", async () => {
     const prisma = createFakePrisma({
-      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "1", authUserId: USER_ID } }),
     });
     const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
 
     expect(ussdAuth.verifyPin).toHaveBeenCalledWith(USER_ID, "1234");
-    expect(result.text).toContain("Option 4");
+    expect(result.text).toContain("Option 1");
     expect(prisma.ussdSession.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ state: "authenticated_stub", userId: USER_ID }) }),
+    );
+  });
+
+  it("PIN correct, option 4 → authentifie et entre dans le flux d'émission", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
+    });
+    const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+    expect(result.text).toBe("Montant de la facture (GNF) :");
+    expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: "emit_awaiting_amount", userId: USER_ID }) }),
     );
   });
 
@@ -193,7 +224,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
       existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
     });
     const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: false, locked: false }) });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "0000");
 
@@ -205,7 +236,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
       existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
     });
     const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: false, locked: true }) });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
 
@@ -216,7 +247,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
   it("téléphone non reconnu → demande le code compte", async () => {
     const prisma = createFakePrisma({ existingSession: existingSession() });
     const ussdAuth = createFakeUssdAuth({ resolveByPhone: vi.fn().mockResolvedValue(null) });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "4");
 
@@ -228,7 +259,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
       existingSession: existingSession({ state: "auth_account_code", contextData: { pendingOption: "4" } }),
     });
     const ussdAuth = createFakeUssdAuth({ resolveByAccountCode: vi.fn().mockResolvedValue(null) });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "BADCODE1");
 
@@ -242,7 +273,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     const ussdAuth = createFakeUssdAuth({
       resolveByAccountCode: vi.fn().mockResolvedValue({ userId: USER_ID, organizationId: ORG_ID, hasPin: true }),
     });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "A8K2P9Q1");
 
@@ -259,7 +290,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     const ussdAuth = createFakeUssdAuth({
       resolveByPhone: vi.fn().mockResolvedValue({ userId: USER_ID, hasPin: false }),
     });
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "4");
 
@@ -273,7 +304,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     const prisma = createFakePrisma({
       existingSession: existingSession({ state: "auth_new_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
     });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "12a4");
 
@@ -285,7 +316,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     const prisma = createFakePrisma({
       existingSession: existingSession({ state: "auth_new_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
     });
-    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
 
@@ -305,7 +336,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
       }),
     });
     const ussdAuth = createFakeUssdAuth();
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "5678");
 
@@ -313,7 +344,7 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
     expect(ussdAuth.createPin).not.toHaveBeenCalled();
   });
 
-  it("confirmation qui correspond → crée le PIN et authentifie", async () => {
+  it("confirmation qui correspond, option 4 → crée le PIN et entre dans le flux d'émission", async () => {
     const prisma = createFakePrisma({
       existingSession: existingSession({
         state: "auth_new_pin_confirm",
@@ -321,11 +352,114 @@ describe("UssdSessionService — sous-flux d'authentification (D2, §3 Spec USSD
       }),
     });
     const ussdAuth = createFakeUssdAuth();
-    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any);
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
 
     expect(ussdAuth.createPin).toHaveBeenCalledWith(USER_ID, "1234");
-    expect(result.text).toContain("Option 4");
+    expect(result.text).toContain("Montant de la facture");
+  });
+
+  it("confirmation qui correspond, option 1 (pas encore construite) → stub générique", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({
+        state: "auth_new_pin_confirm",
+        contextData: { pendingOption: "1", authUserId: USER_ID, pendingPin: "1234" },
+      }),
+    });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+    expect(result.text).toContain("Option 1 bientôt disponible");
+  });
+});
+
+describe("UssdSessionService — option 4, émettre une facture (D1, §2.4 Spec USSD)", () => {
+  it("authentification réussie sur l'option 4 → demande le montant", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "4", authUserId: USER_ID } }),
+    });
+    const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+    expect(result).toEqual({ continue: true, text: "Montant de la facture (GNF) :" });
+    expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: "emit_awaiting_amount", userId: USER_ID }) }),
+    );
+  });
+
+  it("montant invalide → reprompt sans avancer d'état", async () => {
+    const prisma = createFakePrisma({ existingSession: existingSession({ state: "emit_awaiting_amount" }) });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "abc");
+
+    expect(result).toEqual({ continue: true, text: "Montant invalide. Réessayez :" });
+  });
+
+  it("montant valide → demande le numéro du client", async () => {
+    const prisma = createFakePrisma({ existingSession: existingSession({ state: "emit_awaiting_amount" }) });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "500000");
+
+    expect(result).toEqual({ continue: true, text: "Numéro du client (laisser vide si aucun) :" });
+    expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ state: "emit_awaiting_customer_phone", contextData: { emitAmountCentimes: "50000000" } }),
+      }),
+    );
+  });
+
+  it("numéro invalide → reprompt sans avancer d'état", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "emit_awaiting_customer_phone", contextData: { emitAmountCentimes: "50000000" } }),
+    });
+    const ussdInvoice = createFakeUssdInvoice();
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "0620000000");
+
+    expect(result).toEqual({ continue: true, text: "Numéro invalide. Réessayez :" });
+    expect(ussdInvoice.emitInvoice).not.toHaveBeenCalled();
+  });
+
+  it("téléphone vide (aucun client) → émet sans customerId, aucune mention SMS", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({
+        state: "emit_awaiting_customer_phone",
+        contextData: { emitAmountCentimes: "50000000" },
+        userId: USER_ID,
+      }),
+    });
+    const ussdInvoice = createFakeUssdInvoice();
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "");
+
+    expect(ussdInvoice.resolveOrganizationForEmission).toHaveBeenCalledWith(USER_ID, undefined);
+    expect(ussdInvoice.resolveOrCreateCustomer).toHaveBeenCalledWith(ORG_ID, undefined);
+    expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, undefined);
+    expect(result.text).toContain("FG-2026-000001");
+    expect(result.text).not.toContain("SMS");
+  });
+
+  it("aucune organisation habilitée trouvée → message d'échec, aucune facture émise", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({
+        state: "emit_awaiting_customer_phone",
+        contextData: { emitAmountCentimes: "50000000" },
+      }),
+    });
+    const ussdInvoice = createFakeUssdInvoice({ resolveOrganizationForEmission: vi.fn().mockResolvedValue(null) });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "");
+
+    expect(result.continue).toBe(false);
+    expect(ussdInvoice.emitInvoice).not.toHaveBeenCalled();
   });
 });
