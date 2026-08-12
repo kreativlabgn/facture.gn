@@ -70,7 +70,7 @@ export class OrganizationsService {
 
     const verified = await this.prisma.organization.update({
       where: { id: organizationId },
-      data: { dgiVerificationStatus: "verified" },
+      data: { dgiVerificationStatus: "verified", dgiVerifiedAt: new Date() },
     });
 
     // Traçabilité (revue sécurité B2) : seule trace de qui/quand une organisation a

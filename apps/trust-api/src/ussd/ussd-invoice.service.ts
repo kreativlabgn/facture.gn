@@ -3,6 +3,7 @@ import type { OrganizationRole, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { InvoicesService } from "../invoices/invoices.service";
+import { VelocityTierService } from "./velocity-tier.service";
 
 // Même trio que POST /invoices (invoices.controller.ts) — cet appel bypasse
 // RolesGuard (appel direct service à service, jamais passé par le contrôleur
@@ -19,6 +20,7 @@ export class UssdInvoiceService {
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly organizationsService: OrganizationsService,
     private readonly invoicesService: InvoicesService,
+    private readonly velocityTier: VelocityTierService,
   ) {}
 
   // organizationIdHint : déjà résolu et validé par le chemin "code compte"
@@ -57,6 +59,10 @@ export class UssdInvoiceService {
   // la conversion ×100 se fait à la lecture de la saisie utilisateur, jamais
   // ici (même discipline que InvoiceForm.tsx côté web).
   async emitInvoice(organizationId: string, amountCentimes: bigint, customerId: string | undefined) {
+    // D4, §2.4 Spec USSD — "plafonds velocity_tier vérifiés avant confirmation",
+    // toujours avant toute création (jamais un brouillon abandonné en base).
+    await this.velocityTier.assertWithinLimits(organizationId, amountCentimes);
+
     const draft = await this.invoicesService.createDraft({
       organizationId,
       documentType: "invoice",
