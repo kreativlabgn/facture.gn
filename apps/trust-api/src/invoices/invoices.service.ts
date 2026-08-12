@@ -151,6 +151,16 @@ export class InvoicesService {
       where: { id: invoice.organizationId },
     });
 
+    // G2 (réinterprété, voir plan freeze-after-account-recovery) — fenêtre de
+    // vigilance posée par AuthService.resolveRecovery() sur une récupération de
+    // compte owner approuvée. paymentsFrozenUntil expiré (passé) est déjà
+    // inoffensif, aucune comparaison de statut nécessaire.
+    if (organization.paymentsFrozenUntil && organization.paymentsFrozenUntil > new Date()) {
+      throw new ForbiddenException(
+        `Émission gelée temporairement suite à une récupération de compte récente (jusqu'au ${organization.paymentsFrozenUntil.toISOString()})`,
+      );
+    }
+
     const issuedAt = new Date();
     const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear());
 

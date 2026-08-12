@@ -293,6 +293,12 @@ model Organization {
   // en ont un — ADR-046/047, 8 caractères Base32, vérification de collision à la
   // génération (voir organizations.service.ts:createAssisted).
   accountCode                String?               @unique @map("account_code")
+  // Nullable — null = jamais gelé ou gel expiré (comparé à now() à la lecture,
+  // aucun nettoyage actif nécessaire). Posé par AuthService.resolveRecovery()
+  // sur une récupération de compte owner approuvée (B3), lu par
+  // InvoicesService.issue() (G2, réinterprété — voir plan
+  // freeze-after-account-recovery : ni PIN ni "plafond" n'existent dans ce repo).
+  paymentsFrozenUntil        DateTime?             @map("payments_frozen_until")
 
   invoices         Invoice[]
   sequences        InvoiceSequence[]
