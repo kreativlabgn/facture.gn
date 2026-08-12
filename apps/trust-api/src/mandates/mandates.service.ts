@@ -215,4 +215,52 @@ export class MandatesService {
       data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
   }
+
+  // Option 5 USSD (§2.5 Spec USSD) — pendant que create()/accept()/revoke()
+  // sont pensés practice-scopés (un cabinet gère SES mandats), rien jusqu'ici
+  // ne permettait à une ORGANISATION de lister/révoquer côté sien. Seuls les
+  // mandats initiatedBy "practice" (F5) sont acceptables PAR l'organisation —
+  // ceux initiatedBy "organization" (F12) sont acceptés par la practice via
+  // acceptAsPractice(), jamais listés ici.
+  async listPendingForOrganization(organizationId: string) {
+    return this.prisma.mandate.findMany({
+      where: { organizationId, status: "pending", initiatedBy: "practice" },
+      include: { practice: true },
+    });
+  }
+
+  async listActiveForOrganization(organizationId: string) {
+    return this.prisma.mandate.findMany({
+      where: { organizationId, status: "active" },
+      include: { practice: true },
+    });
+  }
+
+  // Symétrique de revoke() (practice-scopé) — ici l'organisation elle-même
+  // révoque, même trio owner/admin que le reste des actions administratives
+  // de ce repo (ex. merge() client, E4).
+  async revokeAsOrganization(organizationId: string, mandateId: string, actorUserId: string) {
+    const member = await this.prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId, userId: actorUserId } },
+    });
+    if (!member || member.revokedAt || !["owner", "admin"].includes(member.role)) {
+      throw new ForbiddenException("Seul un owner ou admin de l'organisation peut révoquer un mandat");
+    }
+
+    const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
+    if (!mandate || mandate.organizationId !== organizationId) {
+      throw new NotFoundException(`Mandat ${mandateId} introuvable pour l'organisation ${organizationId}`);
+    }
+
+    if (mandate.status !== "active") {
+      throw new ConflictException(
+        `Seul un mandat active peut être révoqué (statut actuel : ${mandate.status})`,
+      );
+    }
+
+    return this.prisma.mandate.update({
+      where: { id: mandateId },
+      data: { status: "revoked", revokedAt: new Date() },
+    });
+  }
 }

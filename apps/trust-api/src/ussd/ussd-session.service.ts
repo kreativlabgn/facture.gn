@@ -6,6 +6,7 @@ import { UssdAuthService } from "./ussd-auth.service";
 import { UssdInvoiceService } from "./ussd-invoice.service";
 import { UssdPaymentService } from "./ussd-payment.service";
 import { UssdInvoiceListService } from "./ussd-invoice-list.service";
+import { UssdAccountService } from "./ussd-account.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
 const PIN_FORMAT = /^\d{4}$/;
@@ -25,6 +26,8 @@ interface SessionContext {
   emitAmountCentimes?: string;
   payInvoiceId?: string;
   payInvoiceNumber?: string;
+  mandateAction?: "accept" | "revoke";
+  mandateOptions?: { id: string; name: string }[];
 }
 
 type UssdSessionRow = {
@@ -54,6 +57,16 @@ const STATUS_LABELS: Record<string, string> = {
   voided: "Annulée",
 };
 
+// §2.5 Spec USSD — 5.1-5.4. Numérotation d'affichage seulement : l'entrée
+// attendue reste un chiffre simple (1-4), jamais "5.1" littéral (décision
+// utilisateur : chiffres uniquement, aucune lettre).
+const MANAGE_ACCOUNT_MENU = [
+  "1. Changer mon PIN",
+  "2. Voir mon palier",
+  "3. Mandats en attente",
+  "4. Mandats actifs",
+].join("\n");
+
 // Toute option autre que 2 (vérifier un reçu, §2.2 — aucune authentification
 // requise) exige le sous-flux d'authentification ci-dessous avant sa logique
 // propre — construite tâche par tâche par la suite de la feuille de route USSD.
@@ -73,6 +86,7 @@ export class UssdSessionService {
     private readonly ussdInvoice: UssdInvoiceService,
     private readonly ussdPayment: UssdPaymentService,
     private readonly ussdInvoiceList: UssdInvoiceListService,
+    private readonly ussdAccount: UssdAccountService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -123,6 +137,14 @@ export class UssdSessionService {
         return this.handlePayInvoiceNumber(session, input);
       case "pay_awaiting_confirmation":
         return this.handlePayConfirmation(session, context, input);
+      case "manage_account_menu":
+        return this.handleManageAccountMenu(session, input);
+      case "account_new_pin":
+        return this.handleAccountNewPin(session, context, input);
+      case "account_new_pin_confirm":
+        return this.handleAccountNewPinConfirm(session, context, input);
+      case "account_mandate_select":
+        return this.handleAccountMandateSelect(session, context, input);
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -255,6 +277,19 @@ export class UssdSessionService {
         return { continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." };
       }
       return this.renderMyInvoices(organizationId);
+    }
+
+    if (context.pendingOption === "5") {
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "manage_account_menu",
+          userId: context.authUserId,
+          organizationId: context.authOrganizationId,
+          contextData: {},
+        },
+      });
+      return { continue: true, text: MANAGE_ACCOUNT_MENU };
     }
 
     if (context.pendingOption === "1") {
@@ -393,6 +428,103 @@ export class UssdSessionService {
 
     await this.ussdPayment.confirmPayment(context.payInvoiceId as string, session.userId as string);
     return { continue: false, text: `Lien de paiement envoyé pour la facture ${context.payInvoiceNumber}.` };
+  }
+
+  // §2.5 Spec USSD — choix 1-4 (jamais "5.1" littéral, décision utilisateur :
+  // chiffres uniquement).
+  private async handleManageAccountMenu(session: UssdSessionRow, input: string): Promise<UssdResponse> {
+    if (input === "1") {
+      await this.setState(session.id, "account_new_pin", {});
+      return { continue: true, text: "Nouveau PIN (4 chiffres) :" };
+    }
+
+    if (input === "2") {
+      const tier = await this.ussdAccount.getTierSummary(session.organizationId as string);
+      return { continue: false, text: `Votre palier actuel : ${tier}` };
+    }
+
+    if (input === "3") {
+      return this.presentMandateSelection(session, "accept", "Aucun mandat en attente.");
+    }
+
+    if (input === "4") {
+      return this.presentMandateSelection(session, "revoke", "Aucun mandat actif.");
+    }
+
+    return { continue: false, text: "Choix invalide." };
+  }
+
+  // 5.3/5.4 partagent la même mécanique de sélection numérotée — seule la
+  // source de la liste (pending vs active) et l'action finale diffèrent.
+  private async presentMandateSelection(
+    session: UssdSessionRow,
+    action: "accept" | "revoke",
+    emptyMessage: string,
+  ): Promise<UssdResponse> {
+    const organizationId = session.organizationId as string;
+    const mandates =
+      action === "accept"
+        ? await this.ussdAccount.listPendingMandates(organizationId)
+        : await this.ussdAccount.listActiveMandates(organizationId);
+
+    if (mandates.length === 0) {
+      return { continue: false, text: emptyMessage };
+    }
+
+    const options = mandates.map((mandate: { id: string; practice: { name: string } }) => ({
+      id: mandate.id,
+      name: mandate.practice.name,
+    }));
+    await this.setState(session.id, "account_mandate_select", { mandateAction: action, mandateOptions: options });
+
+    const lines = options.map((option, index) => `${index + 1}. ${option.name}`);
+    return { continue: true, text: [...lines, "Choisissez un numéro :"].join("\n") };
+  }
+
+  private async handleAccountMandateSelect(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    const options = context.mandateOptions ?? [];
+    const index = Number(input) - 1;
+    const selected = Number.isInteger(index) ? options[index] : undefined;
+    if (!selected) {
+      return { continue: false, text: "Numéro invalide." };
+    }
+
+    const organizationId = session.organizationId as string;
+    const userId = session.userId as string;
+    if (context.mandateAction === "accept") {
+      await this.ussdAccount.acceptMandate(organizationId, selected.id, userId);
+      return { continue: false, text: `Mandat de ${selected.name} accepté.` };
+    }
+
+    await this.ussdAccount.revokeMandate(organizationId, selected.id, userId);
+    return { continue: false, text: `Mandat de ${selected.name} révoqué.` };
+  }
+
+  private async handleAccountNewPin(session: UssdSessionRow, context: SessionContext, input: string): Promise<UssdResponse> {
+    if (!PIN_FORMAT.test(input)) {
+      return { continue: true, text: "PIN invalide — 4 chiffres attendus. Réessayez :" };
+    }
+    await this.setState(session.id, "account_new_pin_confirm", { ...context, pendingPin: input });
+    return { continue: true, text: "Confirmez le nouveau PIN :" };
+  }
+
+  // §3.3 Spec USSD — "reset PIN déclenche une bascule 24-48h vers T0 + SMS
+  // systématique", déjà géré par UssdAccountService.changePin().
+  private async handleAccountNewPinConfirm(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    if (input !== context.pendingPin) {
+      return { continue: false, text: "Les PIN saisis ne correspondent pas. Recommencez depuis le menu Gérer mon compte." };
+    }
+
+    await this.ussdAccount.changePin(session.userId as string, session.organizationId as string, input);
+    return { continue: false, text: "PIN changé. Un SMS de confirmation vous a été envoyé." };
   }
 
   // §2.2 Spec USSD — aucune authentification requise, statut de contestation

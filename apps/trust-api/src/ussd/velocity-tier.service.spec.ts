@@ -36,6 +36,22 @@ function createFakePrisma(overrides: {
   };
 }
 
+describe("VelocityTierService — resolveTier (5.2 Spec USSD, méthode publique réutilisée)", () => {
+  it("expose le palier résolu, réutilisable par l'écran 'voir mon palier'", async () => {
+    const prisma = createFakePrisma({
+      organization: {
+        id: ORG_ID,
+        dgiVerificationStatus: "verified",
+        dgiVerifiedAt: new Date(Date.now() - 10 * 24 * 3600_000),
+        paymentsFrozenUntil: null,
+      },
+    });
+    const service = new VelocityTierService(prisma as any);
+
+    await expect(service.resolveTier(ORG_ID)).resolves.toBe("T1");
+  });
+});
+
 describe("VelocityTierService — assertWithinLimits (D4, §4 Spec USSD)", () => {
   it("accepte un montant sous tous les plafonds T0", async () => {
     const prisma = createFakePrisma();
