@@ -5,6 +5,7 @@ import { VerificationService } from "../verification/verification.service";
 import { UssdAuthService } from "./ussd-auth.service";
 import { UssdInvoiceService } from "./ussd-invoice.service";
 import { UssdPaymentService } from "./ussd-payment.service";
+import { UssdInvoiceListService } from "./ussd-invoice-list.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
 const PIN_FORMAT = /^\d{4}$/;
@@ -45,6 +46,14 @@ const ROOT_MENU = [
   "5. Gérer mon compte",
 ].join("\n");
 
+// §2.3 Spec USSD — libellés exacts du texte spec.
+const STATUS_LABELS: Record<string, string> = {
+  paid: "Payée",
+  issued: "Non payée",
+  partially_paid: "Partiel",
+  voided: "Annulée",
+};
+
 // Toute option autre que 2 (vérifier un reçu, §2.2 — aucune authentification
 // requise) exige le sous-flux d'authentification ci-dessous avant sa logique
 // propre — construite tâche par tâche par la suite de la feuille de route USSD.
@@ -63,6 +72,7 @@ export class UssdSessionService {
     private readonly verification: VerificationService,
     private readonly ussdInvoice: UssdInvoiceService,
     private readonly ussdPayment: UssdPaymentService,
+    private readonly ussdInvoiceList: UssdInvoiceListService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -227,6 +237,26 @@ export class UssdSessionService {
       return { continue: true, text: "Montant de la facture (GNF) :" };
     }
 
+    if (context.pendingOption === "3") {
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "authenticated_stub",
+          userId: context.authUserId,
+          organizationId: context.authOrganizationId,
+          contextData: {},
+        },
+      });
+      const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
+        context.authUserId as string,
+        context.authOrganizationId,
+      );
+      if (!organizationId) {
+        return { continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." };
+      }
+      return this.renderMyInvoices(organizationId);
+    }
+
     if (context.pendingOption === "1") {
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
@@ -301,6 +331,20 @@ export class UssdSessionService {
     // est renseigné — le message reflète fidèlement ce qui a réellement eu lieu.
     const smsNote = customerId ? " Lien de paiement envoyé par SMS." : "";
     return { continue: false, text: `Facture ${invoice.number} émise.${smsNote}` };
+  }
+
+  // §2.3 Spec USSD — labels français exacts du texte spec, jamais le nom de
+  // statut technique brut affiché au marchand.
+  private async renderMyInvoices(organizationId: string): Promise<UssdResponse> {
+    const invoices = await this.ussdInvoiceList.listRecent(organizationId);
+    if (invoices.length === 0) {
+      return { continue: false, text: "Aucune facture pour le moment." };
+    }
+
+    const lines = invoices.map(
+      (invoice) => `${invoice.number} — ${STATUS_LABELS[invoice.status] ?? invoice.status} — ${formatGnfPlainText(invoice.totalTtc.toString())}`,
+    );
+    return { continue: false, text: lines.join("\n") };
   }
 
   // D3, §2.1 Spec USSD — amount_due (jamais totalTtc, C11) + frais affichés
