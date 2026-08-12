@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireSessionToken } from "@/lib/session";
-import { getOrganization, listMyOrganizations, TrustApiError } from "@/lib/trust-api";
+import { getOrganization, getTrustScore, listMyOrganizations, TrustApiError } from "@/lib/trust-api";
+import { formatGnf } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Paramètres — facture.gn" };
 
@@ -20,12 +21,15 @@ export default async function SettingsPage() {
     return null;
   }
 
-  // GET /organizations/:id est réservé owner/admin (même sensibilité que
-  // trust-score) — un rôle plus restreint (cashier, accountant_internal) ne
-  // doit pas voir une erreur brute, seulement un message clair.
+  // GET /organizations/:id et GET /organizations/:id/trust-score sont tous deux
+  // réservés owner/admin — même garde 403, un seul message d'erreur pour les deux.
   let detail;
+  let trustScore;
   try {
-    detail = await getOrganization(token, organization.id);
+    [detail, trustScore] = await Promise.all([
+      getOrganization(token, organization.id),
+      getTrustScore(token, organization.id),
+    ]);
   } catch (error) {
     if (error instanceof TrustApiError && error.status === 403) {
       return (
@@ -53,6 +57,20 @@ export default async function SettingsPage() {
           <Field label="Palier">{detail.commercialTier}</Field>
           <Field label="Vérification DGI">{detail.dgiVerificationStatus === "verified" ? "Vérifiée" : "Non vérifiée"}</Field>
         </dl>
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-navy-100 bg-white p-5">
+        <p className="mb-2 font-display text-sm font-semibold text-navy-950">Paiements vérifiés</p>
+        {trustScore.ratio === null ? (
+          <p className="text-sm text-navy-600">Pas encore de paiement enregistré.</p>
+        ) : (
+          <>
+            <p className="font-display text-2xl font-bold text-navy-950">{Math.round(trustScore.ratio * 100)}%</p>
+            <p className="mt-1 text-sm text-navy-600">
+              {formatGnf(trustScore.verifiedAmount)} vérifiés sur {formatGnf(trustScore.totalAmount)} encaissés
+            </p>
+          </>
+        )}
       </div>
 
       <div className="rounded-2xl border border-navy-100 bg-white p-5">

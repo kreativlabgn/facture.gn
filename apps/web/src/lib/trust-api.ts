@@ -363,6 +363,24 @@ export async function acceptMandateRequest(token: string, practiceId: string, ma
   }
 }
 
+// Mirroir de GET /organizations/:id/trust-score (getVerifiedPaymentRatio, E8) —
+// totalAmount/verifiedAmount en centimes GNF (BigInt sérialisé en string, même
+// convention que totalTtc). ratio null tant qu'aucun paiement n'existe (jamais
+// une division par zéro déguisée en 0%).
+export interface OrganizationTrustScore {
+  totalAmount: string;
+  verifiedAmount: string;
+  ratio: number | null;
+}
+
+export async function getTrustScore(token: string, organizationId: string): Promise<OrganizationTrustScore> {
+  const response = await authenticatedFetch(`/organizations/${encodeURIComponent(organizationId)}/trust-score`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger le taux de paiements vérifiés", response.status);
+  }
+  return response.json();
+}
+
 export async function fetchInvoiceVerification(
   certificationId: string,
 ): Promise<PublicInvoiceVerification | null> {
