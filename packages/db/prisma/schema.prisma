@@ -395,6 +395,12 @@ model Branch {
 // possibleDuplicateOf reste un pointeur informatif, jamais un déclencheur
 // automatique — la fusion (CustomersService.merge()) accepte n'importe quelle
 // paire de clients de la même organisation, que ce champ soit renseigné ou non.
+enum NotificationChannel {
+  sms
+  whatsapp
+  both
+}
+
 model Customer {
   id             String  @id @default(uuid())
   organizationId String  @map("organization_id")
@@ -404,6 +410,11 @@ model Customer {
 
   creditLimit         BigInt? @map("credit_limit")
   possibleDuplicateOf String? @map("possible_duplicate_of")
+  // C9 — canal d'envoi du lien de paiement, choisi par la PME à la création du
+  // client (pas au niveau organisation : le moyen de contact réel d'un client
+  // est indépendant des autres clients de la même PME). Sans effet si phone
+  // est null (aucune tentative d'envoi).
+  notificationChannel NotificationChannel @default(sms) @map("notification_channel")
 
   createdAt DateTime @default(now()) @map("created_at")
 

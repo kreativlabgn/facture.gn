@@ -159,6 +159,7 @@ export interface CreateCustomerInput {
   name: string;
   phone?: string;
   nif?: string;
+  notificationChannel?: "sms" | "whatsapp" | "both";
 }
 
 export async function createCustomer(token: string, input: CreateCustomerInput): Promise<CustomerListItem> {

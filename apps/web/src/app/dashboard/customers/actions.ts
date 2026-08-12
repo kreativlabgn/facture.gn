@@ -23,6 +23,7 @@ export async function createCustomerAction(
   }
   const phoneRaw = String(formData.get("phone") ?? "").trim();
   const nifRaw = String(formData.get("nif") ?? "").trim();
+  const notificationChannelRaw = String(formData.get("notificationChannel") ?? "").trim();
 
   try {
     await createCustomer(token, {
@@ -30,6 +31,12 @@ export async function createCustomerAction(
       name,
       phone: phoneRaw || undefined,
       nif: nifRaw || undefined,
+      // Vide (client sans téléphone) → laisse le défaut serveur ("sms") — pas
+      // de champ pertinent tant qu'aucun téléphone n'est renseigné.
+      notificationChannel:
+        notificationChannelRaw === "sms" || notificationChannelRaw === "whatsapp" || notificationChannelRaw === "both"
+          ? notificationChannelRaw
+          : undefined,
     });
   } catch (error) {
     if (error instanceof TrustApiError) {

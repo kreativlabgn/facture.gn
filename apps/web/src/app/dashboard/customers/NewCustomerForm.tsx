@@ -32,6 +32,16 @@ export function NewCustomerForm() {
           placeholder="NIF (optionnel)"
           className="rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
         />
+        <select
+          name="notificationChannel"
+          defaultValue="sms"
+          aria-label="Canal d'envoi du lien de paiement"
+          className="rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+        >
+          <option value="sms">Recevoir par SMS</option>
+          <option value="whatsapp">Recevoir par WhatsApp</option>
+          <option value="both">Recevoir par SMS et WhatsApp</option>
+        </select>
       </div>
       {state?.error ? <p className="mt-3 text-sm text-red-text">{state.error}</p> : null}
       <button
