@@ -852,3 +852,27 @@ model Mandate {
 
   @@map("mandate")
 }
+
+// Canal USSD *620# (D1-D4, Spec-USSD-facture-gn.md) — table de session au lieu
+// de Redis (aucune autre infra Redis dans ce repo, décision utilisateur).
+// expiresAt court (quelques minutes) : une session USSD réelle dure < 90s
+// (DAT §Performance) — une session expirée est traitée comme neuve, jamais
+// une erreur (voir ussd-session.service.ts).
+model UssdSession {
+  id             String    @id @default(uuid())
+  sessionId      String    @unique @map("session_id")
+  phone          String
+  state          String    @default("root")
+  // Données accumulées entre étapes (montant saisi, customerId choisi...) —
+  // Json plutôt que des colonnes dédiées : la forme dépend de l'étape courante,
+  // jamais la même pour "émettre" que pour "payer".
+  contextData    Json?     @map("context_data")
+  // Peuplés après authentification (tâche ussd-pin-auth) — nullable ici,
+  // aucune requête authentifiée construite dans cette tâche.
+  userId         String?   @map("user_id")
+  organizationId String?   @map("organization_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  expiresAt      DateTime  @map("expires_at")
+
+  @@map("ussd_session")
+}

@@ -17,6 +17,7 @@ import { PartnersModule } from "./partners/partners.module";
 import { VerificationModule } from "./verification/verification.module";
 import { CabinetViewModule } from "./cabinet-view/cabinet-view.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { UssdModule } from "./ussd/ussd.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -41,6 +42,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     VerificationModule,
     CabinetViewModule,
     NotificationsModule,
+    UssdModule,
   ],
   providers: [
     // Ordre significatif : JwtAuthGuard peuple request.user avant que RolesGuard
