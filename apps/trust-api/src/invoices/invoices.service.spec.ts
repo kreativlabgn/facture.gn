@@ -781,6 +781,90 @@ describe("InvoicesService — machine à états", () => {
   });
 });
 
+describe("InvoicesService — gel post-récupération de compte (G2, réinterprété)", () => {
+  it("refuse d'émettre si paymentsFrozenUntil de l'organisation est dans le futur", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "org-1",
+          nif: "GN12345678",
+          commercialTier: "freemium",
+          paymentsFrozenUntil: new Date(Date.now() + 3600_000),
+        }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).rejects.toThrow(/gel/);
+  });
+
+  it("autorise l'émission si paymentsFrozenUntil est dans le passé (fenêtre expirée)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "org-1",
+          nif: "GN12345678",
+          commercialTier: "freemium",
+          paymentsFrozenUntil: new Date(Date.now() - 3600_000),
+        }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+  });
+
+  it("autorise l'émission si paymentsFrozenUntil est null (jamais gelé)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+  });
+});
+
 describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", () => {
   const draftInvoice = {
     id: "inv-1",

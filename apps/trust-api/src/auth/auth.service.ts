@@ -14,6 +14,12 @@ import type { RequestRecoveryDto } from "./dto/request-recovery.dto";
 const RECOVERY_REQUEST_GENERIC_MESSAGE =
   "Si les informations correspondent à un compte, une demande de récupération a été transmise à un administrateur de l'organisation.";
 
+// G2 (backlog : "geler temporairement les plafonds après un reset PIN", sans
+// détail ni ADR — réinterprété faute de PIN/plafond dans ce repo, voir plan
+// freeze-after-account-recovery) — 24h choisi comme fenêtre MVP raisonnable,
+// aucun signal backlog pour une valeur précise.
+const RECOVERY_FREEZE_WINDOW_MS = 24 * 3600_000;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -137,6 +143,13 @@ export class AuthService {
       const temporaryPassword = this.passwordService.generateTemporaryPassword();
       const passwordHash = await this.passwordService.hash(temporaryPassword);
       await tx.user.update({ where: { id: request.userId }, data: { passwordHash } });
+
+      // Fenêtre de vigilance post-récupération (G2, réinterprété) — le compte
+      // vient de changer de mot de passe, moment de plus haute suspicion.
+      await tx.organization.update({
+        where: { id: request.organizationId },
+        data: { paymentsFrozenUntil: new Date(Date.now() + RECOVERY_FREEZE_WINDOW_MS) },
+      });
 
       return { temporaryPassword };
     });

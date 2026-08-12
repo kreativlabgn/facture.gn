@@ -120,6 +120,7 @@ describe("AuthService", () => {
         },
         organization: {
           findUnique: vi.fn().mockResolvedValue(opts.organization ?? null),
+          update: vi.fn().mockResolvedValue({}),
         },
         organizationMember: {
           findUnique: vi.fn().mockResolvedValue(opts.membership ?? null),
@@ -257,6 +258,36 @@ describe("AuthService", () => {
         await expect(
           service.resolveRecovery("recovery-1", "user-2", "approved"),
         ).rejects.toThrow(/résolue/);
+      });
+
+      it("gèle l'organisation 24h sur approbation (G2, réinterprété — fenêtre de vigilance post-récupération)", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+          membership: { role: "admin", revokedAt: null },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const before = Date.now();
+
+        await service.resolveRecovery("recovery-1", "user-2", "approved");
+
+        expect(prisma.organization.update).toHaveBeenCalledTimes(1);
+        const call = prisma.organization.update.mock.calls[0][0];
+        expect(call.where).toEqual({ id: "org-1" });
+        const frozenUntil = call.data.paymentsFrozenUntil.getTime();
+        expect(frozenUntil).toBeGreaterThanOrEqual(before + 23.9 * 3600_000);
+        expect(frozenUntil).toBeLessThanOrEqual(before + 24.1 * 3600_000);
+      });
+
+      it("ne gèle jamais l'organisation sur rejet", async () => {
+        const prisma = createFakePrismaForRecovery({
+          recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
+          membership: { role: "owner", revokedAt: null },
+        });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+
+        await service.resolveRecovery("recovery-1", "user-2", "rejected");
+
+        expect(prisma.organization.update).not.toHaveBeenCalled();
       });
     });
   });
