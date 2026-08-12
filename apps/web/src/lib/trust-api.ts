@@ -281,6 +281,88 @@ export async function listOrganizationCustomersForCabinet(token: string, organiz
   return response.json();
 }
 
+// Mirroir de GET /practices/:id/members (practices.service.ts:listMembers).
+export interface PracticeMemberItem {
+  id: string;
+  role: string;
+  user: { id: string; name: string };
+}
+
+export async function listPracticeMembers(token: string, practiceId: string): Promise<PracticeMemberItem[]> {
+  const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/members`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les collaborateurs", response.status);
+  }
+  return response.json();
+}
+
+export async function inviteMember(token: string, practiceId: string, msisdn: string): Promise<PracticeMemberItem> {
+  const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/members`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ msisdn, role: "accountant_external" }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Invitation impossible", response.status);
+  }
+  return response.json();
+}
+
+// Mirroir de GET /practices/:id/mandates (mandates.service.ts:listAll).
+export interface PracticeMandateItem {
+  id: string;
+  status: string;
+  grantedRole: string;
+  initiatedBy: string;
+  organization: { id: string; name: string };
+}
+
+export async function listPracticeMandates(token: string, practiceId: string): Promise<PracticeMandateItem[]> {
+  const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/mandates`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les mandats", response.status);
+  }
+  return response.json();
+}
+
+export async function requestMandate(token: string, practiceId: string, organizationId: string): Promise<PracticeMandateItem> {
+  const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/mandates`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ organizationId, grantedRole: "accountant_external" }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Demande de mandat impossible", response.status);
+  }
+  return response.json();
+}
+
+export async function revokeMandate(token: string, practiceId: string, mandateId: string): Promise<void> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/mandates/${encodeURIComponent(mandateId)}/revoke`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Révocation impossible", response.status);
+  }
+}
+
+export async function acceptMandateRequest(token: string, practiceId: string, mandateId: string): Promise<void> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/mandates/${encodeURIComponent(mandateId)}/accept-request`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Acceptation impossible", response.status);
+  }
+}
+
 export async function fetchInvoiceVerification(
   certificationId: string,
 ): Promise<PublicInvoiceVerification | null> {

@@ -143,6 +143,26 @@ export class MandatesService {
     });
   }
 
+  // Écran "Mandats" du dashboard cabinet — distinct de listAccessibleOrganizations
+  // (F7, actifs uniquement, sert le switch d'organisation) : ici pending ET active,
+  // pour que le cabinet voie ses demandes en attente (F5, initiées par lui) et les
+  // adhésions à accepter (F12, initiées par une organisation) — sans mandateId
+  // visible ici, acceptAsPractice()/revoke() sont inappelables depuis l'UI.
+  // revoked/expired exclus, bruit historique non actionnable.
+  async listAll(practiceId: string, requesterUserId: string) {
+    const member = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!member) {
+      throw new ForbiddenException("Seul un membre du cabinet peut consulter ses mandats");
+    }
+
+    return this.prisma.mandate.findMany({
+      where: { practiceId, status: { in: ["pending", "active"] } },
+      include: { organization: { select: { id: true, name: true } } },
+    });
+  }
+
   // F12, ADR-078 — "adhérer à un CGA" : sens d'initiation inverse de create()
   // (F5). Autorisation organisationnelle déjà garantie en amont par RolesGuard
   // (@Roles("owner","admin") + @OrganizationIdSource("organization")) — aucune

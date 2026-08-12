@@ -461,3 +461,37 @@ describe("MandatesService — organisations accessibles (F7, ADR-070)", () => {
     await expect(service.listAccessibleOrganizations(PRACTICE_ID, REQUESTER_ID)).resolves.not.toThrow();
   });
 });
+
+describe("MandatesService — lister tous les mandats d'un cabinet (pending + active)", () => {
+  it("retourne les mandats pending et active avec l'organisation, tout membre actif peut consulter", async () => {
+    const prisma: any = {
+      practiceMember: { findFirst: vi.fn().mockResolvedValue({ id: "member-1", role: "accountant_external" }) },
+      mandate: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "mandate-1", status: "active", initiatedBy: "practice", organization: { id: ORG_ID, name: "Boutique Aissatou" } },
+          { id: "mandate-2", status: "pending", initiatedBy: "organization", organization: { id: "org-2", name: "Salon Djénabou" } },
+        ]),
+      },
+    };
+    const service = new MandatesService(prisma as any);
+
+    const result = await service.listAll(PRACTICE_ID, REQUESTER_ID);
+
+    expect(prisma.mandate.findMany).toHaveBeenCalledWith({
+      where: { practiceId: PRACTICE_ID, status: { in: ["pending", "active"] } },
+      include: { organization: { select: { id: true, name: true } } },
+    });
+    expect(result).toHaveLength(2);
+  });
+
+  it("refuse un non-membre de la practice", async () => {
+    const prisma: any = {
+      practiceMember: { findFirst: vi.fn().mockResolvedValue(null) },
+      mandate: { findMany: vi.fn() },
+    };
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.listAll(PRACTICE_ID, REQUESTER_ID)).rejects.toThrow(/membre/);
+    expect(prisma.mandate.findMany).not.toHaveBeenCalled();
+  });
+});
