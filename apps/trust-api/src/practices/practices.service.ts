@@ -65,6 +65,23 @@ export class PracticesService {
     });
   }
 
+  // Écran "Collaborateurs" du dashboard cabinet — même garde que
+  // listAccessibleOrganizations (F7) : tout membre actif suffit, pas seulement
+  // practice_admin (consultation, pas une action administrative).
+  async listMembers(practiceId: string, requesterUserId: string) {
+    const requesterMembership = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!requesterMembership) {
+      throw new ForbiddenException("Seul un membre du cabinet peut consulter ses collaborateurs");
+    }
+
+    return this.prisma.practiceMember.findMany({
+      where: { practiceId, leftAt: null },
+      include: { user: { select: { id: true, name: true } } },
+    });
+  }
+
   // F12, ADR-078 — "liste des CGA actifs" : ProfessionalPractice n'a aucun
   // concept "actif/inactif" scaffoldé, toute practice existante du type demandé
   // est retournée. Scope à "cga" uniquement pour cette story (jamais généralisé).

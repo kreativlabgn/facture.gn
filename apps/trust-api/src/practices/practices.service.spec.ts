@@ -175,6 +175,45 @@ describe("PracticesService — lister les practices dont je suis membre", () => 
   });
 });
 
+describe("PracticesService — lister les collaborateurs d'un cabinet", () => {
+  it("retourne les membres actifs avec leur nom, tout membre actif peut consulter", async () => {
+    const prisma: any = {
+      practiceMember: {
+        findFirst: vi.fn().mockResolvedValue({ id: "member-requester", role: "accountant_external", leftAt: null }),
+        findMany: vi.fn().mockResolvedValue([
+          { id: "member-1", role: "practice_admin", user: { id: "user-1", name: "Mamadou Diallo" } },
+          { id: "member-2", role: "accountant_external", user: { id: "user-2", name: "Fanta Camara" } },
+        ]),
+      },
+    };
+    const service = new PracticesService(prisma as any);
+
+    const result = await service.listMembers(PRACTICE_ID, "requester-1");
+
+    expect(prisma.practiceMember.findMany).toHaveBeenCalledWith({
+      where: { practiceId: PRACTICE_ID, leftAt: null },
+      include: { user: { select: { id: true, name: true } } },
+    });
+    expect(result).toEqual([
+      { id: "member-1", role: "practice_admin", user: { id: "user-1", name: "Mamadou Diallo" } },
+      { id: "member-2", role: "accountant_external", user: { id: "user-2", name: "Fanta Camara" } },
+    ]);
+  });
+
+  it("refuse un non-membre de la practice", async () => {
+    const prisma: any = {
+      practiceMember: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn(),
+      },
+    };
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.listMembers(PRACTICE_ID, "outsider-1")).rejects.toThrow(/membre/);
+    expect(prisma.practiceMember.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("PracticesService — lister par type (F12, ADR-078)", () => {
   it("liste les practices du type demandé", async () => {
     const prisma: any = {

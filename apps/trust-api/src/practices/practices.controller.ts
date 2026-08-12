@@ -51,6 +51,14 @@ export class PracticesController {
     return this.mandatesService.listAccessibleOrganizations(practiceId, user.id);
   }
 
+  // Écran "Collaborateurs" du dashboard cabinet — manquait jusqu'ici (seul
+  // POST :id/members existait). Aucun @Roles() : tout membre actif suffit
+  // (autorisation en ligne dans PracticesService.listMembers()).
+  @Get(":id/members")
+  listMembers(@Param("id") practiceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.practicesService.listMembers(practiceId, user.id);
+  }
+
   // Point d'entrée manquant jusqu'ici : après login, rien ne permettait de
   // découvrir à quelle(s) practice(s) l'utilisateur appartient (même gap déjà
   // comblé côté organisations, OrganizationsController.listMine()). Distinct

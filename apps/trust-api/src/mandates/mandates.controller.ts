@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
@@ -44,5 +44,13 @@ export class MandatesController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.mandatesService.acceptAsPractice(practiceId, mandateId, user.id);
+  }
+
+  // Écran "Mandats" du dashboard cabinet — pending + active, distinct de
+  // GET /practices/:id/organizations (F7, actifs uniquement). Aucun @Roles() :
+  // tout membre actif suffit (autorisation en ligne dans MandatesService.listAll()).
+  @Get()
+  listAll(@Param("id") practiceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.mandatesService.listAll(practiceId, user.id);
   }
 }
