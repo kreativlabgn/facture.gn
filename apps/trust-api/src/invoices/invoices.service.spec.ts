@@ -865,6 +865,126 @@ describe("InvoicesService — gel post-récupération de compte (G2, réinterpr�
   });
 });
 
+describe("InvoicesService — notification du client au lien de paiement (C9)", () => {
+  const draftInvoiceWithCustomer = {
+    id: "inv-1",
+    status: "draft",
+    documentType: "invoice",
+    organizationId: "org-1",
+    customerId: "cust-1",
+    totalTtc: 1_500_000n,
+  };
+  const resolvedLink = {
+    paymentLinkUrl: "https://stub.djomy.africa/pay/djomy-stub-inv-1",
+    providerRef: "djomy-stub-inv-1",
+    expiresAt: new Date("2026-09-07T00:00:00.000Z"),
+  };
+
+  function createNotificationService(overrides: { notify?: ReturnType<typeof vi.fn> } = {}) {
+    return { notify: overrides.notify ?? vi.fn().mockResolvedValue(undefined) };
+  }
+
+  it("notifie le client via PaymentLinkNotificationService quand le lien de paiement réussit et que le client a un customerId", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
+    });
+    (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    const notificationService = createNotificationService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(resolvedLink) as any,
+      notificationService as any,
+    );
+
+    const result = await service.issue("inv-1");
+
+    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect(notificationService.notify).toHaveBeenCalledWith(
+      { phone: "+224622334455", notificationChannel: "sms" },
+      resolvedLink.paymentLinkUrl,
+      result.totalTtc,
+    );
+  });
+
+  it("ne notifie jamais si la facture n'a pas de customerId", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+    });
+    const notificationService = createNotificationService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(resolvedLink) as any,
+      notificationService as any,
+    );
+
+    await service.issue("inv-1");
+
+    expect(notificationService.notify).not.toHaveBeenCalled();
+  });
+
+  it("ne notifie jamais si la génération du lien de paiement a échoué (Money Context en panne)", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
+    });
+    const notificationService = createNotificationService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(null) as any,
+      notificationService as any,
+    );
+
+    await service.issue("inv-1");
+
+    expect(notificationService.notify).not.toHaveBeenCalled();
+  });
+
+  it("l'échec de la notification ne fait jamais échouer l'émission — meilleur effort", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
+    });
+    (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    const notificationService = createNotificationService({ notify: vi.fn().mockRejectedValue(new Error("panne")) });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(resolvedLink) as any,
+      notificationService as any,
+    );
+
+    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+  });
+
+  it("n'échoue jamais l'émission si aucun PaymentLinkNotificationService n'est fourni (compat, 65+ tests existants sans ce paramètre)", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
+    });
+    (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(resolvedLink) as any,
+    );
+
+    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+  });
+});
+
 describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", () => {
   const draftInvoice = {
     id: "inv-1",
@@ -1105,7 +1225,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
       lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
     } as any);
 
-    expect(prisma.customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
     expect(result.customerId).toBe("cust-1");
   });
 

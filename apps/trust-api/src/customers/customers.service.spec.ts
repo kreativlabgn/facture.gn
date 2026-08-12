@@ -48,6 +48,7 @@ describe("CustomersService — création (C6, ADR-039)", () => {
         phone: undefined,
         nif: undefined,
         creditLimit: undefined,
+        notificationChannel: undefined,
       },
     });
     expect(result.id).toBe("cust-1");

@@ -9,6 +9,7 @@ import { computePlatformFee } from "../common/commission-grid";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
 import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
+import type { PaymentLinkNotificationService } from "../notifications/payment-link-notification.service";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
@@ -26,6 +27,12 @@ export class InvoicesService {
     // globale : vérifier les factures signées avant cette story).
     private readonly certification: OrganizationSigningKeyService,
     private readonly paymentLinkClient: PaymentLinkClient,
+    // C9 — optionnel : les 65+ tests existants de ce fichier construisent
+    // InvoicesService sans ce paramètre (aucun rapport avec la notification),
+    // les forcer à le fournir romprait tous les call sites pour un gain nul
+    // (voir plan payment-link-notifications, risque de rayon d'impact déjà
+    // documenté pour ce fichier dans le plan organization-root-key, A3).
+    private readonly notificationService?: PaymentLinkNotificationService,
   ) {}
 
   async createDraft(dto: CreateInvoiceDto) {
@@ -246,8 +253,9 @@ export class InvoicesService {
     // Même garantie que l'appel HTTP lui-même : un corps de réponse money-api
     // inattendu (ex. paymentLinkExpiresAt invalide) ne doit jamais faire échouer
     // une émission déjà certifiée et committée.
+    let invoiceWithLink;
     try {
-      return await this.prisma.invoice.update({
+      invoiceWithLink = await this.prisma.invoice.update({
         where: { id: invoiceId },
         data: {
           paymentLinkUrl: paymentLink.paymentLinkUrl,
@@ -261,6 +269,22 @@ export class InvoicesService {
       );
       return issuedInvoice;
     }
+
+    // C9 — meilleur effort, jamais couplé à la facture déjà certifiée (même
+    // garantie que le lien lui-même ci-dessus). Silencieux si la facture n'a
+    // aucun client rattaché (C6, optionnel) — rien à notifier.
+    if (this.notificationService && invoiceWithLink.customerId) {
+      try {
+        const customer = await this.prisma.customer.findUnique({ where: { id: invoiceWithLink.customerId } });
+        if (customer) {
+          await this.notificationService.notify(customer, paymentLink.paymentLinkUrl, invoiceWithLink.totalTtc);
+        }
+      } catch (error) {
+        this.logger.warn(`Facture ${invoiceId} certifiée mais la notification du client a échoué : ${(error as Error).message}`);
+      }
+    }
+
+    return invoiceWithLink;
   }
 
   // ADR-064 : la conversion crée toujours une NOUVELLE facture — jamais une mutation

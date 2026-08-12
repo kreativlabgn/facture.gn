@@ -33,6 +33,8 @@ export class CustomersService {
         phone: dto.phone,
         nif: dto.nif,
         creditLimit: dto.creditLimit,
+        // undefined → Prisma applique le défaut schema ("sms"), jamais dupliqué ici.
+        notificationChannel: dto.notificationChannel,
       },
     });
   }

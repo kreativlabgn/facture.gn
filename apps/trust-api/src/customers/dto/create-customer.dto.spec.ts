@@ -35,4 +35,22 @@ describe("createCustomerSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepte notificationChannel whatsapp/both en plus de sms (C9)", () => {
+    const result = createCustomerSchema.safeParse({
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      name: "Épicerie Sory",
+      notificationChannel: "both",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejette un notificationChannel hors énumération", () => {
+    const result = createCustomerSchema.safeParse({
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      name: "Épicerie Sory",
+      notificationChannel: "email",
+    });
+    expect(result.success).toBe(false);
+  });
 });
