@@ -78,6 +78,8 @@ export class PaymentProviderRegistryService {
         providerRef: result?.providerRef,
         amountGnf: request.amountGnf,
         feeGateway: result?.feeGatewayGnf ?? 0n,
+        paymentLinkUrl: result?.paymentLinkUrl,
+        expiresAt: result?.expiresAt,
         settledAt: status === "success" ? new Date() : null,
       },
     });
