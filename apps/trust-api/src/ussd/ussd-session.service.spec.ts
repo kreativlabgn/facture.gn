@@ -1,4 +1,4 @@
-import { NotFoundException } from "@nestjs/common";
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { UssdSessionService } from "./ussd-session.service";
 
@@ -445,6 +445,23 @@ describe("UssdSessionService — option 4, émettre une facture (D1, §2.4 Spec 
     expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, undefined);
     expect(result.text).toContain("FG-2026-000001");
     expect(result.text).not.toContain("SMS");
+  });
+
+  it("plafond de vélocité dépassé (D4) → message d'échec explicite, session terminée", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({
+        state: "emit_awaiting_customer_phone",
+        contextData: { emitAmountCentimes: "50000000" },
+      }),
+    });
+    const ussdInvoice = createFakeUssdInvoice({
+      emitInvoice: vi.fn().mockRejectedValue(new ForbiddenException("Plafond journalier dépassé (palier T0) : 1 500 000 GNF/jour")),
+    });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "");
+
+    expect(result).toEqual({ continue: false, text: "Plafond journalier dépassé (palier T0) : 1 500 000 GNF/jour" });
   });
 
   it("aucune organisation habilitée trouvée → message d'échec, aucune facture émise", async () => {

@@ -124,13 +124,15 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
     });
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
+    const before = Date.now();
     const result = await service.verifyDgi("org-1");
 
     expect(result.dgiVerificationStatus).toBe("verified");
-    expect(prisma.organization.update).toHaveBeenCalledWith({
-      where: { id: "org-1" },
-      data: { dgiVerificationStatus: "verified" },
-    });
+    const call = prisma.organization.update.mock.calls[0][0];
+    expect(call.where).toEqual({ id: "org-1" });
+    expect(call.data.dgiVerificationStatus).toBe("verified");
+    // D4, §4 Spec USSD — nécessaire pour "T1+90j" (velocity_tier).
+    expect(call.data.dgiVerifiedAt.getTime()).toBeGreaterThanOrEqual(before);
   });
 
   it("est idempotent sur une organisation déjà vérifiée — un second appel ne casse rien", async () => {

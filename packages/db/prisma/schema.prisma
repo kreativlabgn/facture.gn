@@ -291,6 +291,9 @@ model Organization {
   rccm                       String?
   registrationSource         RegistrationSource    @default(organic) @map("registration_source")
   dgiVerificationStatus      DgiVerificationStatus @default(unverified) @map("dgi_verification_status")
+  // D4, §4 Spec USSD — nécessaire pour "T1+90j" (velocity_tier). Posé au
+  // moment de la transition vers verified (organizations.service.ts:verifyDgi).
+  dgiVerifiedAt              DateTime?             @map("dgi_verified_at")
   bankAccountDetails         Json?                 @map("bank_account_details")
   preferredLanguage          PreferredLanguage     @default(fr) @map("preferred_language")
   chiffreAffairesBrutDeclare BigInt                @default(0) @map("chiffre_affaires_brut_declare")

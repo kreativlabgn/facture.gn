@@ -6,10 +6,11 @@ import { UssdController } from "./ussd.controller";
 import { UssdSessionService } from "./ussd-session.service";
 import { UssdAuthService } from "./ussd-auth.service";
 import { UssdInvoiceService } from "./ussd-invoice.service";
+import { VelocityTierService } from "./velocity-tier.service";
 
 @Module({
   imports: [VerificationModule, OrganizationsModule, InvoicesModule],
   controllers: [UssdController],
-  providers: [UssdSessionService, UssdAuthService, UssdInvoiceService],
+  providers: [UssdSessionService, UssdAuthService, UssdInvoiceService, VelocityTierService],
 })
 export class UssdModule {}

@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { VerificationService } from "../verification/verification.service";
@@ -262,7 +262,18 @@ export class UssdSessionService {
 
     const customerId = await this.ussdInvoice.resolveOrCreateCustomer(organizationId, phone || undefined);
     const amountCentimes = BigInt(context.emitAmountCentimes as string);
-    const invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, customerId);
+
+    // D4 — VelocityTierService.assertWithinLimits() (appelé par emitInvoice,
+    // avant toute création) lève ForbiddenException au-delà des plafonds T0-T3.
+    let invoice;
+    try {
+      invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, customerId);
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return { continue: false, text: error.message };
+      }
+      throw error;
+    }
 
     // C9 (déjà câblée dans InvoicesService.issue()) n'envoie que si customerId
     // est renseigné — le message reflète fidèlement ce qui a réellement eu lieu.

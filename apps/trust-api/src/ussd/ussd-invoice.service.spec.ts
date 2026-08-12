@@ -25,12 +25,17 @@ function createFakeInvoicesService() {
   };
 }
 
+function createFakeVelocityTier(overrides: { assertWithinLimits?: ReturnType<typeof vi.fn> } = {}) {
+  return { assertWithinLimits: overrides.assertWithinLimits ?? vi.fn().mockResolvedValue(undefined) };
+}
+
 describe("UssdInvoiceService — résolution de l'organisation d'émission", () => {
   it("retourne le hint fourni tel quel (chemin code compte, déjà validé)", async () => {
     const service = new UssdInvoiceService(
       createFakePrisma() as any,
       createFakeOrganizationsService() as any,
       createFakeInvoicesService() as any,
+      createFakeVelocityTier() as any,
     );
 
     const result = await service.resolveOrganizationForEmission(USER_ID, ORG_ID);
@@ -43,7 +48,7 @@ describe("UssdInvoiceService — résolution de l'organisation d'émission", () 
       { id: "org-viewer", role: "client_portal" },
       { id: "org-cashier", role: "cashier" },
     ]);
-    const service = new UssdInvoiceService(createFakePrisma() as any, organizations as any, createFakeInvoicesService() as any);
+    const service = new UssdInvoiceService(createFakePrisma() as any, organizations as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
 
     const result = await service.resolveOrganizationForEmission(USER_ID);
 
@@ -52,7 +57,7 @@ describe("UssdInvoiceService — résolution de l'organisation d'émission", () 
 
   it("retourne null si aucun membership n'a de rôle habilité", async () => {
     const organizations = createFakeOrganizationsService([{ id: "org-viewer", role: "client_portal" }]);
-    const service = new UssdInvoiceService(createFakePrisma() as any, organizations as any, createFakeInvoicesService() as any);
+    const service = new UssdInvoiceService(createFakePrisma() as any, organizations as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
 
     await expect(service.resolveOrganizationForEmission(USER_ID)).resolves.toBeNull();
   });
@@ -61,7 +66,7 @@ describe("UssdInvoiceService — résolution de l'organisation d'émission", () 
 describe("UssdInvoiceService — résolution/création du client (C9, notification automatique)", () => {
   it("retourne undefined si aucun téléphone n'est fourni", async () => {
     const prisma = createFakePrisma();
-    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any);
+    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
 
     await expect(service.resolveOrCreateCustomer(ORG_ID, undefined)).resolves.toBeUndefined();
     expect(prisma.customer.findFirst).not.toHaveBeenCalled();
@@ -69,7 +74,7 @@ describe("UssdInvoiceService — résolution/création du client (C9, notificati
 
   it("réutilise un client existant portant déjà ce téléphone", async () => {
     const prisma = createFakePrisma({ customer: { id: "customer-existing", phone: PHONE } });
-    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any);
+    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
 
     const result = await service.resolveOrCreateCustomer(ORG_ID, PHONE);
 
@@ -79,7 +84,7 @@ describe("UssdInvoiceService — résolution/création du client (C9, notificati
 
   it("crée un client à la volée si aucun n'existe pour ce téléphone", async () => {
     const prisma = createFakePrisma({ customer: null });
-    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any);
+    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
 
     const result = await service.resolveOrCreateCustomer(ORG_ID, PHONE);
 
@@ -93,7 +98,7 @@ describe("UssdInvoiceService — résolution/création du client (C9, notificati
 describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
   it("crée une facture à une seule ligne 'Vente USSD' puis l'émet immédiatement", async () => {
     const invoicesService = createFakeInvoicesService();
-    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any);
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, createFakeVelocityTier() as any);
 
     const result = await service.emitInvoice(ORG_ID, 500_000n, "customer-1");
 
@@ -110,12 +115,33 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
 
   it("émet sans customerId quand aucun téléphone n'a été saisi", async () => {
     const invoicesService = createFakeInvoicesService();
-    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any);
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, createFakeVelocityTier() as any);
 
     await service.emitInvoice(ORG_ID, 500_000n, undefined);
 
     expect(invoicesService.createDraft).toHaveBeenCalledWith(
       expect.objectContaining({ customerId: undefined }),
     );
+  });
+
+  it("vérifie les plafonds de vélocité AVANT de créer le brouillon (D4)", async () => {
+    const invoicesService = createFakeInvoicesService();
+    const velocityTier = createFakeVelocityTier();
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, velocityTier as any);
+
+    await service.emitInvoice(ORG_ID, 500_000n, undefined);
+
+    expect(velocityTier.assertWithinLimits).toHaveBeenCalledWith(ORG_ID, 500_000n);
+  });
+
+  it("ne crée aucun brouillon si le plafond de vélocité est dépassé", async () => {
+    const invoicesService = createFakeInvoicesService();
+    const velocityTier = createFakeVelocityTier({
+      assertWithinLimits: vi.fn().mockRejectedValue(new Error("plafond dépassé")),
+    });
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, velocityTier as any);
+
+    await expect(service.emitInvoice(ORG_ID, 500_000n, undefined)).rejects.toThrow(/plafond/);
+    expect(invoicesService.createDraft).not.toHaveBeenCalled();
   });
 });
