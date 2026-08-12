@@ -48,9 +48,17 @@ export default async function CabinetClientOrganizationPage({ params }: { params
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold text-navy-950">Organisation cliente</h1>
-        <Link href="/cabinet" className="text-sm font-medium text-navy-600 hover:text-navy-950">
-          ← Retour
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href={`/cabinet/organizations/${organizationId}/fec`}
+            className="rounded-[10px] bg-navy-950 px-5 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800"
+          >
+            Télécharger le FEC
+          </Link>
+          <Link href="/cabinet" className="text-sm font-medium text-navy-600 hover:text-navy-950">
+            ← Retour
+          </Link>
+        </div>
       </div>
 
       <section className="mb-8">
