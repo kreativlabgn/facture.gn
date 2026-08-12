@@ -1,6 +1,7 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { VerificationService } from "../verification/verification.service";
 import { UssdAuthService } from "./ussd-auth.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
@@ -50,6 +51,7 @@ export class UssdSessionService {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly ussdAuth: UssdAuthService,
+    private readonly verification: VerificationService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -90,6 +92,8 @@ export class UssdSessionService {
         return this.handleNewPin(session, context, input);
       case "auth_new_pin_confirm":
         return this.handleNewPinConfirm(session, context, input);
+      case "verify_awaiting_code":
+        return this.handleVerifyReceipt(input);
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -100,8 +104,12 @@ export class UssdSessionService {
       return { continue: true, text: ROOT_MENU };
     }
 
+    if (input === "2") {
+      await this.setState(session.id, "verify_awaiting_code", {});
+      return { continue: true, text: "Entrez l'identifiant de vérification :" };
+    }
+
     if (!AUTHENTICATED_OPTIONS.has(input)) {
-      // Option 2 (vérifier) ou choix invalide — remplacé par ussd-menu-verify-receipt.
       return { continue: false, text: "Fonctionnalité bientôt disponible." };
     }
 
@@ -198,10 +206,44 @@ export class UssdSessionService {
     return { continue: false, text: `Authentification réussie. Option ${context.pendingOption} bientôt disponible.` };
   }
 
+  // §2.2 Spec USSD — aucune authentification requise, statut de contestation
+  // affiché uniquement si ≠ none. Réutilise VerificationService tel quel
+  // (déjà utilisé par GET /verify/:certificationId, page publique PWA) — seul
+  // l'habillage texte change.
+  private async handleVerifyReceipt(certificationId: string): Promise<UssdResponse> {
+    try {
+      const invoice = await this.verification.verifyByCertificationId(certificationId);
+      const lines = [
+        `Facture ${invoice.number}`,
+        `Montant : ${formatGnfPlainText(invoice.totalTtc)}`,
+        `Statut : ${invoice.status}`,
+      ];
+      if (invoice.disputeStatus !== "none") {
+        lines.push(`Contestation : ${invoice.disputeStatus}`);
+      }
+      return { continue: false, text: lines.join("\n") };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        return { continue: false, text: "Aucune facture ne correspond à cet identifiant." };
+      }
+      throw error;
+    }
+  }
+
   private async setState(sessionId: string, state: string, context: SessionContext): Promise<void> {
     await this.prisma.ussdSession.update({
       where: { id: sessionId },
       data: { state, contextData: context as Prisma.InputJsonValue },
     });
   }
+}
+
+// Pas d'Intl.NumberFormat (pas de garantie de locale complète en environnement
+// Node minimal) — mêmes centimes GNF que formatGnf côté web, sérialisation
+// texte manuelle adaptée à un canal contraint.
+function formatGnfPlainText(centimesString: string): string {
+  const centimes = BigInt(centimesString);
+  const gnf = centimes / 100n;
+  const withThousands = gnf.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return `${withThousands} GNF`;
 }
