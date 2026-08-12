@@ -1,7 +1,7 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { resolveVelocityTier, VELOCITY_LIMITS_CENTIMES } from "./velocity-tier";
+import { resolveVelocityTier, VELOCITY_LIMITS_CENTIMES, type VelocityTier } from "./velocity-tier";
 
 const DAY_MS = 24 * 3600_000;
 const WEEK_MS = 7 * DAY_MS;
@@ -15,10 +15,9 @@ const COUNTED_STATUSES = ["issued", "partially_paid", "paid"] as const;
 export class VelocityTierService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
-  // D4, §4 Spec USSD — lève ForbiddenException si l'acte ou l'une des trois
-  // fenêtres glissantes (jour/semaine/mois) dépasserait le plafond du palier
-  // résolu. Appelée AVANT toute création de facture (jamais après).
-  async assertWithinLimits(organizationId: string, amountCentimes: bigint): Promise<void> {
+  // 5.2 Spec USSD ("voir mon palier") — extrait pour être réutilisable en
+  // dehors d'assertWithinLimits(), même calcul, aucune duplication.
+  async resolveTier(organizationId: string): Promise<VelocityTier> {
     const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
 
     const hasAnomalyFlag = organization.dgiVerifiedAt
@@ -31,12 +30,19 @@ export class VelocityTierService {
         })) > 0
       : false;
 
-    const tier = resolveVelocityTier({
+    return resolveVelocityTier({
       dgiVerificationStatus: organization.dgiVerificationStatus,
       dgiVerifiedAt: organization.dgiVerifiedAt,
       hasAnomalyFlag,
       forcedT0Until: organization.paymentsFrozenUntil,
     });
+  }
+
+  // D4, §4 Spec USSD — lève ForbiddenException si l'acte ou l'une des trois
+  // fenêtres glissantes (jour/semaine/mois) dépasserait le plafond du palier
+  // résolu. Appelée AVANT toute création de facture (jamais après).
+  async assertWithinLimits(organizationId: string, amountCentimes: bigint): Promise<void> {
+    const tier = await this.resolveTier(organizationId);
     const limits = VELOCITY_LIMITS_CENTIMES[tier];
 
     if (amountCentimes > limits.perAct) {

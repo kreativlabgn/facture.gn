@@ -495,3 +495,89 @@ describe("MandatesService — lister tous les mandats d'un cabinet (pending + ac
     expect(prisma.mandate.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe("MandatesService — vues et révocation côté organisation (option 5 USSD, §2.5 Spec USSD)", () => {
+  it("liste les mandats pending initiés par une practice (F5) — jamais ceux initiés par l'organisation elle-même (F12)", async () => {
+    const prisma: any = {
+      mandate: { findMany: vi.fn().mockResolvedValue([{ id: "mandate-1" }]) },
+    };
+    const service = new MandatesService(prisma as any);
+
+    const result = await service.listPendingForOrganization(ORG_ID);
+
+    expect(prisma.mandate.findMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG_ID, status: "pending", initiatedBy: "practice" },
+      include: { practice: true },
+    });
+    expect(result).toHaveLength(1);
+  });
+
+  it("liste les mandats actifs de l'organisation", async () => {
+    const prisma: any = {
+      mandate: { findMany: vi.fn().mockResolvedValue([{ id: "mandate-1" }]) },
+    };
+    const service = new MandatesService(prisma as any);
+
+    await service.listActiveForOrganization(ORG_ID);
+
+    expect(prisma.mandate.findMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG_ID, status: "active" },
+      include: { practice: true },
+    });
+  });
+
+  function createFakePrismaForRevokeAsOrganization(
+    overrides: { member?: any; mandate?: any } = {},
+  ) {
+    return {
+      organizationMember: {
+        findUnique: vi.fn().mockResolvedValue(
+          overrides.member !== undefined ? overrides.member : { role: "owner", revokedAt: null },
+        ),
+      },
+      mandate: {
+        findUnique: vi.fn().mockResolvedValue(
+          overrides.mandate !== undefined ? overrides.mandate : { id: MANDATE_ID, organizationId: ORG_ID, status: "active" },
+        ),
+        update: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
+      },
+    };
+  }
+
+  it("révoque un mandat actif — autorisé owner/admin de l'organisation elle-même", async () => {
+    const prisma = createFakePrismaForRevokeAsOrganization();
+    const service = new MandatesService(prisma as any);
+
+    await service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID);
+
+    expect(prisma.mandate.update).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID },
+      data: { status: "revoked", revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("refuse un membre non owner/admin de l'organisation", async () => {
+    const prisma = createFakePrismaForRevokeAsOrganization({ member: { role: "cashier", revokedAt: null } });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/owner|admin/);
+  });
+
+  it("refuse (404) si le mandat n'appartient pas à cette organisation", async () => {
+    const prisma = createFakePrismaForRevokeAsOrganization({
+      mandate: { id: MANDATE_ID, organizationId: "autre-org", status: "active" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/introuvable/);
+  });
+
+  it("refuse (409) un mandat déjà revoked/pending", async () => {
+    const prisma = createFakePrismaForRevokeAsOrganization({
+      mandate: { id: MANDATE_ID, organizationId: ORG_ID, status: "pending" },
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(/active/);
+  });
+});
