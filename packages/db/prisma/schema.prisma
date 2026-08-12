@@ -187,6 +187,14 @@ model User {
   // avec MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY).
   isFieldAgent Boolean @default(false) @map("is_field_agent")
 
+  // Canal USSD *620# (D2, Spec USSD §3) — distinct de passwordHash (PWA/agent).
+  // Nullable : créé au premier accès *620# (décision utilisateur), jamais
+  // depuis la PWA. pinFailedAttempts/pinLockedUntil : 3 essais puis blocage
+  // 30 min (§3.3), voir ussd-auth.service.ts.
+  pinHash          String?   @map("pin_hash")
+  pinFailedAttempts Int      @default(0) @map("pin_failed_attempts")
+  pinLockedUntil   DateTime? @map("pin_locked_until")
+
   phones                   UserPhone[]
   invoiceEvents            InvoiceEvent[]
   memberships              OrganizationMember[]
