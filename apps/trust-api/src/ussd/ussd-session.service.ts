@@ -3,9 +3,12 @@ import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { VerificationService } from "../verification/verification.service";
 import { UssdAuthService } from "./ussd-auth.service";
+import { UssdInvoiceService } from "./ussd-invoice.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
 const PIN_FORMAT = /^\d{4}$/;
+const MSISDN_FORMAT = /^\+224\d{8,9}$/;
+const AMOUNT_FORMAT = /^[1-9]\d*$/;
 
 export interface UssdResponse {
   continue: boolean;
@@ -17,6 +20,7 @@ interface SessionContext {
   authUserId?: string;
   authOrganizationId?: string;
   pendingPin?: string;
+  emitAmountCentimes?: string;
 }
 
 type UssdSessionRow = {
@@ -24,6 +28,8 @@ type UssdSessionRow = {
   state: string;
   phone: string;
   contextData: unknown;
+  userId?: string | null;
+  organizationId?: string | null;
 };
 
 const ROOT_MENU = [
@@ -52,6 +58,7 @@ export class UssdSessionService {
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly ussdAuth: UssdAuthService,
     private readonly verification: VerificationService,
+    private readonly ussdInvoice: UssdInvoiceService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -94,6 +101,10 @@ export class UssdSessionService {
         return this.handleNewPinConfirm(session, context, input);
       case "verify_awaiting_code":
         return this.handleVerifyReceipt(input);
+      case "emit_awaiting_amount":
+        return this.handleEmitAmount(session, input);
+      case "emit_awaiting_customer_phone":
+        return this.handleEmitCustomerPhone(session, context, input);
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -192,6 +203,21 @@ export class UssdSessionService {
   }
 
   private async completeAuthentication(sessionId: string, context: SessionContext): Promise<UssdResponse> {
+    // Option 4 (émettre, D1) câblée ici — 1/3/5 restent le stub générique,
+    // remplacé tâche par tâche par la suite de la feuille de route USSD.
+    if (context.pendingOption === "4") {
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "emit_awaiting_amount",
+          userId: context.authUserId,
+          organizationId: context.authOrganizationId,
+          contextData: {},
+        },
+      });
+      return { continue: true, text: "Montant de la facture (GNF) :" };
+    }
+
     await this.prisma.ussdSession.update({
       where: { id: sessionId },
       data: {
@@ -201,9 +227,47 @@ export class UssdSessionService {
         contextData: {},
       },
     });
-    // Option réellement câblée par les tâches suivantes de la feuille de route
-    // USSD (ussd-menu-emit-invoice, ussd-menu-pay-invoice, ...).
     return { continue: false, text: `Authentification réussie. Option ${context.pendingOption} bientôt disponible.` };
+  }
+
+  // §2.4 Spec USSD — montant seul collecté, jamais une description (séquence
+  // < 90s). AMOUNT_FORMAT rejette "0" et tout préfixe zéro ambigu.
+  private async handleEmitAmount(session: UssdSessionRow, input: string): Promise<UssdResponse> {
+    if (!AMOUNT_FORMAT.test(input)) {
+      return { continue: true, text: "Montant invalide. Réessayez :" };
+    }
+    // Centimes GNF (convention repo) — la saisie utilisateur est en GNF naturels.
+    const amountCentimes = (BigInt(input) * 100n).toString();
+    await this.setState(session.id, "emit_awaiting_customer_phone", { emitAmountCentimes: amountCentimes });
+    return { continue: true, text: "Numéro du client (laisser vide si aucun) :" };
+  }
+
+  private async handleEmitCustomerPhone(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    const phone = input.trim();
+    if (phone && !MSISDN_FORMAT.test(phone)) {
+      return { continue: true, text: "Numéro invalide. Réessayez :" };
+    }
+
+    const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
+      session.userId as string,
+      session.organizationId ?? undefined,
+    );
+    if (!organizationId) {
+      return { continue: false, text: "Aucune organisation habilitée à émettre n'a été trouvée pour ce compte." };
+    }
+
+    const customerId = await this.ussdInvoice.resolveOrCreateCustomer(organizationId, phone || undefined);
+    const amountCentimes = BigInt(context.emitAmountCentimes as string);
+    const invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, customerId);
+
+    // C9 (déjà câblée dans InvoicesService.issue()) n'envoie que si customerId
+    // est renseigné — le message reflète fidèlement ce qui a réellement eu lieu.
+    const smsNote = customerId ? " Lien de paiement envoyé par SMS." : "";
+    return { continue: false, text: `Facture ${invoice.number} émise.${smsNote}` };
   }
 
   // §2.2 Spec USSD — aucune authentification requise, statut de contestation
