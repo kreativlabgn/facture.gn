@@ -31,6 +31,6 @@ function readPemFromEnv(name: string): string {
         new JwtAuthTokenService(readPemFromEnv("JWT_PRIVATE_KEY"), readPemFromEnv("JWT_PUBLIC_KEY")),
     },
   ],
-  exports: [AUTH_TOKEN_SERVICE],
+  exports: [AUTH_TOKEN_SERVICE, PASSWORD_SERVICE],
 })
 export class AuthModule {}
