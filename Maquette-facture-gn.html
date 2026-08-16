@@ -730,7 +730,7 @@ button{font-family:inherit;}
   <div class="app-header">
     <div class="brand-row">
       <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><path d="M13 3L20 9.5L13 16L6 9.5Z" fill="none" stroke="#FBB500" stroke-width="1.6"/></svg>
-      <div><div class="org-name">Boutique Aissatou</div><span class="tier-chip">Freemium · T1</span></div>
+      <div><div class="org-name">Boutique Aissatou</div><span class="tier-chip" id="home-tier-chip">Freemium · T1</span></div>
     </div>
   </div>
 
@@ -765,7 +765,7 @@ button{font-family:inherit;}
 
       <div class="stats-strip">
         <div class="stat-mini"><div class="lbl">Encaissé ce mois</div><div class="val mono">4,82M</div></div>
-        <div class="stat-mini"><div class="lbl">Palier</div><div class="val">Freemium</div></div>
+        <div class="stat-mini"><div class="lbl">Palier</div><div class="val" id="home-tier-val">Freemium</div></div>
       </div>
       <div class="chain-note">
         <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -850,20 +850,35 @@ button{font-family:inherit;}
   <!-- ================= ÉMISSION ================= -->
   <section class="screen" id="s-emission">
     <h1 style="font-size:20px; margin-bottom:16px;">Émettre une facture</h1>
-    <div class="card" style="padding:18px; margin-bottom:14px;">
-      <div class="field"><label>Client</label><select><option>Restaurant Le Damier</option><option>+ Nouveau client</option><option>Facture anonyme (plafond 500 000 GNF)</option></select></div>
-      <div class="field"><label>Type de document</label><select><option>Facture</option><option>Proforma (arrhes uniquement)</option><option>Devis</option></select></div>
-      <div class="line-item head"><span>Description</span><span>Qté</span><span>P.U.</span><span>Total</span></div>
-      <div class="line-item"><span>Sac de riz 50kg</span><span>4</span><span class="mono">85 000</span><span class="mono">340 000</span></div>
-      <div class="line-item"><span>Livraison Kaloum</span><span>1</span><span class="mono">15 000</span><span class="mono">15 000</span></div>
-      <button class="btn-ghost" style="margin-top:10px;">+ Ajouter une ligne</button>
+    <div id="em-form">
+      <div class="card" style="padding:18px; margin-bottom:14px;">
+        <div class="field"><label>Client</label><select><option>Restaurant Le Damier</option><option>+ Nouveau client</option><option>Facture anonyme (plafond 500 000 GNF)</option></select></div>
+        <div class="field"><label>Type de document</label><select><option>Facture</option><option>Proforma (arrhes uniquement)</option><option>Devis</option></select></div>
+        <div class="line-item head"><span>Description</span><span>Qté</span><span>P.U.</span><span>Total</span></div>
+        <div class="line-item"><span>Sac de riz 50kg</span><span>4</span><span class="mono">85 000</span><span class="mono">340 000</span></div>
+        <div class="line-item"><span>Livraison Kaloum</span><span>1</span><span class="mono">15 000</span><span class="mono">15 000</span></div>
+        <button class="btn-ghost" style="margin-top:10px;">+ Ajouter une ligne</button>
+      </div>
+      <div class="card" style="padding:18px;">
+        <div class="total-line"><span>Sous-total HT</span><span class="mono">355 000 GNF</span></div>
+        <div class="total-line"><span>Régime</span><span>TPU · 5 %</span></div>
+        <div class="total-line grand"><span>Total TTC</span><span class="mono">372 750 GNF</span></div>
+        <button class="btn-primary" onclick="s1_emitInvoice()">Émettre et certifier</button>
+        <p style="font-size:11px; color:var(--text-dim); margin-top:10px; line-height:1.5;">Signée (Ed25519), chaînée au registre. Hors ligne : mise en file, synchronisée à la reconnexion.</p>
+      </div>
     </div>
-    <div class="card" style="padding:18px;">
-      <div class="total-line"><span>Sous-total HT</span><span class="mono">355 000 GNF</span></div>
-      <div class="total-line"><span>Régime</span><span>TPU · 5 %</span></div>
-      <div class="total-line grand"><span>Total TTC</span><span class="mono">372 750 GNF</span></div>
-      <button class="btn-primary">Émettre et certifier</button>
-      <p style="font-size:11px; color:var(--text-dim); margin-top:10px; line-height:1.5;">Signée (Ed25519), chaînée au registre. Hors ligne : mise en file, synchronisée à la reconnexion.</p>
+
+    <div id="em-success" hidden style="text-align:center; padding:20px 4px;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h2 style="font-size:17px; margin-bottom:6px;">Facture émise et certifiée</h2>
+      <p style="font-size:12.5px; color:var(--text-dim); margin:0 0 4px;" id="em-success-num"></p>
+      <p class="mono" style="font-size:11px; color:var(--text-dim); margin:0 0 20px;" id="em-success-certid"></p>
+      <div style="display:flex; gap:8px;">
+        <button class="go ghost" style="flex:1;" onclick="s1_viewJustEmitted()">Voir la facture</button>
+        <button class="go" style="flex:1;" onclick="s1_resetEmission()">Nouvelle facture</button>
+      </div>
     </div>
   </section>
 
@@ -921,47 +936,11 @@ button{font-family:inherit;}
     <h1 style="font-size:20px; margin-bottom:4px;">Approbations</h1>
     <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Toute augmentation de plafond au-delà du seuil configuré exige une validation — jamais une décision unilatérale d'un admin seul (ADR-083).</p>
 
-    <div class="section-head" style="margin-top:0;"><h2>En attente</h2><span class="count">2</span></div>
-    <div class="queue" style="margin-bottom:22px;">
-      <div class="card" style="padding:15px 16px;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
-          <div>
-            <div style="font-weight:600; font-size:14px;">Fatoumata Camara</div>
-            <div class="mono" style="font-size:11px; color:var(--text-dim); margin-top:3px;">12 factures · 0 retard historique</div>
-          </div>
-          <div style="text-align:right;">
-            <div class="mono" style="font-size:13px;"><span style="color:var(--text-dim);">250 000</span> → <span style="font-weight:600;">400 000</span> GNF</div>
-            <div style="font-size:10.5px; color:var(--text-dim); margin-top:2px;">demandé par cashier · il y a 4h</div>
-          </div>
-        </div>
-        <div style="display:flex; gap:8px; margin-top:12px;">
-          <button class="go" style="flex:1;">Valider</button>
-          <button class="go ghost" style="flex:1;">Rejeter</button>
-        </div>
-      </div>
-      <div class="card" style="padding:15px 16px;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
-          <div>
-            <div style="font-weight:600; font-size:14px;">Boutique Sory</div>
-            <div style="font-size:11px; color:var(--bad); margin-top:3px; font-weight:600;">⚠ facture 610 000 GNF contestée en cours</div>
-          </div>
-          <div style="text-align:right;">
-            <div class="mono" style="font-size:13px;"><span style="color:var(--text-dim);">200 000</span> → <span style="font-weight:600;">350 000</span> GNF</div>
-            <div style="font-size:10.5px; color:var(--text-dim); margin-top:2px;">demandé par owner · hier</div>
-          </div>
-        </div>
-        <div style="display:flex; gap:8px; margin-top:12px;">
-          <button class="go" style="flex:1;">Valider</button>
-          <button class="go ghost" style="flex:1;">Rejeter</button>
-        </div>
-      </div>
-    </div>
+    <div class="section-head" style="margin-top:0;"><h2>En attente</h2><span class="count" id="appr-count">2</span></div>
+    <div class="queue" style="margin-bottom:22px;" id="appr-pending"></div>
 
     <div class="section-head"><h2>Traitées récemment</h2></div>
-    <div class="card">
-      <div class="client-row"><div class="row-main"><span class="name">Mamadou Sylla</span><span class="sub">800 000 → 1 000 000 GNF · admin notifié</span></div><div class="row-side"><span class="pill paid">Validée</span></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Restaurant Le Damier</span><span class="sub">500 000 → 900 000 GNF · admin notifié</span></div><div class="row-side"><span class="pill void">Rejetée</span></div></div>
-    </div>
+    <div class="card" id="appr-done"></div>
   </section>
 
   <!-- ================= ANALYTICS (business_manager, ADR-084) ================= -->
@@ -1016,34 +995,18 @@ button{font-family:inherit;}
 
     <div class="card" style="padding:16px; margin-bottom:18px;">
       <div class="panel-title" style="margin-bottom:12px;">Réceptionner du stock</div>
-      <div class="field" style="margin-bottom:10px;"><label>Produit</label><select><option>Sac de riz 50kg</option><option>Huile 5L</option><option>Sucre 50kg</option><option>Savon (carton)</option></select></div>
+      <div class="field" style="margin-bottom:10px;"><label>Produit</label><select id="stock-product"><option>Sac de riz 50kg</option><option>Huile 5L</option><option>Sucre 50kg</option><option>Savon (carton)</option></select></div>
       <div style="display:flex; gap:10px;">
-        <div class="field" style="flex:1.3; margin-bottom:0;"><label>Succursale</label><select><option>Boutique principale</option><option>Entrepôt Kaloum</option></select></div>
-        <div class="field" style="flex:1; margin-bottom:0;"><label>Quantité</label><input type="text" value="+ 20"></div>
+        <div class="field" style="flex:1.3; margin-bottom:0;"><label>Succursale</label><select id="stock-branch"><option>Boutique principale</option><option>Entrepôt Kaloum</option></select></div>
+        <div class="field" style="flex:1; margin-bottom:0;"><label>Quantité</label><input type="text" id="stock-qty" value="20"></div>
       </div>
       <div class="field" style="margin-top:10px; margin-bottom:0;"><label>Motif</label><select><option>Réception fournisseur</option><option>Ajustement d'inventaire</option><option>Perte / casse</option></select></div>
-      <button class="btn-primary" style="margin-top:14px;">Enregistrer le mouvement</button>
+      <button class="btn-primary" style="margin-top:14px;" onclick="s1_receiveStock()">Enregistrer le mouvement</button>
+      <p id="stock-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:10px 0 0;"></p>
     </div>
 
     <div class="section-head" style="margin-top:0;"><h2>Niveaux de stock</h2></div>
-    <div class="card">
-      <div class="invoice-row">
-        <div class="row-main"><span class="offline-dot" style="background:var(--bad);" title="Stock critique"></span><span class="name">Sac de riz 50kg</span><span class="sub">Boutique principale · Entrepôt Kaloum</span></div>
-        <div class="row-side" style="gap:14px;"><span class="mono" style="color:var(--bad);">4</span><span class="mono">38</span></div>
-      </div>
-      <div class="invoice-row">
-        <div class="row-main"><span class="name">Huile 5L</span><span class="sub">Boutique principale · Entrepôt Kaloum</span></div>
-        <div class="row-side" style="gap:14px;"><span class="mono">22</span><span class="mono">15</span></div>
-      </div>
-      <div class="invoice-row">
-        <div class="row-main"><span class="offline-dot" title="Stock bas"></span><span class="name">Sucre 50kg</span><span class="sub">Boutique principale · Entrepôt Kaloum</span></div>
-        <div class="row-side" style="gap:14px;"><span class="mono" style="color:var(--accent);">9</span><span class="mono">40</span></div>
-      </div>
-      <div class="invoice-row">
-        <div class="row-main"><span class="name">Savon (carton)</span><span class="sub">Boutique principale · Entrepôt Kaloum</span></div>
-        <div class="row-side" style="gap:14px;"><span class="mono">31</span><span class="mono">12</span></div>
-      </div>
-    </div>
+    <div class="card" id="stock-list"></div>
     <p style="font-size:11px; color:var(--text-dim); margin-top:12px; text-align:center;">
       Colonnes : Boutique principale · Entrepôt Kaloum. Seuils d'alerte illustratifs — non encore formalisés dans le modèle (gap ouvert).
     </p>
@@ -1059,36 +1022,34 @@ button{font-family:inherit;}
       <div class="stat-mini"><div class="lbl">Transactions</div><div class="val mono">38</div></div>
     </div>
 
-    <div class="section-head" style="margin-top:0;"><h2>Virements à rapprocher</h2><span class="count">2</span></div>
-    <div class="queue" style="margin-bottom:20px;">
-      <div class="queue-item">
-        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg></span>
-        <div class="body"><div class="title">Restaurant Le Damier</div><div class="meta">95 000 GNF · virement annoncé hier</div></div>
-        <button class="go ghost">Marquer reçu</button>
-      </div>
-      <div class="queue-item">
-        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg></span>
-        <div class="body"><div class="title">Aminata Diallo</div><div class="meta">130 000 GNF · virement annoncé il y a 2j</div></div>
-        <button class="go ghost">Marquer reçu</button>
-      </div>
-    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Virements à rapprocher</h2><span class="count" id="rapp-count">2</span></div>
+    <div class="queue" style="margin-bottom:20px;" id="rapp-list"></div>
 
-    <div class="filter-row">
-      <button class="filter-chip active">Toutes</button>
-      <button class="filter-chip">Cash</button>
-      <button class="filter-chip">Lien</button>
-      <button class="filter-chip">Virement</button>
+    <div class="filter-row" id="pay-filter-row">
+      <button class="filter-chip active" data-method="all">Toutes</button>
+      <button class="filter-chip" data-method="Cash">Cash</button>
+      <button class="filter-chip" data-method="Lien">Lien</button>
+      <button class="filter-chip" data-method="Virement">Virement</button>
     </div>
-    <div class="card">
-      <div class="invoice-row"><div class="row-main"><span class="name">Mamadou Sylla</span><span class="sub">Lien · Djomy MTN MoMo · il y a 2h</span></div><div class="row-side"><span class="amount">180 000</span><span class="pill paid">Payée</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Restaurant Le Damier</span><span class="sub">Virement · hier</span></div><div class="row-side"><span class="amount">95 000</span><span class="pill pending">Attente</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Fatoumata Camara</span><span class="sub">Cash · 24 juil.</span></div><div class="row-side"><span class="amount">100 000</span><span class="pill partial">Partiel</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Client anonyme</span><span class="sub">Lien · Moneroo Carte · 23 juil.</span></div><div class="row-side"><span class="amount">45 000</span><span class="pill paid">Payée</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Boutique Sory</span><span class="sub">Virement · 22 juil.</span></div><div class="row-side"><span class="amount">610 000</span><span class="pill void">Contestée</span></div></div>
-    </div>
+    <div class="card" id="pay-list"></div>
     <p style="font-size:11px; color:var(--text-dim); margin-top:12px; text-align:center;">
       Le marchand reçoit toujours 100 % du montant facturé — commission et frais gateway portés par le payeur.
     </p>
+  </section>
+
+  <!-- ================= DÉTAIL PAIEMENT ================= -->
+  <section class="screen" id="s-payment-detail">
+    <div class="back-row" onclick="s1_showScreen('s-paiements')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Paiements</div>
+    <div class="detail-hero">
+      <div class="org" id="pd-name"></div>
+      <div class="amt mono" id="pd-amount"></div>
+      <span class="pill" id="pd-status"></span>
+    </div>
+    <div class="card">
+      <div class="detail-row"><span class="k">Méthode</span><span id="pd-method"></span></div>
+      <div class="detail-row"><span class="k">Date</span><span id="pd-date"></span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Commission</span><span id="pd-commission"></span></div>
+    </div>
   </section>
 
   <!-- ================= ÉQUIPE & RÔLES (owner/admin) ================= -->
@@ -1098,28 +1059,38 @@ button{font-family:inherit;}
 
     <div class="card" style="padding:16px; margin-bottom:18px;">
       <div class="panel-title" style="margin-bottom:12px;">Inviter un membre</div>
-      <div class="field" style="margin-bottom:10px;"><label>Téléphone</label><input type="text" placeholder="+224 6…"></div>
-      <div class="field" style="margin-bottom:0;"><label>Rôle</label><select><option>cashier — Caissier</option><option>admin — Administrateur</option><option>accountant_internal — Comptable salarié</option><option>business_manager — Gestionnaire d'activité</option><option>inventory_manager — Gestionnaire de stock</option><option>approver — Approbateur</option><option>viewer — Lecteur</option><option>field_agent — Agent terrain</option></select></div>
-      <button class="btn-primary">Envoyer l'invitation</button>
+      <div class="field" style="margin-bottom:10px;"><label>Téléphone</label><input type="text" id="inv-phone" placeholder="+224 6…"></div>
+      <div class="field" style="margin-bottom:0;"><label>Rôle</label><select id="inv-role"><option value="cashier">cashier — Caissier</option><option value="admin">admin — Administrateur</option><option value="accountant_internal">accountant_internal — Comptable salarié</option><option value="business_manager">business_manager — Gestionnaire d'activité</option><option value="inventory_manager">inventory_manager — Gestionnaire de stock</option><option value="approver">approver — Approbateur</option><option value="viewer">viewer — Lecteur</option><option value="field_agent">field_agent — Agent terrain</option></select></div>
+      <button class="btn-primary" onclick="s1_inviteMember()">Envoyer l'invitation</button>
+      <p id="inv-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:10px 0 0;"></p>
     </div>
 
-    <div class="section-head" style="margin-top:0;"><h2>Membres</h2><span class="count">5</span></div>
-    <div class="card" style="margin-bottom:18px;">
-      <div class="client-row"><div class="row-main"><span class="name">Aissatou Diallo</span><span class="sub">Vous</span></div><span class="pill neutral">owner</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Ibrahima Bah</span><span class="sub">Actif depuis mars 2026</span></div><div class="row-side" style="gap:8px;"><span class="pill neutral">admin</span><button class="btn-ghost">Gérer</button></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Fatou Camara</span><span class="sub">Actif depuis avril 2026</span></div><div class="row-side" style="gap:8px;"><span class="pill neutral">cashier</span><button class="btn-ghost">Gérer</button></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Sékou Traoré</span><span class="sub">Actif depuis mai 2026</span></div><div class="row-side" style="gap:8px;"><span class="pill neutral">field_agent</span><button class="btn-ghost">Gérer</button></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Mamadou Barry</span><span class="sub">Actif depuis juin 2026</span></div><div class="row-side" style="gap:8px;"><span class="pill neutral">accountant_internal</span><button class="btn-ghost">Gérer</button></div></div>
-    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Membres</h2><span class="count" id="team-count">5</span></div>
+    <div class="card" style="margin-bottom:18px;" id="team-list"></div>
 
     <div class="section-head"><h2>Sécurité</h2></div>
     <div class="card" style="padding:15px 16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--border);">
-        <div><div style="font-weight:600; font-size:13px;">Administrateur de secours</div><div style="font-size:11.5px; color:var(--text-dim); margin-top:2px;">Ibrahima Bah</div></div>
-        <button class="btn-ghost">Changer</button>
+        <div><div style="font-weight:600; font-size:13px;">Administrateur de secours</div><div style="font-size:11.5px; color:var(--text-dim); margin-top:2px;" id="backup-admin-name">Ibrahima Bah</div></div>
+        <button class="btn-ghost" onclick="s1_changeBackupAdmin()">Changer</button>
       </div>
       <div style="font-size:11.5px; color:var(--text-dim); line-height:1.6;">Accès d'urgence (break-glass) : nécessite 2 administrateurs et un code OTP — jamais une décision unilatérale.</div>
     </div>
+  </section>
+
+  <!-- ================= DÉTAIL MEMBRE ================= -->
+  <section class="screen" id="s-member-detail">
+    <div class="back-row" onclick="s1_showScreen('s-equipe')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Équipe &amp; Rôles</div>
+    <div class="detail-hero">
+      <div class="org" id="md-name"></div>
+      <span class="pill neutral" id="md-role"></span>
+    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Changer de rôle</h2></div>
+    <div class="card" style="padding:16px; margin-bottom:18px;">
+      <select id="md-role-select" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; margin-bottom:12px;"><option value="admin">admin — Administrateur</option><option value="cashier">cashier — Caissier</option><option value="accountant_internal">accountant_internal — Comptable salarié</option><option value="business_manager">business_manager — Gestionnaire d'activité</option><option value="inventory_manager">inventory_manager — Gestionnaire de stock</option><option value="approver">approver — Approbateur</option><option value="viewer">viewer — Lecteur</option><option value="field_agent">field_agent — Agent terrain</option></select>
+      <button class="btn-primary" style="width:100%;" onclick="s1_applyMemberRole()">Enregistrer le rôle</button>
+    </div>
+    <button class="btn-ghost" style="width:100%; padding:12px; text-align:center; color:var(--bad); border-color:var(--bad);" onclick="s1_revokeMember()">Retirer l'accès</button>
   </section>
 
   <!-- ================= JOURNAL D'AUDIT (auditor, ADR-097) ================= -->
@@ -1127,20 +1098,14 @@ button{font-family:inherit;}
     <h1 style="font-size:20px; margin-bottom:4px;">Journal d'audit</h1>
     <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Lecture seule — invoice_event (append-only, ADR-015) et historique des changements de permissions.</p>
 
-    <div class="filter-row">
-      <button class="filter-chip active">Tout</button>
-      <button class="filter-chip">Factures</button>
-      <button class="filter-chip">Paiements</button>
-      <button class="filter-chip">Permissions</button>
+    <div class="filter-row" id="audit-filter-row">
+      <button class="filter-chip active" data-cat="all">Tout</button>
+      <button class="filter-chip" data-cat="Factures">Factures</button>
+      <button class="filter-chip" data-cat="Paiements">Paiements</button>
+      <button class="filter-chip" data-cat="Permissions">Permissions</button>
     </div>
 
-    <div class="card">
-      <div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px; color:var(--good);">invoice.paid</span><span class="sub">FG-2026-000412 réglée · Djomy (webhook)</span></div><span class="sub" style="flex:none;">il y a 2h</span></div>
-      <div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px;">credit_limit.updated</span><span class="sub">Fatoumata Camara 250k → 400k · Ibrahima Bah (approver)</span></div><span class="sub" style="flex:none;">il y a 4h</span></div>
-      <div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px; color:var(--bad);">invoice.disputed</span><span class="sub">FG-2026-000408 contestée · Boutique Sory</span></div><span class="sub" style="flex:none;">22 juil.</span></div>
-      <div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px;">role.assigned</span><span class="sub">Sékou Traoré → field_agent · Aissatou Diallo</span></div><span class="sub" style="flex:none;">18 juil.</span></div>
-      <div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px; color:var(--good);">invoice.issued</span><span class="sub">FG-2026-000412 émise · Aissatou Diallo</span></div><span class="sub" style="flex:none;">il y a 2h</span></div>
-    </div>
+    <div class="card" id="audit-list"></div>
   </section>
 
   <!-- ================= DÉVELOPPEUR / API (developer_api, ADR-097) ================= -->
@@ -1149,11 +1114,9 @@ button{font-family:inherit;}
     <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Palier Pro et supérieur. Gestion self-service des clés — aucune donnée sensible affichée en clair après création.</p>
 
     <div class="section-head" style="margin-top:0;"><h2>Clés API</h2></div>
-    <div class="card" style="margin-bottom:18px;">
-      <div class="client-row"><div class="row-main"><span class="name mono" style="font-size:12.5px;">fg_live_••••9f2a</span><span class="sub">Production · créée 12 juin · utilisée il y a 3h</span></div><button class="btn-ghost">Révoquer</button></div>
-      <div class="client-row"><div class="row-main"><span class="name mono" style="font-size:12.5px;">fg_test_••••2c81</span><span class="sub">Sandbox · créée 12 juin · jamais utilisée</span></div><button class="btn-ghost">Révoquer</button></div>
-    </div>
-    <button class="btn-ghost" style="width:100%; padding:12px; text-align:center; margin-bottom:22px;">+ Générer une nouvelle clé</button>
+    <div class="card" style="margin-bottom:18px;" id="apikeys-list"></div>
+    <button class="btn-ghost" style="width:100%; padding:12px; text-align:center; margin-bottom:10px;" onclick="s1_generateApiKey()">+ Générer une nouvelle clé</button>
+    <p id="apikey-new" hidden class="mono" style="font-size:11.5px; color:var(--good); font-weight:600; margin:0 0 22px; word-break:break-all;"></p>
 
     <div class="section-head" style="margin-top:0;"><h2>Appels récents</h2></div>
     <div class="card" style="margin-bottom:16px;">
@@ -1170,11 +1133,32 @@ button{font-family:inherit;}
   <section class="screen" id="s-parametres">
     <h1 style="font-size:20px; margin-bottom:16px;">Paramètres organisation</h1>
     <div class="card">
-      <div class="client-row"><div class="row-main"><span class="name">Organisation</span><span class="sub">Boutique Aissatou · NIF 123456789 · eTax vérifié</span></div><span class="sub" style="flex:none;">›</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Succursales</span><span class="sub">2 · Boutique principale, Entrepôt Kaloum</span></div><span class="sub" style="flex:none;">›</span></div>
+      <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-org-detail')"><div class="row-main"><span class="name">Organisation</span><span class="sub">Boutique Aissatou · NIF 123456789 · eTax vérifié</span></div><span class="sub" style="flex:none;">›</span></div>
+      <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-succursales')"><div class="row-main"><span class="name">Succursales</span><span class="sub">2 · Boutique principale, Entrepôt Kaloum</span></div><span class="sub" style="flex:none;">›</span></div>
       <div class="client-row" style="opacity:.5;"><div class="row-main"><span class="name">Branding personnalisé</span><span class="sub">Verrouillé — palier Pro requis</span></div><span class="sub" style="flex:none;">🔒</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Sécurité</span><span class="sub">Administrateur de secours : Ibrahima Bah</span></div><span class="sub" style="flex:none;">›</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Abonnement</span><span class="sub">Freemium</span></div><button class="btn-ghost">Passer à Starter</button></div>
+      <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-equipe')"><div class="row-main"><span class="name">Sécurité</span><span class="sub">Administrateur de secours : <span id="param-backup-admin">Ibrahima Bah</span></span></div><span class="sub" style="flex:none;">›</span></div>
+      <div class="client-row"><div class="row-main"><span class="name">Abonnement</span><span class="sub" id="param-plan">Freemium</span></div><button class="btn-ghost" id="param-upgrade-btn" onclick="s1_upgradePlan()">Passer à Starter</button></div>
+    </div>
+  </section>
+
+  <!-- ================= ORGANISATION (détail) ================= -->
+  <section class="screen" id="s-org-detail">
+    <div class="back-row" onclick="s1_showScreen('s-parametres')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Paramètres</div>
+    <h1 style="font-size:20px; margin-bottom:16px;">Organisation</h1>
+    <div class="card">
+      <div class="detail-row"><span class="k">Nom légal</span><span>Boutique Aissatou</span></div>
+      <div class="detail-row"><span class="k">NIF</span><span class="mono">123456789</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">eTax</span><span class="pill paid">Vérifié</span></div>
+    </div>
+  </section>
+
+  <!-- ================= SUCCURSALES (détail) ================= -->
+  <section class="screen" id="s-succursales">
+    <div class="back-row" onclick="s1_showScreen('s-parametres')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Paramètres</div>
+    <h1 style="font-size:20px; margin-bottom:16px;">Succursales</h1>
+    <div class="card">
+      <div class="client-row"><div class="row-main"><span class="name">Boutique principale</span><span class="sub">Madina, Conakry</span></div><span class="pill paid">Active</span></div>
+      <div class="client-row"><div class="row-main"><span class="name">Entrepôt Kaloum</span><span class="sub">Kaloum, Conakry</span></div><span class="pill paid">Active</span></div>
     </div>
   </section>
 
@@ -1184,22 +1168,34 @@ button{font-family:inherit;}
 
     <div class="card" style="padding:16px; margin-bottom:18px;">
       <div class="panel-title" style="margin-bottom:12px;">Nouveau ticket</div>
-      <div class="field" style="margin-bottom:10px;"><label>Sujet</label><input type="text" placeholder="Décrivez votre problème en une phrase"></div>
-      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select><option>Faible</option><option>Moyenne</option><option>Élevée</option><option>Critique</option></select></div>
-      <div class="field" style="margin-bottom:0;"><label>Détails</label><input type="text" placeholder="Plus de contexte…"></div>
-      <button class="btn-primary">Envoyer</button>
+      <div class="field" style="margin-bottom:10px;"><label>Sujet</label><input type="text" id="tk-subject" placeholder="Décrivez votre problème en une phrase"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select id="tk-severity"><option>Faible</option><option>Moyenne</option><option>Élevée</option><option>Critique</option></select></div>
+      <div class="field" style="margin-bottom:0;"><label>Détails</label><input type="text" id="tk-details" placeholder="Plus de contexte…"></div>
+      <button class="btn-primary" onclick="s1_submitTicket()">Envoyer</button>
+      <p id="tk-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:10px 0 0;"></p>
     </div>
 
     <div class="section-head" style="margin-top:0;"><h2>Mes tickets</h2></div>
-    <div class="card" style="margin-bottom:18px;">
-      <div class="client-row"><div class="row-main"><span class="name">Lien de paiement expiré sans raison</span><span class="sub">Sévérité moyenne · SLA 24h · ouvert il y a 5h</span></div><span class="pill pending">En cours</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Question sur l'export FEC</span><span class="sub">Sévérité faible · répondu hier</span></div><span class="pill paid">Résolu</span></div>
-    </div>
+    <div class="card" style="margin-bottom:18px;" id="ticket-list"></div>
 
     <div class="section-head" style="margin-top:0;"><h2>Contact direct</h2></div>
     <div class="card" style="padding:6px 16px;">
-      <div class="client-row"><div class="row-main"><span class="name">WhatsApp</span><span class="sub">Réponse sous 2h en heures ouvrées</span></div><span class="sub" style="flex:none;">›</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Téléphone</span><span class="sub">+224 6XX XX XX XX</span></div><span class="sub" style="flex:none;">›</span></div>
+      <a class="client-row" style="text-decoration:none; color:inherit;" href="https://wa.me/224600000000" target="_blank" rel="noopener"><div class="row-main"><span class="name">WhatsApp</span><span class="sub">Réponse sous 2h en heures ouvrées</span></div><span class="sub" style="flex:none;">↗</span></a>
+      <a class="client-row" style="text-decoration:none; color:inherit;" href="tel:+224600000000"><div class="row-main"><span class="name">Téléphone</span><span class="sub">+224 6XX XX XX XX</span></div><span class="sub" style="flex:none;">↗</span></a>
+    </div>
+  </section>
+
+  <!-- ================= DÉTAIL TICKET ================= -->
+  <section class="screen" id="s-ticket-detail">
+    <div class="back-row" onclick="s1_showScreen('s-support')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Support</div>
+    <div class="detail-hero">
+      <div class="org" id="tkd-subject"></div>
+      <span class="pill" id="tkd-status"></span>
+    </div>
+    <div class="card">
+      <div class="detail-row"><span class="k">Sévérité</span><span id="tkd-severity"></span></div>
+      <div class="detail-row"><span class="k">Ouvert</span><span id="tkd-opened"></span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">SLA restant</span><span class="mono" id="tkd-sla"></span></div>
     </div>
   </section>
 
@@ -1982,7 +1978,7 @@ button{font-family:inherit;}
 
 <script>
 (function(){
-const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-equipe','s-audit','s-dev','s-parametres','s-support'];
+const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-support','s-ticket-detail'];
 const LIGHT_ROLES = ['field_agent','delivery_driver'];
 const tabbar = document.getElementById('tabbar');
 const drawer = document.getElementById('drawer');
@@ -1992,6 +1988,7 @@ function showScreen(id){
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
   document.querySelectorAll('.tabbar-item[data-screen], .tabbar-cta').forEach(t => t.classList.toggle('active', t.dataset.screen === id));
   tabbar.classList.toggle('visible', SHELL1_SCREENS.includes(id));
+  if (id !== 's-ticket-detail' && ticketCountdownTimer) { clearInterval(ticketCountdownTimer); ticketCountdownTimer = null; }
   window.scrollTo(0,0);
 }
 tabbar.addEventListener('click', (e) => {
@@ -2209,6 +2206,322 @@ document.querySelectorAll('.sync-toggle button').forEach(btn => {
   });
 });
 
+// ===== Émission — flux de confirmation =====
+let lastEmittedId = null;
+function emitInvoice(){
+  const newInv = {
+    id: 'inv' + (INVOICES.length + 1),
+    num: 'FG-2026-0004' + (13 + INVOICES.length),
+    org: 'Nouvelle facture — client comptoir',
+    amount: 45000, status: 'pending',
+    date: '14 août 2026 · à l\'instant',
+    certid: 'GN-31029918-2026-' + Math.random().toString(16).slice(2, 8).toUpperCase(),
+    hash: Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6) + ' ← ' + INVOICES[0].hash.split(' ← ')[0],
+    lines: [{ d:'Vente comptoir', q:1, pu:'45 000', t:'45 000' }],
+    events: [{ t:'invoice.issued', a:'Aissatou Diallo', w:'à l\'instant' }],
+    payment: { link:'https://facture.gn/p/' + Math.random().toString(16).slice(2, 14), expiry:'Expire dans 30 jours (TTL 30j, ADR-066)' },
+    actions: ['marquer_paye','avoir'],
+  };
+  INVOICES.unshift(newInv);
+  lastEmittedId = newInv.id;
+  renderInvoicesList();
+  document.getElementById('em-form').hidden = true;
+  document.getElementById('em-success').hidden = false;
+  document.getElementById('em-success-num').textContent = newInv.num + ' · ' + newInv.amount.toLocaleString('fr-FR') + ' GNF';
+  document.getElementById('em-success-certid').textContent = newInv.certid;
+}
+function viewJustEmitted(){
+  if (!lastEmittedId) return;
+  resetEmission();
+  showInvoiceDetail(lastEmittedId);
+}
+function resetEmission(){
+  document.getElementById('em-form').hidden = false;
+  document.getElementById('em-success').hidden = true;
+}
+
+// ===== Approbations (approver, ADR-083) =====
+const APPROVALS = [
+  { id:'ap1', title:'Demande de crédit — Fatoumata Camara', meta:'250 000 → 400 000 GNF · demandé il y a 4h', status:'pending' },
+  { id:'ap2', title:'Remise exceptionnelle — Restaurant Le Damier', meta:'Remise 10 % sur FG-2026-000411 · demandé hier', status:'pending' },
+  { id:'ap3', title:'Demande de crédit — Mamadou Sylla', meta:'800 000 → 1 000 000 GNF', status:'approved', by:'Aissatou Diallo', when:'18 juil.' },
+  { id:'ap4', title:'Remise exceptionnelle — Boutique Sory', meta:'Remise 15 % demandée sur FG-2026-000408', status:'rejected', by:'Aissatou Diallo', when:'15 juil.' },
+];
+function renderApprovals(){
+  const pending = APPROVALS.filter(a => a.status === 'pending');
+  const done = APPROVALS.filter(a => a.status !== 'pending');
+  document.getElementById('appr-count').textContent = pending.length;
+  document.getElementById('appr-pending').innerHTML = pending.length ? pending.map(a => `
+    <div class="queue-item">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></span>
+      <div class="body"><div class="title">${a.title}</div><div class="meta">${a.meta}</div></div>
+      <div style="display:flex; gap:6px;">
+        <button class="go ghost" onclick="s1_decideApproval('${a.id}','rejected')">Rejeter</button>
+        <button class="go" onclick="s1_decideApproval('${a.id}','approved')">Valider</button>
+      </div>
+    </div>`).join('') : '<div class="queue-empty">Aucune demande en attente.</div>';
+  document.getElementById('appr-done').innerHTML = done.map(a => `
+    <div class="invoice-row"><div class="row-main"><span class="name">${a.title}</span><span class="sub">${a.meta} · ${a.by}</span></div><span class="pill ${a.status === 'approved' ? 'paid' : 'void'}">${a.status === 'approved' ? 'Validée' : 'Rejetée'}</span></div>`).join('');
+}
+function decideApproval(id, decision){
+  const a = APPROVALS.find(x => x.id === id);
+  a.status = decision; a.by = 'Aissatou Diallo'; a.when = "à l'instant";
+  renderApprovals();
+  const badge = document.querySelector('.drawer-item[data-screen="s-approbations"] .badge');
+  if (badge) badge.textContent = APPROVALS.filter(x => x.status === 'pending').length;
+}
+
+// ===== Produits & Stock (inventory_manager, ADR-097) =====
+const STOCK = {
+  'Sac de riz 50kg': { principale:4, kaloum:0 },
+  'Huile 5L': { principale:32, kaloum:18 },
+  'Sucre 50kg': { principale:15, kaloum:22 },
+  'Savon (carton)': { principale:9, kaloum:3 },
+};
+const BRANCH_KEY = { 'Boutique principale':'principale', 'Entrepôt Kaloum':'kaloum' };
+function renderStock(){
+  document.getElementById('stock-list').innerHTML = Object.entries(STOCK).map(([name, s]) => {
+    const total = s.principale + s.kaloum;
+    return `<div class="invoice-row"><div class="row-main"><span class="name">${name}</span><span class="sub">Boutique principale : ${s.principale} · Entrepôt Kaloum : ${s.kaloum}</span></div><span class="pill ${total < 10 ? 'void' : 'paid'}">${total} en stock</span></div>`;
+  }).join('');
+}
+function receiveStock(){
+  const product = document.getElementById('stock-product').value;
+  const branch = BRANCH_KEY[document.getElementById('stock-branch').value];
+  const qty = parseInt(document.getElementById('stock-qty').value, 10) || 0;
+  if (!STOCK[product] || qty <= 0) return;
+  STOCK[product][branch] += qty;
+  renderStock();
+  const confirm = document.getElementById('stock-confirm');
+  confirm.hidden = false;
+  confirm.textContent = `+${qty} ${product} enregistré — ${document.getElementById('stock-branch').value}.`;
+  const qi = QUEUE_ITEMS.find(i => i.title.includes(product));
+  if (qi) {
+    const total = STOCK[product].principale + STOCK[product].kaloum;
+    qi.meta = `${total} unités restantes`;
+    if (!LIGHT_ROLES.includes(roleSelect.value)) renderQueue(roleSelect.value);
+  }
+}
+
+// ===== Paiements & Encaissements =====
+const RECONCILE_ITEMS = [
+  { id:'rc1', name:'Restaurant Le Damier', amount:95000, meta:'virement annoncé hier' },
+  { id:'rc2', name:'Aminata Diallo', amount:130000, meta:'virement annoncé il y a 2j' },
+];
+const PAYMENTS = [
+  { id:'py1', name:'Mamadou Sylla', method:'Lien', sub:'Djomy MTN MoMo · il y a 2h', amount:180000, status:'paid' },
+  { id:'py2', name:'Restaurant Le Damier', method:'Virement', sub:'hier', amount:95000, status:'pending' },
+  { id:'py3', name:'Fatoumata Camara', method:'Cash', sub:'24 juil.', amount:100000, status:'partial' },
+  { id:'py4', name:'Client anonyme', method:'Lien', sub:'Moneroo Carte · 23 juil.', amount:45000, status:'paid' },
+  { id:'py5', name:'Boutique Sory', method:'Virement', sub:'22 juil.', amount:610000, status:'void' },
+];
+function renderReconcile(){
+  document.getElementById('rapp-count').textContent = RECONCILE_ITEMS.length;
+  document.getElementById('rapp-list').innerHTML = RECONCILE_ITEMS.length ? RECONCILE_ITEMS.map(r => `
+    <div class="queue-item">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg></span>
+      <div class="body"><div class="title">${r.name}</div><div class="meta">${r.amount.toLocaleString('fr-FR')} GNF · ${r.meta}</div></div>
+      <button class="go ghost" onclick="s1_markReceived('${r.id}')">Marquer reçu</button>
+    </div>`).join('') : '<div class="queue-empty">Rien à rapprocher.</div>';
+}
+function markReceived(id){
+  const idx = RECONCILE_ITEMS.findIndex(r => r.id === id);
+  if (idx === -1) return;
+  const r = RECONCILE_ITEMS[idx];
+  RECONCILE_ITEMS.splice(idx, 1);
+  const py = PAYMENTS.find(p => p.name === r.name && p.amount === r.amount);
+  if (py) { py.status = 'paid'; py.sub = 'Virement · confirmé à l\'instant'; }
+  renderReconcile();
+  renderPayments(document.querySelector('#pay-filter-row .filter-chip.active')?.dataset.method || 'all');
+}
+function renderPayments(method){
+  const list = method === 'all' ? PAYMENTS : PAYMENTS.filter(p => p.method === method);
+  document.getElementById('pay-list').innerHTML = list.map(p => `
+    <div class="invoice-row" onclick="s1_showPaymentDetail('${p.id}')"><div class="row-main"><span class="name">${p.name}</span><span class="sub">${p.method} · ${p.sub}</span></div><div class="row-side"><span class="amount">${p.amount.toLocaleString('fr-FR')}</span><span class="pill ${p.status}">${STATUS_LABEL[p.status]}</span></div></div>`).join('');
+}
+document.getElementById('pay-filter-row').addEventListener('click', (e) => {
+  const chip = e.target.closest('.filter-chip');
+  if (!chip) return;
+  document.querySelectorAll('#pay-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  renderPayments(chip.dataset.method);
+});
+function showPaymentDetail(id){
+  const p = PAYMENTS.find(x => x.id === id);
+  document.getElementById('pd-name').textContent = p.name;
+  document.getElementById('pd-amount').textContent = p.amount.toLocaleString('fr-FR') + ' GNF';
+  const pill = document.getElementById('pd-status');
+  pill.className = 'pill ' + p.status;
+  pill.textContent = STATUS_LABEL[p.status];
+  document.getElementById('pd-method').textContent = p.method;
+  document.getElementById('pd-date').textContent = p.sub;
+  document.getElementById('pd-commission').textContent = '0 GNF — commission portée par le payeur';
+  showScreen('s-payment-detail');
+}
+
+// ===== Équipe & Rôles (owner/admin) =====
+const TEAM = [
+  { id:'m1', name:'Aissatou Diallo', role:'owner', sub:'Vous', locked:true },
+  { id:'m2', name:'Ibrahima Bah', role:'admin', sub:'Actif depuis mars 2026' },
+  { id:'m3', name:'Fatou Camara', role:'cashier', sub:'Actif depuis avril 2026' },
+  { id:'m4', name:'Sékou Traoré', role:'field_agent', sub:'Actif depuis mai 2026' },
+  { id:'m5', name:'Mamadou Barry', role:'accountant_internal', sub:'Actif depuis juin 2026' },
+];
+function renderTeam(){
+  document.getElementById('team-count').textContent = TEAM.length;
+  document.getElementById('team-list').innerHTML = TEAM.map(m => `
+    <div class="client-row"><div class="row-main"><span class="name">${m.name}</span><span class="sub">${m.sub}</span></div><div class="row-side" style="gap:8px;"><span class="pill neutral">${m.role}</span>${m.locked ? '' : `<button class="btn-ghost" onclick="s1_showMemberDetail('${m.id}')">Gérer</button>`}</div></div>`).join('');
+}
+function inviteMember(){
+  const phone = document.getElementById('inv-phone').value.trim();
+  const role = document.getElementById('inv-role').value;
+  if (!phone) return;
+  TEAM.push({ id:'m' + (TEAM.length + 1), name:'Invité — ' + phone, role, sub:"Invitation envoyée · en attente d'acceptation" });
+  renderTeam();
+  const confirm = document.getElementById('inv-confirm');
+  confirm.hidden = false;
+  confirm.textContent = `Invitation envoyée à ${phone}.`;
+  document.getElementById('inv-phone').value = '';
+}
+let currentMemberId = null;
+function showMemberDetail(id){
+  currentMemberId = id;
+  const m = TEAM.find(x => x.id === id);
+  document.getElementById('md-name').textContent = m.name;
+  document.getElementById('md-role').textContent = m.role;
+  document.getElementById('md-role-select').value = m.role;
+  showScreen('s-member-detail');
+}
+function applyMemberRole(){
+  const m = TEAM.find(x => x.id === currentMemberId);
+  if (!m) return;
+  m.role = document.getElementById('md-role-select').value;
+  renderTeam();
+  showScreen('s-equipe');
+}
+function revokeMember(){
+  const idx = TEAM.findIndex(x => x.id === currentMemberId);
+  if (idx === -1) return;
+  TEAM.splice(idx, 1);
+  renderTeam();
+  showScreen('s-equipe');
+}
+function changeBackupAdmin(){
+  const admins = TEAM.filter(m => m.role === 'admin');
+  if (!admins.length) return;
+  const current = document.getElementById('backup-admin-name').textContent;
+  const idx = admins.findIndex(a => a.name === current);
+  const next = admins[(idx + 1) % admins.length];
+  document.getElementById('backup-admin-name').textContent = next.name;
+  document.getElementById('param-backup-admin').textContent = next.name;
+}
+
+// ===== Journal d'audit (auditor, ADR-097) =====
+const AUDIT_LOG = [
+  { cat:'Paiements', t:'invoice.paid', color:'good', sub:'FG-2026-000412 réglée · Djomy (webhook)', w:'il y a 2h' },
+  { cat:'Permissions', t:'credit_limit.updated', color:null, sub:'Fatoumata Camara 250k → 400k · Ibrahima Bah (approver)', w:'il y a 4h' },
+  { cat:'Factures', t:'invoice.disputed', color:'bad', sub:'FG-2026-000408 contestée · Boutique Sory', w:'22 juil.' },
+  { cat:'Permissions', t:'role.assigned', color:null, sub:'Sékou Traoré → field_agent · Aissatou Diallo', w:'18 juil.' },
+  { cat:'Factures', t:'invoice.issued', color:'good', sub:'FG-2026-000412 émise · Aissatou Diallo', w:'il y a 2h' },
+];
+function renderAuditLog(cat){
+  const list = (!cat || cat === 'all') ? AUDIT_LOG : AUDIT_LOG.filter(e => e.cat === cat);
+  document.getElementById('audit-list').innerHTML = list.length ? list.map(e => `
+    <div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px; ${e.color ? 'color:var(--' + e.color + ');' : ''}">${e.t}</span><span class="sub">${e.sub}</span></div><span class="sub" style="flex:none;">${e.w}</span></div>`).join('') : '<div class="queue-empty">Aucun événement dans cette catégorie.</div>';
+}
+document.getElementById('audit-filter-row').addEventListener('click', (e) => {
+  const chip = e.target.closest('.filter-chip');
+  if (!chip) return;
+  document.querySelectorAll('#audit-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  renderAuditLog(chip.dataset.cat);
+});
+
+// ===== Développeur / API (developer_api, ADR-097) =====
+const API_KEYS = [
+  { id:'k1', label:'fg_live_••••9f2a', sub:'Production · créée 12 juin · utilisée il y a 3h' },
+  { id:'k2', label:'fg_test_••••2c81', sub:'Sandbox · créée 12 juin · jamais utilisée' },
+];
+function renderApiKeys(){
+  document.getElementById('apikeys-list').innerHTML = API_KEYS.map(k => `
+    <div class="client-row"><div class="row-main"><span class="name mono" style="font-size:12.5px;">${k.label}</span><span class="sub">${k.sub}</span></div><button class="btn-ghost" onclick="s1_revokeApiKey('${k.id}')">Révoquer</button></div>`).join('');
+}
+function revokeApiKey(id){
+  const idx = API_KEYS.findIndex(k => k.id === id);
+  if (idx === -1) return;
+  API_KEYS.splice(idx, 1);
+  renderApiKeys();
+}
+function generateApiKey(){
+  const full = 'fg_live_' + Array.from({length:24}, () => Math.random().toString(16)[2]).join('');
+  API_KEYS.push({ id:'k' + (API_KEYS.length + 1), label:'fg_live_••••' + full.slice(-4), sub:"Production · créée à l'instant · jamais utilisée" });
+  renderApiKeys();
+  const el = document.getElementById('apikey-new');
+  el.hidden = false;
+  el.textContent = 'Nouvelle clé (copiez-la maintenant, elle ne sera plus affichée) : ' + full;
+}
+
+// ===== Paramètres organisation (owner/admin) =====
+function upgradePlan(){
+  document.getElementById('param-plan').textContent = 'Starter';
+  document.getElementById('home-tier-chip').textContent = 'Starter · T1';
+  document.getElementById('home-tier-val').textContent = 'Starter';
+  const btn = document.getElementById('param-upgrade-btn');
+  btn.textContent = 'Palier actuel';
+  btn.disabled = true;
+  btn.style.opacity = '.5';
+}
+
+// ===== Support =====
+const SEVERITY_SLA = { 'Faible':72, 'Moyenne':24, 'Élevée':8, 'Critique':2 };
+const SUPPORT_TICKETS = [
+  { id:'tk1', subject:'Lien de paiement expiré sans raison', severity:'Moyenne', status:'pending', opened:'ouvert il y a 5h', slaHours:24, elapsedHours:5 },
+  { id:'tk2', subject:"Question sur l'export FEC", severity:'Faible', status:'resolved', opened:'répondu hier' },
+];
+function renderTickets(){
+  document.getElementById('ticket-list').innerHTML = SUPPORT_TICKETS.map(t => `
+    <div class="client-row" onclick="s1_showTicketDetail('${t.id}')" style="cursor:pointer;"><div class="row-main"><span class="name">${t.subject}</span><span class="sub">Sévérité ${t.severity.toLowerCase()} · ${t.opened}</span></div><span class="pill ${t.status === 'resolved' ? 'paid' : 'pending'}">${t.status === 'resolved' ? 'Résolu' : 'En cours'}</span></div>`).join('');
+}
+function submitTicket(){
+  const subject = document.getElementById('tk-subject').value.trim();
+  const severity = document.getElementById('tk-severity').value;
+  if (!subject) return;
+  const sla = SEVERITY_SLA[severity];
+  SUPPORT_TICKETS.unshift({ id:'tk' + (SUPPORT_TICKETS.length + 1), subject, severity, status:'pending', opened:"ouvert à l'instant", slaHours:sla, elapsedHours:0 });
+  renderTickets();
+  const confirm = document.getElementById('tk-confirm');
+  confirm.hidden = false;
+  confirm.textContent = `Ticket envoyé — SLA ${sla}h.`;
+  document.getElementById('tk-subject').value = '';
+  document.getElementById('tk-details').value = '';
+}
+let ticketCountdownTimer = null;
+function showTicketDetail(id){
+  const t = SUPPORT_TICKETS.find(x => x.id === id);
+  document.getElementById('tkd-subject').textContent = t.subject;
+  const pill = document.getElementById('tkd-status');
+  pill.className = 'pill ' + (t.status === 'resolved' ? 'paid' : 'pending');
+  pill.textContent = t.status === 'resolved' ? 'Résolu' : 'En cours';
+  document.getElementById('tkd-severity').textContent = t.severity;
+  document.getElementById('tkd-opened').textContent = t.opened;
+  if (ticketCountdownTimer) { clearInterval(ticketCountdownTimer); ticketCountdownTimer = null; }
+  const slaEl = document.getElementById('tkd-sla');
+  if (t.status === 'resolved') {
+    slaEl.textContent = '—';
+  } else {
+    if (!t.deadline) t.deadline = Date.now() + Math.max(0, (t.slaHours - t.elapsedHours)) * 3600000;
+    const tick = () => {
+      const remain = t.deadline - Date.now();
+      if (remain <= 0) { slaEl.textContent = 'SLA dépassé'; clearInterval(ticketCountdownTimer); ticketCountdownTimer = null; return; }
+      const h = Math.floor(remain / 3600000), m = Math.floor((remain % 3600000) / 60000), s = Math.floor((remain % 60000) / 1000);
+      slaEl.textContent = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    };
+    tick();
+    ticketCountdownTimer = setInterval(tick, 1000);
+  }
+  showScreen('s-ticket-detail');
+}
+
 // ===== Jauge de confiance (dessin au chargement) =====
 window.addEventListener('DOMContentLoaded', () => {
   const arc = document.getElementById('gauge-arc');
@@ -2220,12 +2533,37 @@ window.addEventListener('DOMContentLoaded', () => {
   renderInvoicesList();
   renderClientsList();
   applyRoleFilter();
+  renderApprovals();
+  renderStock();
+  renderReconcile();
+  renderPayments('all');
+  renderTeam();
+  renderAuditLog('all');
+  renderApiKeys();
+  renderTickets();
   showScreen('s-accueil');
 });
 
 window.s1_showScreen = showScreen;
 window.s1_showInvoiceDetail = showInvoiceDetail;
 window.s1_showClientDetail = showClientDetail;
+window.s1_emitInvoice = emitInvoice;
+window.s1_viewJustEmitted = viewJustEmitted;
+window.s1_resetEmission = resetEmission;
+window.s1_decideApproval = decideApproval;
+window.s1_receiveStock = receiveStock;
+window.s1_markReceived = markReceived;
+window.s1_showPaymentDetail = showPaymentDetail;
+window.s1_inviteMember = inviteMember;
+window.s1_showMemberDetail = showMemberDetail;
+window.s1_applyMemberRole = applyMemberRole;
+window.s1_revokeMember = revokeMember;
+window.s1_changeBackupAdmin = changeBackupAdmin;
+window.s1_revokeApiKey = revokeApiKey;
+window.s1_generateApiKey = generateApiKey;
+window.s1_upgradePlan = upgradePlan;
+window.s1_submitTicket = submitTicket;
+window.s1_showTicketDetail = showTicketDetail;
 })();
 
 (function(){
