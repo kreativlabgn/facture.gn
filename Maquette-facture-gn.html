@@ -114,6 +114,8 @@ button{font-family:inherit;}
 .light-shell p{font-size:13px; color:var(--text-dim); margin:0 0 24px; line-height:1.6;}
 .light-shell .big-cta{background:var(--accent); color:var(--accent-ink); border:none; border-radius:14px; padding:16px 28px; font-family:'Space Grotesk'; font-weight:600; font-size:15px; cursor:pointer;}
 
+@keyframes spin{to{transform:rotate(360deg);}}
+
 /* ===== Écrans / cartes génériques ===== */
 .screen{display:none;}
 .screen.active{display:block; animation:fadein .3s ease;}
@@ -787,10 +789,28 @@ button{font-family:inherit;}
 
     <div id="accueil-light" class="light-shell" hidden>
       <h2>Prêt à facturer</h2>
-      <p>Votre rôle donne accès à l'émission assistée uniquement — pas de tiroir, pas de liste complète (ADR-095).</p>
-      <button class="big-cta" onclick="s1_showScreen('s-emission')">+ Émettre une facture</button>
+      <p>Votre rôle donne accès à une session assistée limitée dans le temps — pas de tiroir, pas de liste complète, pas de compte permanent (ADR-095).</p>
+      <button class="big-cta" onclick="s1_startAssistedSession()">Démarrer une session assistée</button>
     </div>
 
+  </section>
+
+  <!-- ================= SESSION ASSISTÉE (field_agent / delivery_driver) ================= -->
+  <section class="screen" id="s-assisted">
+    <div style="text-align:center; padding:8px 4px 20px;">
+      <div style="width:48px; height:48px; border-radius:50%; background:var(--surface-2); display:flex; align-items:center; justify-content:center; margin:0 auto 12px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>
+      </div>
+      <h1 style="font-size:18px; margin-bottom:4px;" id="asst-agent-name">Session assistée</h1>
+      <p style="font-size:12px; color:var(--text-dim); margin:0;">Autorisée par <b id="asst-owner">Aissatou Diallo</b> · Boutique Aissatou</p>
+    </div>
+    <div class="card" style="padding:16px; margin-bottom:16px;">
+      <div class="detail-row"><span class="k">Valide encore</span><span class="mono" id="asst-timer" style="font-weight:600;">45:00</span></div>
+      <div class="detail-row"><span class="k">Ventes cette session</span><span id="asst-count">0</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Total encaissé</span><span class="mono" id="asst-total">0 GNF</span></div>
+    </div>
+    <button class="big-cta" style="width:100%;" onclick="s1_showScreen('s-emission')">+ Démarrer une vente</button>
+    <button class="btn-ghost" style="width:100%; padding:12px; text-align:center; margin-top:10px; color:var(--bad); border-color:var(--bad);" onclick="s1_endAssistedSession()">Terminer la session</button>
   </section>
 
   <!-- ================= FACTURES ================= -->
@@ -1167,6 +1187,56 @@ button{font-family:inherit;}
       <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-equipe')"><div class="row-main"><span class="name">Sécurité</span><span class="sub">Administrateur de secours : <span id="param-backup-admin">Ibrahima Bah</span></span></div><span class="sub" style="flex:none;">›</span></div>
       <div class="client-row"><div class="row-main"><span class="name">Abonnement</span><span class="sub" id="param-plan">Freemium</span></div><button class="btn-ghost" id="param-upgrade-btn" onclick="s1_upgradePlan()">Passer à Starter</button></div>
     </div>
+    <button class="btn-ghost" style="width:100%; padding:12px; text-align:center; margin-top:14px;" onclick="s1_startOnboarding()">+ Créer une nouvelle organisation</button>
+  </section>
+
+  <!-- ================= INSCRIPTION ORGANISATION — Étape 1 ================= -->
+  <section class="screen" id="s-onb-1">
+    <div class="back-row" onclick="s1_showScreen('s-parametres')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Paramètres</div>
+    <h1 style="font-size:20px; margin-bottom:4px;">Nouvelle organisation</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Étape 1 sur 3 — informations de base.</p>
+    <div class="card" style="padding:18px;">
+      <div class="field" style="margin-bottom:10px;"><label>Nom de l'organisation</label><input type="text" id="onb-name" placeholder="Ex. Boutique Mariama"></div>
+      <div class="field" style="margin-bottom:10px;"><label>NIF (Numéro d'Identification Fiscale)</label><input type="text" id="onb-nif" class="mono" placeholder="9 chiffres"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Secteur d'activité</label><select id="onb-secteur"><option>Commerce général</option><option>Restauration</option><option>Textile</option><option>Grossiste</option><option>Services</option></select></div>
+      <div class="field" style="margin-bottom:0;"><label>Téléphone</label><input type="text" id="onb-phone" placeholder="+224 6…"></div>
+    </div>
+    <p id="onb-1-error" hidden style="font-size:11.5px; color:var(--bad); font-weight:600; margin:10px 0 0;">Nom et NIF sont requis pour continuer.</p>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="s1_onboardingStep2()">Continuer</button>
+  </section>
+
+  <!-- ================= INSCRIPTION ORGANISATION — Étape 2 (eTax) ================= -->
+  <section class="screen" id="s-onb-2">
+    <div class="back-row" onclick="s1_showScreen('s-onb-1')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+    <h1 style="font-size:20px; margin-bottom:4px;">Vérification eTax</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Étape 2 sur 3 — confirmation du NIF auprès de la DGI.</p>
+    <div class="card" style="padding:18px; text-align:center;">
+      <div class="mono" style="font-size:13px; color:var(--text-dim); margin-bottom:16px;" id="onb-2-nif"></div>
+      <div id="onb-2-pending">
+        <div style="width:36px; height:36px; border-radius:50%; border:3px solid var(--surface-3); border-top-color:var(--accent); margin:0 auto 12px; animation:spin 0.8s linear infinite;"></div>
+        <div style="font-size:12.5px; color:var(--text-dim);">Vérification en cours auprès d'eTax…</div>
+      </div>
+      <div id="onb-2-done" hidden>
+        <div style="width:48px; height:48px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 12px;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="font-size:13px; font-weight:600;">NIF vérifié auprès de la DGI (eTax)</div>
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" id="onb-2-continue" hidden onclick="s1_onboardingStep3()">Continuer</button>
+  </section>
+
+  <!-- ================= INSCRIPTION ORGANISATION — Étape 3 (succès) ================= -->
+  <section class="screen" id="s-onb-3">
+    <div style="text-align:center; padding:24px 4px 8px;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h2 style="font-size:17px; margin-bottom:6px;">Organisation créée</h2>
+      <p style="font-size:12.5px; color:var(--text-dim); margin:0 0 4px;" id="onb-3-name"></p>
+      <p class="mono" style="font-size:11px; color:var(--text-dim); margin:0 0 24px;" id="onb-3-nif"></p>
+    </div>
+    <button class="btn-primary" style="width:100%;" onclick="s1_finishOnboarding()">Accéder au tableau de bord</button>
   </section>
 
   <!-- ================= ORGANISATION (détail) ================= -->
@@ -2004,7 +2074,7 @@ button{font-family:inherit;}
 
 <script>
 (function(){
-const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-support','s-ticket-detail'];
+const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-assisted','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-onb-1','s-onb-2','s-onb-3','s-support','s-ticket-detail'];
 const LIGHT_ROLES = ['field_agent','delivery_driver'];
 const tabbar = document.getElementById('tabbar');
 const drawer = document.getElementById('drawer');
@@ -2259,6 +2329,12 @@ function emitInvoice(){
     payment: { link:'https://facture.gn/p/' + Math.random().toString(16).slice(2, 14), expiry:'Expire dans 30 jours (TTL 30j, ADR-066)' },
     actions: ['marquer_paye','avoir'],
   };
+  if (assistedSession.active) {
+    newInv.events[0].a = assistedSession.agent + ' (session assistée)';
+    assistedSession.count += 1;
+    assistedSession.total += newInv.amount;
+    updateAssistedDisplay();
+  }
   INVOICES.unshift(newInv);
   lastEmittedId = newInv.id;
   renderInvoicesList();
@@ -2266,6 +2342,7 @@ function emitInvoice(){
   document.getElementById('em-success').hidden = false;
   document.getElementById('em-success-num').textContent = newInv.num + ' · ' + newInv.amount.toLocaleString('fr-FR') + ' GNF';
   document.getElementById('em-success-certid').textContent = newInv.certid;
+  document.querySelector('#em-success .go:not(.ghost)').textContent = assistedSession.active ? 'Vente suivante' : 'Nouvelle facture';
 }
 function viewJustEmitted(){
   if (!lastEmittedId) return;
@@ -2275,6 +2352,86 @@ function viewJustEmitted(){
 function resetEmission(){
   document.getElementById('em-form').hidden = false;
   document.getElementById('em-success').hidden = true;
+  if (assistedSession.active) showScreen('s-assisted');
+}
+
+// ===== Session assistée (field_agent / delivery_driver, accès délégué) =====
+const AGENT_NAMES = { field_agent:'Sékou Traoré', delivery_driver:'Ousmane Bah — livreur' };
+let assistedSession = { active:false, agent:'', remaining:0, count:0, total:0, timer:null };
+function startAssistedSession(){
+  const role = roleSelect.value;
+  const agent = AGENT_NAMES[role] || 'Agent terrain';
+  if (assistedSession.timer) clearInterval(assistedSession.timer);
+  assistedSession = { active:true, agent, remaining:2700, count:0, total:0, timer:null };
+  document.getElementById('asst-agent-name').textContent = 'Session assistée — ' + agent;
+  updateAssistedDisplay();
+  assistedSession.timer = setInterval(tickAssistedSession, 1000);
+  showScreen('s-assisted');
+}
+function tickAssistedSession(){
+  assistedSession.remaining -= 1;
+  if (assistedSession.remaining <= 0) { endAssistedSession(); return; }
+  document.getElementById('asst-timer').textContent = formatMMSS(assistedSession.remaining);
+}
+function formatMMSS(s){
+  const m = Math.floor(s / 60), sec = s % 60;
+  return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+}
+function updateAssistedDisplay(){
+  document.getElementById('asst-timer').textContent = formatMMSS(assistedSession.remaining);
+  document.getElementById('asst-count').textContent = assistedSession.count;
+  document.getElementById('asst-total').textContent = assistedSession.total.toLocaleString('fr-FR') + ' GNF';
+}
+function endAssistedSession(){
+  if (assistedSession.timer) clearInterval(assistedSession.timer);
+  assistedSession.active = false;
+  showScreen('s-accueil');
+}
+
+// ===== Inscription d'une nouvelle organisation =====
+function startOnboarding(){
+  document.getElementById('onb-name').value = '';
+  document.getElementById('onb-nif').value = '';
+  document.getElementById('onb-phone').value = '';
+  document.getElementById('onb-1-error').hidden = true;
+  showScreen('s-onb-1');
+}
+function onboardingStep2(){
+  const name = document.getElementById('onb-name').value.trim();
+  const nif = document.getElementById('onb-nif').value.trim();
+  if (!name || !nif) {
+    document.getElementById('onb-1-error').hidden = false;
+    return;
+  }
+  document.getElementById('onb-2-nif').textContent = 'NIF ' + nif;
+  document.getElementById('onb-2-pending').hidden = false;
+  document.getElementById('onb-2-done').hidden = true;
+  document.getElementById('onb-2-continue').hidden = true;
+  showScreen('s-onb-2');
+  setTimeout(() => {
+    document.getElementById('onb-2-pending').hidden = true;
+    document.getElementById('onb-2-done').hidden = false;
+    document.getElementById('onb-2-continue').hidden = false;
+  }, 1500);
+}
+function onboardingStep3(){
+  const name = document.getElementById('onb-name').value.trim();
+  const nif = document.getElementById('onb-nif').value.trim();
+  document.getElementById('onb-3-name').textContent = name;
+  document.getElementById('onb-3-nif').textContent = 'NIF ' + nif + ' · eTax vérifié';
+  showScreen('s-onb-3');
+}
+function finishOnboarding(){
+  const name = document.getElementById('onb-name').value.trim();
+  document.querySelectorAll('.org-name').forEach(el => el.textContent = name);
+  document.getElementById('home-tier-chip').textContent = 'Freemium · T1';
+  document.getElementById('home-tier-val').textContent = 'Freemium';
+  const upgradeBtn = document.getElementById('param-upgrade-btn');
+  upgradeBtn.textContent = 'Passer à Starter';
+  upgradeBtn.disabled = false;
+  upgradeBtn.style.opacity = '1';
+  document.getElementById('param-plan').textContent = 'Freemium';
+  showScreen('s-accueil');
 }
 
 // ===== Écran d'erreur générique (patron réutilisable) =====
@@ -2728,6 +2885,12 @@ window.s1_submitTicket = submitTicket;
 window.s1_showTicketDetail = showTicketDetail;
 window.s1_switchBranch = switchBranch;
 window.s1_selectBranch = selectBranch;
+window.s1_startAssistedSession = startAssistedSession;
+window.s1_endAssistedSession = endAssistedSession;
+window.s1_startOnboarding = startOnboarding;
+window.s1_onboardingStep2 = onboardingStep2;
+window.s1_onboardingStep3 = onboardingStep3;
+window.s1_finishOnboarding = finishOnboarding;
 })();
 
 (function(){
