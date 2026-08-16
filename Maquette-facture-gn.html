@@ -247,8 +247,20 @@ button{font-family:inherit;}
 .scope-note{display:flex; gap:10px; padding:12px 14px; background:color-mix(in srgb, var(--good) 10%, var(--surface)); border:1px solid var(--border); border-radius:12px; margin-bottom:16px; font-size:11.5px; color:var(--text-dim); line-height:1.5;}
 .scope-note svg{flex:none; width:16px; height:16px; color:var(--good); margin-top:1px;}
 
-.team-row{display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--border);}
+.team-row{display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--border); cursor:pointer;}
 .team-row:last-child{border-bottom:none;}
+.team-row:hover{background:var(--surface-2);}
+
+.sheet-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:70; display:none; opacity:0; transition:opacity .2s ease;}
+.sheet-backdrop.open{display:block; opacity:1;}
+.sheet{position:fixed; left:0; right:0; bottom:0; max-width:460px; margin:0 auto; background:var(--surface); z-index:80;
+  border-radius:20px 20px 0 0; padding:18px 18px 24px; transform:translateY(100%); transition:transform .25s ease; border:1px solid var(--border-strong); border-bottom:none;}
+.sheet-backdrop.open .sheet{transform:translateY(0);}
+.sheet-handle{width:36px; height:4px; background:var(--border-strong); border-radius:100px; margin:0 auto 16px;}
+.perm-row{display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12.5px;}
+.perm-row svg{width:14px; height:14px; flex:none;}
+.perm-row.yes{color:var(--text);} .perm-row.yes svg{color:var(--good);}
+.perm-row.no{color:var(--text-dim);} .perm-row.no svg{color:var(--text-dim);}
 
 :root{
   --bg:#F5F7F9; --surface:#FFFFFF; --surface-2:rgba(11,29,58,.05); --surface-3:rgba(11,29,58,.08);
@@ -1200,6 +1212,9 @@ button{font-family:inherit;}
   <span class="proto-label">Aperçu prototype</span>
   <button data-role="accountant_external" class="active">accountant_external — Comptable externe</button>
   <button data-role="practice_admin">practice_admin — Administrateur cabinet</button>
+  <span style="width:1px; background:var(--border-strong); align-self:stretch;"></span>
+  <button data-type="cabinet_comptable" class="active">Type : cabinet comptable</button>
+  <button data-type="cga">Type : CGA</button>
 </div>
 
 <div class="page">
@@ -1207,12 +1222,13 @@ button{font-family:inherit;}
 
   <div class="header">
     <p class="eyebrow">Portail Cabinet / CGA</p>
-    <h1 style="font-size:20px;">Cabinet Comptable Barry &amp; Associés</h1>
-    <span class="badge-ordre"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Badge Ordre OCAECG vérifié</span>
+    <h1 style="font-size:20px;" id="cab-practice-name">Cabinet Comptable Barry &amp; Associés</h1>
+    <span class="badge-ordre" id="cab-practice-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Badge Ordre OCAECG vérifié</span>
   </div>
 
   <div class="seg">
     <button class="active" data-screen="cab-s-portefeuille">Portefeuille</button>
+    <button data-screen="cab-s-nouveau-mandat">+ Mandat</button>
     <button id="cab-tab-cabinet" data-screen="cab-s-cabinet">Cabinet</button>
   </div>
 
@@ -1240,11 +1256,49 @@ button{font-family:inherit;}
     </div>
   </section>
 
+  <!-- ================= NOUVEAU MANDAT (F5, ADR-069) — accountant_external + practice_admin ================= -->
+  <section class="screen" id="cab-s-nouveau-mandat">
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Le mandat est accordé au cabinet, pas à un individu — un collaborateur qui part perd l'accès automatiquement (ADR-069).</p>
+
+    <div class="card" style="padding:16px; margin-bottom:16px;" id="cab-mandat-search-card">
+      <div class="panel-title" style="margin-bottom:12px;">Rechercher une organisation cliente</div>
+      <input class="btn-ghost" style="width:100%; padding:11px 13px; text-align:left; font-weight:400; margin-bottom:12px;" placeholder="NIF, téléphone ou nom d'organisation…" value="Hôtel Riviera">
+      <div class="inv-row" style="padding:12px 4px;">
+        <div class="inv-main"><span class="inv-name">Hôtel Riviera</span><span class="inv-sub">NIF 445 998 221 · Djénabou Sow · Starter</span></div>
+        <button class="btn-ghost" onclick="cab_sendMandateRequest()">Envoyer la demande</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px;" id="cab-mandat-sent-card" hidden>
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <div style="width:24px; height:24px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; flex:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div style="font-weight:600; font-size:13.5px;">Demande envoyée à Hôtel Riviera</div>
+      </div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0;">
+        POST /practices/{id}/mandates — en attente d'acceptation par le propriétaire de l'organisation, via la PWA ou *620# (option 5.3 + PIN). Aucun accès tant que le mandat n'est pas accepté.
+      </p>
+    </div>
+  </section>
+
   <!-- ================= CABINET (practice_admin uniquement) ================= -->
   <section class="screen" id="cab-s-cabinet">
+    <div class="card" id="cab-cga-panel" hidden style="padding:16px; margin-bottom:16px; border-color:var(--good);">
+      <div style="font-weight:600; font-size:13px; color:var(--good); margin-bottom:6px;">Avantage CGA</div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0;">
+        Centre de Gestion Agréé (décret du 17 février 2017, sous tutelle DGI) — les adhérents formalisés bénéficient d'un abattement fiscal de -50 % la 1ʳᵉ année, -25 % les deux suivantes. facture.gn structure l'adhésion mais ne se substitue jamais à la DGI (ADR-079).
+      </p>
+    </div>
+
     <div class="stats-strip">
       <div class="stat-mini"><div class="lbl">Revenue share · juillet</div><div class="val mono" style="color:var(--good);">32 000</div></div>
       <div class="stat-mini"><div class="lbl">Formule Partner</div><div class="val">Pro</div></div>
+    </div>
+
+    <div class="card" style="margin:14px 0 16px; padding:15px 16px;">
+      <div class="panel-title" style="margin-bottom:10px;">Détail du revenue share</div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);"><span>Boutique Aissatou</span><span class="mono">18 000 GNF</span></div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0;"><span>Restaurant Le Damier</span><span class="mono">14 000 GNF</span></div>
+      <div style="font-size:10.5px; color:var(--text-dim); margin-top:10px; line-height:1.5;">10 % de la commission Money de chaque organisation mandatée, plafonné à 5 000 GNF/mois/client.</div>
     </div>
 
     <div class="card" style="margin-bottom:16px;">
@@ -1252,19 +1306,32 @@ button{font-family:inherit;}
         <span class="panel-title">Collaborateurs</span>
         <button class="btn-ghost">+ Inviter</button>
       </div>
-      <div class="team-row"><div><div style="font-weight:600; font-size:13.5px;">Ibrahima Bah</div><div class="inv-sub">Associé · practice_admin</div></div><button class="btn-ghost">Gérer</button></div>
-      <div class="team-row"><div><div style="font-weight:600; font-size:13.5px;">Fatou Camara</div><div class="inv-sub">Comptable junior · accountant_external</div></div><button class="btn-ghost">Gérer</button></div>
+      <div class="team-row" onclick="cab_showMemberDetail('Ibrahima Bah','Associé','practice_admin')"><div><div style="font-weight:600; font-size:13.5px;">Ibrahima Bah</div><div class="inv-sub">Associé · practice_admin</div></div><button class="btn-ghost">Gérer</button></div>
+      <div class="team-row" onclick="cab_showMemberDetail('Fatou Camara','Comptable junior','accountant_external')"><div><div style="font-weight:600; font-size:13.5px;">Fatou Camara</div><div class="inv-sub">Comptable junior · accountant_external</div></div><button class="btn-ghost">Gérer</button></div>
     </div>
 
     <div class="card" style="padding:15px 16px;">
       <div class="panel-title" style="margin-bottom:10px;">Facturation cabinet</div>
       <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);"><span style="color:var(--text-dim);">Formule</span><span>Pro · 1 500 000 GNF/mois</span></div>
       <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0;"><span style="color:var(--text-dim);">Clients mandatés</span><span>2 actifs · 1 en attente</span></div>
-      <div style="font-size:10.5px; color:var(--text-dim); margin-top:10px; line-height:1.5;">10 % de la commission Money de chaque organisation mandatée, plafonné à 5 000 GNF/mois/client.</div>
     </div>
   </section>
 
 </div>
+</div>
+
+<div class="sheet-backdrop" id="cab-member-sheet">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 style="font-size:16px; margin-bottom:4px;" id="cab-ms-name"></h2>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:16px;" id="cab-ms-role"></div>
+    <div class="panel-title" style="margin-bottom:10px;">Permissions</div>
+    <div id="cab-ms-perms" style="margin-bottom:16px;"></div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ghost" style="flex:1;">Changer le rôle</button>
+      <button class="btn-ghost" style="flex:1; color:var(--bad); border-color:var(--bad);">Retirer l'accès</button>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -2119,6 +2186,47 @@ roleButtons.forEach(btn => {
     if (!isAdmin) showScreen('cab-s-portefeuille');
   });
 });
+
+// ===== Type de practice — cabinet_comptable vs CGA (ADR-078) =====
+const typeButtons = document.querySelectorAll('.proto-bar [data-type]');
+typeButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    typeButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const isCga = btn.dataset.type === 'cga';
+    document.getElementById('cab-practice-name').textContent = isCga ? 'CGA Nimba Conseil' : 'Cabinet Comptable Barry & Associés';
+    document.getElementById('cab-cga-panel').hidden = !isCga;
+  });
+});
+
+// ===== Nouveau mandat (F5, ADR-069) =====
+function sendMandateRequest(){
+  document.getElementById('cab-mandat-search-card').hidden = true;
+  document.getElementById('cab-mandat-sent-card').hidden = false;
+}
+
+// ===== Détail collaborateur =====
+const MEMBER_PERMS = {
+  practice_admin: ['practice:manage','practice:invite_member','practice:view_billing','practice:view_revenue_share','mandate:request','mandate:accept','mandate:revoke'],
+  accountant_external: ['mandate:request'],
+};
+const ALL_PERMS = ['practice:manage','practice:invite_member','practice:view_billing','practice:view_revenue_share','mandate:request','mandate:accept','mandate:revoke'];
+function showMemberDetail(name, title, role){
+  document.getElementById('cab-ms-name').textContent = name;
+  document.getElementById('cab-ms-role').textContent = title + ' · ' + role;
+  const granted = MEMBER_PERMS[role] || [];
+  document.getElementById('cab-ms-perms').innerHTML = ALL_PERMS.map(p => {
+    const has = granted.includes(p);
+    return `<div class="perm-row ${has ? 'yes' : 'no'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">${has ? '<path d="M20 6L9 17l-5-5"/>' : '<path d="M6 6l12 12M18 6L6 18"/>'}</svg><span class="mono" style="font-size:11.5px;">${p}</span></div>`;
+  }).join('');
+  document.getElementById('cab-member-sheet').classList.add('open');
+}
+document.getElementById('cab-member-sheet').addEventListener('click', (e) => {
+  if (e.target.id === 'member-sheet') e.target.classList.remove('open');
+});
+
+window.cab_sendMandateRequest = sendMandateRequest;
+window.cab_showMemberDetail = showMemberDetail;
 })();
 
 (function(){
