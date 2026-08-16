@@ -90,6 +90,16 @@ button{font-family:inherit;}
 .stat-mini{flex:1; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 14px;}
 .stat-mini .lbl{font-family:'JetBrains Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim);}
 .stat-mini .val{font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:17px; margin-top:4px;}
+
+/* ===== Écrans de détail (facture / client) ===== */
+.back-row{display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer; color:var(--text-dim); font-size:13px; font-weight:600;}
+.back-row svg{width:16px; height:16px;}
+.detail-hero{background:var(--surface-2); border-radius:16px; padding:22px; margin-bottom:16px;}
+.detail-hero .org{font-family:'JetBrains Mono'; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
+.detail-hero .amt{font-family:'Space Grotesk'; font-weight:600; font-size:30px; margin-top:6px;}
+.detail-row{display:flex; justify-content:space-between; padding:11px 16px; border-bottom:1px solid var(--border); font-size:13px;}
+.detail-row:last-child{border-bottom:none;}
+.detail-row .k{color:var(--text-dim);}
 .chain-note{display:flex; align-items:center; gap:8px; margin-top:14px; padding:10px 12px; font-size:11px; color:var(--text-dim);}
 .chain-note svg{flex:none; width:14px; height:14px; color:var(--good);}
 
@@ -729,7 +739,7 @@ button{font-family:inherit;}
     <div id="accueil-light" class="light-shell" hidden>
       <h2>Prêt à facturer</h2>
       <p>Votre rôle donne accès à l'émission assistée uniquement — pas de tiroir, pas de liste complète (ADR-095).</p>
-      <button class="big-cta" onclick="showScreen('s-emission')">+ Émettre une facture</button>
+      <button class="big-cta" onclick="s1_showScreen('s-emission')">+ Émettre une facture</button>
     </div>
 
   </section>
@@ -745,13 +755,59 @@ button{font-family:inherit;}
       <button class="filter-chip">Partielles · 2</button>
       <button class="filter-chip">Contestées · 1</button>
     </div>
-    <div class="card">
-      <div class="invoice-row"><div class="row-main"><span class="name">Mamadou Sylla — Grossiste tissus</span><span class="sub">FG-2026-000412 · il y a 2h</span></div><div class="row-side"><span class="amount">180 000</span><span class="pill paid">Payée</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Restaurant Le Damier</span><span class="sub">FG-2026-000411 · hier</span></div><div class="row-side"><span class="amount">95 000</span><span class="pill pending">Attente</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Fatoumata Camara</span><span class="sub">FG-2026-000410 · 24 juil.</span></div><div class="row-side"><span class="amount">220 000</span><span class="pill partial">Partiel</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="offline-dot" title="Créée hors ligne, en attente de synchro"></span><span class="name">Client anonyme — comptoir</span><span class="sub">FG-2026-000409 · 23 juil.</span></div><div class="row-side"><span class="amount">45 000</span><span class="pill paid">Payée</span></div></div>
-      <div class="invoice-row"><div class="row-main"><span class="name">Boutique Sory</span><span class="sub">FG-2026-000408 · 22 juil.</span></div><div class="row-side"><span class="amount">610 000</span><span class="pill void">Contestée</span></div></div>
+    <div class="card" id="factures-list"></div>
+  </section>
+
+  <!-- ================= DÉTAIL FACTURE ================= -->
+  <section class="screen" id="s-facture-detail">
+    <div class="back-row" onclick="s1_showScreen('s-factures')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Factures</div>
+
+    <div class="detail-hero">
+      <div class="org" id="fd-org"></div>
+      <div class="amt mono" id="fd-amount"></div>
+      <span class="pill" id="fd-status-pill"></span>
     </div>
+
+    <div class="card" id="fd-dispute-banner" hidden style="padding:14px 16px; margin-bottom:14px; border-color:var(--bad);">
+      <div style="font-weight:600; font-size:13px; color:var(--bad); margin-bottom:4px;">⚠ Contestation ouverte</div>
+      <div style="font-size:12px; color:var(--text-dim); line-height:1.5;" id="fd-dispute-text"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <div class="panel-head"><span class="panel-title">Détail</span></div>
+      <div class="line-item head"><span>Description</span><span>Qté</span><span>P.U.</span><span>Total</span></div>
+      <div id="fd-lines"></div>
+    </div>
+
+    <div class="card" style="padding:16px; margin-bottom:14px;">
+      <div class="panel-title" style="margin-bottom:12px;">Certification</div>
+      <div class="detail-row" style="padding:8px 0;"><span class="k">Identifiant de vérification</span><span class="mono" id="fd-certid" style="font-size:11.5px;"></span></div>
+      <div class="detail-row" style="padding:8px 0;"><span class="k">Chaînage</span><span class="mono" id="fd-hash" style="font-size:11px;"></span></div>
+      <div class="detail-row" style="padding:8px 0; border-bottom:none;"><span class="k">Signature</span><span class="mono" style="font-size:11.5px; color:var(--good);">Ed25519 ✓ · SHA-256 ✓</span></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <div class="panel-head"><span class="panel-title">Historique (invoice_event)</span></div>
+      <div id="fd-events"></div>
+    </div>
+
+    <div id="fd-payment-block" hidden style="margin-bottom:14px;">
+      <div class="card" style="padding:16px;">
+        <div class="panel-title" style="margin-bottom:10px;">Lien de paiement</div>
+        <div class="mono" style="font-size:11.5px; color:var(--text-dim); word-break:break-all;" id="fd-link"></div>
+        <div style="font-size:11px; color:var(--text-dim); margin-top:6px;" id="fd-link-expiry"></div>
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <button class="go" style="flex:1;">Relancer (WhatsApp)</button>
+          <button class="go ghost" style="flex:1;">Régénérer le lien</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="fd-actions" style="display:flex; flex-direction:column; gap:8px;"></div>
+
+    <p style="font-size:11px; color:var(--text-dim); margin-top:16px; text-align:center; line-height:1.6;">
+      Une facture émise est immuable — toute correction passe par un avoir (credit_note), jamais par une modification directe.
+    </p>
   </section>
 
   <!-- ================= ÉMISSION ================= -->
@@ -780,12 +836,47 @@ button{font-family:inherit;}
     <div class="filter-row" style="margin-bottom:12px;">
       <input class="search-field" style="margin:0;" type="text" placeholder="Rechercher un client…">
     </div>
-    <div class="card">
-      <div class="client-row"><div class="row-main"><span class="name">Restaurant Le Damier</span><span class="sub">+224 622 00 11 22 · 14 factures</span></div><div class="row-side"><span class="amount" style="color:var(--bad);">180 000</span></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Mamadou Sylla</span><span class="sub">+224 655 44 33 22 · 41 factures</span></div><div class="row-side"><span class="amount">0</span></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Fatoumata Camara</span><span class="sub">+224 611 22 33 44 · 2 retards récents</span></div><div class="row-side"><span class="amount" style="color:var(--bad);">220 000</span></div></div>
-      <div class="client-row"><div class="row-main"><span class="name">Boutique Sory</span><span class="sub">+224 666 77 88 99 · contestation en cours</span></div><div class="row-side"><span class="amount">610 000</span></div></div>
+    <div class="card" id="clients-list"></div>
+  </section>
+
+  <!-- ================= DÉTAIL CLIENT ================= -->
+  <section class="screen" id="s-client-detail">
+    <div class="back-row" onclick="s1_showScreen('s-clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Clients</div>
+
+    <div class="detail-hero">
+      <div class="org" id="cd-name"></div>
+      <div style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-dim); margin-top:6px;" id="cd-phone"></div>
     </div>
+
+    <div class="stats-strip" style="margin-bottom:14px;">
+      <div class="stat-mini"><div class="lbl">Factures</div><div class="val mono" id="cd-count"></div></div>
+      <div class="stat-mini"><div class="lbl">Total facturé</div><div class="val mono" id="cd-total"></div></div>
+      <div class="stat-mini"><div class="lbl">Délai moyen</div><div class="val mono" id="cd-delay"></div></div>
+    </div>
+
+    <div class="card" id="cd-risk-banner" hidden style="padding:14px 16px; margin-bottom:14px; border-color:var(--bad);">
+      <div style="font-weight:600; font-size:13px; color:var(--bad); margin-bottom:4px;">⚠ Client à risque</div>
+      <div style="font-size:12px; color:var(--text-dim); line-height:1.5;" id="cd-risk-text"></div>
+    </div>
+
+    <div class="card" style="padding:16px; margin-bottom:14px;">
+      <div class="panel-title" style="margin-bottom:12px;">Crédit commercial</div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:6px;"><span>Encours actuel</span><span class="mono" id="cd-balance"></span></div>
+      <div style="height:8px; background:var(--surface-3); border-radius:100px; overflow:hidden;"><div id="cd-balance-bar" style="height:100%; background:var(--accent);"></div></div>
+      <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:5px;"><span>0</span><span>Plafond : <span class="mono" id="cd-limit"></span></span></div>
+      <button class="btn-ghost" style="width:100%; margin-top:14px; padding:10px; text-align:center;">Demander une augmentation de plafond</button>
+      <p style="font-size:10.5px; color:var(--text-dim); margin-top:8px; line-height:1.5;">Au-delà du seuil configuré, toute augmentation exige une validation par le rôle approver — jamais une décision unilatérale (ADR-083).</p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <div class="panel-head"><span class="panel-title">Historique des factures</span></div>
+      <div id="cd-invoices"></div>
+    </div>
+
+    <div id="cd-actions" style="display:flex; flex-direction:column; gap:8px;"></div>
+    <p style="font-size:11px; color:var(--text-dim); margin-top:14px; text-align:center; line-height:1.6;">
+      Fusion de doublons et ajustement direct du plafond réservés à admin/owner — jamais cashier ni field_agent (ADR-038/083).
+    </p>
   </section>
 
   <!-- ================= APPROBATIONS (approver, ADR-083) ================= -->
@@ -1206,7 +1297,7 @@ button{font-family:inherit;}
     </div>
 
     <div class="card">
-      <div class="inv-row" onclick="showScreen('daf-s-detail')">
+      <div class="inv-row" onclick="daf_showScreen('daf-s-detail')">
         <div class="inv-main"><span class="inv-name">Entreprise Sylla &amp; Fils</span><span class="inv-sub">FG-2026-000388 · marché MPA-2026-00417</span></div>
         <div style="text-align:right;"><span class="amount">14 200 000</span><span class="pill pending" style="display:block; margin-top:4px;">Non validée</span></div>
       </div>
@@ -1214,7 +1305,7 @@ button{font-family:inherit;}
         <div class="inv-main"><span class="inv-name">Coopérative Agricole Kindia</span><span class="inv-sub">FG-2026-000401 · marché MPA-2026-00422</span></div>
         <div style="text-align:right;"><span class="amount">3 100 000</span><span class="pill pending" style="display:block; margin-top:4px;">Non validée</span></div>
       </div>
-      <div class="inv-row" onclick="showScreen('daf-s-detail-valide')">
+      <div class="inv-row" onclick="daf_showScreen('daf-s-detail-valide')">
         <div class="inv-main"><span class="inv-name">Établissements Diakité</span><span class="inv-sub">FG-2026-000350 · marché MPA-2026-00390</span></div>
         <div style="text-align:right;"><span class="amount">8 500 000</span><span class="pill paid" style="display:block; margin-top:4px;">Validée</span></div>
       </div>
@@ -1223,7 +1314,7 @@ button{font-family:inherit;}
 
   <!-- ================= DÉTAIL — NON VALIDÉE ================= -->
   <section class="screen" id="daf-s-detail">
-    <div class="back-row" onclick="showScreen('daf-s-liste')">
+    <div class="back-row" onclick="daf_showScreen('daf-s-liste')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
       Factures reçues
     </div>
@@ -1246,12 +1337,12 @@ button{font-family:inherit;}
       <div>Cette action confirme uniquement la <b>liquidation</b> — la reconnaissance de dette. Elle ne déclenche <b>aucun paiement</b> : le paiement effectif reste un acte distinct, hors de facture.gn (Trésor ou financement bancaire, ADR-088).</div>
     </div>
 
-    <button class="btn-primary" onclick="showScreen('daf-s-detail-valide')">Valider la liquidation</button>
+    <button class="btn-primary" onclick="daf_showScreen('daf-s-detail-valide')">Valider la liquidation</button>
   </section>
 
   <!-- ================= DÉTAIL — VALIDÉE ================= -->
   <section class="screen" id="daf-s-detail-valide">
-    <div class="back-row" onclick="showScreen('daf-s-liste')">
+    <div class="back-row" onclick="daf_showScreen('daf-s-liste')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
       Factures reçues
     </div>
@@ -1304,7 +1395,7 @@ button{font-family:inherit;}
     <div class="card" style="padding:20px; margin-top:14px;" id="cli-verify-step-2" hidden>
       <div class="field" style="margin-bottom:6px;"><label>Code reçu par SMS</label></div>
       <div class="pin-boxes"><input maxlength="1" value="4"><input maxlength="1" value="1"><input maxlength="1" value="9"><input maxlength="1" value="2"></div>
-      <button class="btn-primary" onclick="showScreen('cli-s-liste')">Valider</button>
+      <button class="btn-primary" onclick="cli_showScreen('cli-s-liste')">Valider</button>
     </div>
 
     <p class="helper">Même flux de vérification que le canal *620# (ADR-087) — un seul numéro suffit, même s'il est reconnu par plusieurs commerçants.</p>
@@ -1334,7 +1425,7 @@ button{font-family:inherit;}
     </div>
 
     <div class="card">
-      <div class="inv-row" onclick="showScreen('cli-s-detail')">
+      <div class="inv-row" onclick="cli_showScreen('cli-s-detail')">
         <div class="inv-main"><span class="inv-org">Boutique Aissatou</span><span class="inv-sub">FG-2026-000420 · 22 juil.</span></div>
         <div class="inv-side"><span class="amount">120 000</span><span class="pill pending">En attente</span></div>
       </div>
@@ -1351,7 +1442,7 @@ button{font-family:inherit;}
 
   <!-- ================= DÉTAIL FACTURE ================= -->
   <section class="screen" id="cli-s-detail">
-    <div class="back-row" onclick="showScreen('cli-s-liste')">
+    <div class="back-row" onclick="cli_showScreen('cli-s-liste')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
       Mes factures
     </div>
@@ -1756,7 +1847,7 @@ button{font-family:inherit;}
 
 <script>
 (function(){
-const SHELL1_SCREENS = ['s-accueil','s-factures','s-emission','s-clients','s-approbations','s-analytics','s-stock','s-paiements','s-equipe','s-audit','s-dev','s-parametres','s-support'];
+const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-equipe','s-audit','s-dev','s-parametres','s-support'];
 const LIGHT_ROLES = ['field_agent','delivery_driver'];
 const tabbar = document.getElementById('tabbar');
 const drawer = document.getElementById('drawer');
@@ -1788,6 +1879,122 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.add('active');
   });
 });
+
+// ===== Factures — données + détail (invoice_event, ADR-015) =====
+const INVOICES = [
+  { id:'inv1', num:'FG-2026-000412', org:'Mamadou Sylla — Grossiste tissus', amount:180000, status:'paid',
+    date:'14 août 2026 · il y a 2h', certid:'GN-31029918-2026-7F3A2C', hash:'8f2a…c91e ← 71bd…44a0',
+    lines:[{d:'Tissu wax 6 yards',q:5,pu:'32 000',t:'160 000'},{d:'Frais de transport',q:1,pu:'20 000',t:'20 000'}],
+    events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'il y a 2h'},{t:'payment_link.generated',a:'système',w:'il y a 2h'},{t:'invoice.paid',a:'Djomy (webhook)',w:'il y a 5 min'}],
+    payment:null, actions:['avoir'] },
+  { id:'inv2', num:'FG-2026-000411', org:'Restaurant Le Damier', amount:95000, status:'pending',
+    date:'13 août 2026 · hier', certid:'GN-77102256-2026-B71E4A', hash:'3c9d…12ab ← 8f2a…c91e',
+    lines:[{d:'Prestation traiteur',q:1,pu:'95 000',t:'95 000'}],
+    events:[{t:'invoice.issued',a:'Fatou Camara (cashier)',w:'hier, 14h32'},{t:'payment_link.generated',a:'système',w:'hier, 14h32'},{t:'payment_link.viewed',a:'payeur',w:'hier, 16h10'}],
+    payment:{link:'https://facture.gn/p/7f3a2c91b0d4', expiry:'Expire dans 28 jours (TTL 30j, ADR-066)'}, actions:['marquer_paye','avoir'] },
+  { id:'inv3', num:'FG-2026-000410', org:'Fatoumata Camara', amount:220000, status:'partial',
+    date:'24 juillet 2026', certid:'GN-55810234-2026-9D4F17', hash:'1a2b…77cd ← 3c9d…12ab',
+    lines:[{d:'Sac de riz 50kg',q:2,pu:'85 000',t:'170 000'},{d:'Huile 5L',q:2,pu:'25 000',t:'50 000'}],
+    events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'24 juil.'},{t:'payment.partial',a:'Djomy · 100 000 GNF',w:'25 juil.'}],
+    payment:{link:'https://facture.gn/p/1a2b77cd9f01', expiry:'Reste dû : 120 000 GNF · expire dans 4 jours'}, actions:['marquer_paye','avoir'] },
+  { id:'inv4', num:'FG-2026-000409', org:'Client anonyme — comptoir', amount:45000, status:'paid',
+    date:'23 juillet 2026 · hors ligne', certid:'GN-31029918-2026-2C81FE', hash:'9e0f…33aa ← 1a2b…77cd',
+    lines:[{d:'Vente comptoir',q:1,pu:'45 000',t:'45 000'}],
+    events:[{t:'invoice.issued',a:'Fatou Camara (cashier) · hors ligne',w:'23 juil.'},{t:'sync.completed',a:'système',w:'23 juil., +40 min'},{t:'payment.cash',a:'Fatou Camara (cashier)',w:'23 juil.'}],
+    payment:null, actions:['avoir'] },
+  { id:'inv5', num:'FG-2026-000408', org:'Boutique Sory', amount:610000, status:'void',
+    date:'22 juillet 2026', certid:'GN-64471820-2026-E203BC', hash:'7bb1…905e ← 9e0f…33aa',
+    lines:[{d:'Commande groupée — divers',q:1,pu:'610 000',t:'610 000'}],
+    events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'22 juil.'},{t:'invoice.disputed',a:'Boutique Sory (payeur)',w:'23 juil.'}],
+    payment:null, dispute:'Le client conteste avoir reçu la commande complète — litige ouvert depuis 3 jours, en attente de résolution amiable avant recours à un avoir partiel.', actions:['avoir'] },
+];
+const STATUS_LABEL = { paid:'Payée', pending:'Attente', partial:'Partiel', void:'Contestée' };
+const ACTION_LABEL = { marquer_paye:'Marquer payé (virement reçu)', avoir:'Émettre un avoir (credit_note)' };
+
+function renderInvoicesList(){
+  document.getElementById('factures-list').innerHTML = INVOICES.map(inv => `
+    <div class="invoice-row" onclick="s1_showInvoiceDetail('${inv.id}')">
+      <div class="row-main">${inv.id === 'inv4' ? '<span class="offline-dot" title="Créée hors ligne, en attente de synchro"></span>' : ''}<span class="name">${inv.org}</span><span class="sub">${inv.num} · ${inv.date.split(' · ')[1] || inv.date}</span></div>
+      <div class="row-side"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.status}">${STATUS_LABEL[inv.status]}</span></div>
+    </div>`).join('');
+}
+
+function showInvoiceDetail(id){
+  const inv = INVOICES.find(i => i.id === id);
+  document.getElementById('fd-org').textContent = inv.org;
+  document.getElementById('fd-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
+  const pill = document.getElementById('fd-status-pill');
+  pill.className = 'pill ' + inv.status;
+  pill.textContent = STATUS_LABEL[inv.status];
+  document.getElementById('fd-certid').textContent = inv.certid;
+  document.getElementById('fd-hash').textContent = inv.hash;
+  document.getElementById('fd-lines').innerHTML = inv.lines.map(l => `<div class="line-item"><span>${l.d}</span><span>${l.q}</span><span class="mono">${l.pu}</span><span class="mono">${l.t}</span></div>`).join('');
+  document.getElementById('fd-events').innerHTML = inv.events.map(e => `<div class="invoice-row"><div class="row-main"><span class="name mono" style="font-size:11.5px;">${e.t}</span><span class="sub">${e.a}</span></div><span class="sub" style="flex:none;">${e.w}</span></div>`).join('');
+
+  const disputeBanner = document.getElementById('fd-dispute-banner');
+  disputeBanner.hidden = !inv.dispute;
+  if (inv.dispute) document.getElementById('fd-dispute-text').textContent = inv.dispute;
+
+  const payBlock = document.getElementById('fd-payment-block');
+  payBlock.hidden = !inv.payment;
+  if (inv.payment) {
+    document.getElementById('fd-link').textContent = inv.payment.link;
+    document.getElementById('fd-link-expiry').textContent = inv.payment.expiry;
+  }
+
+  document.getElementById('fd-actions').innerHTML = inv.actions.map((a,i) => `<button class="go ${i>0?'ghost':''}" style="width:100%;">${ACTION_LABEL[a]}</button>`).join('');
+
+  showScreen('s-facture-detail');
+}
+
+// ===== Clients — données + détail (credit_limit/running_balance, ADR-039/062/083) =====
+const CLIENTS = [
+  { id:'cli1', name:'Restaurant Le Damier', phone:'+224 622 00 11 22', count:14, total:'1 450 000 GNF', delay:'5,8 j', balance:180000, limit:500000, org:'Restaurant Le Damier' },
+  { id:'cli2', name:'Mamadou Sylla — Grossiste tissus', phone:'+224 655 44 33 22', count:41, total:'6 200 000 GNF', delay:'2,1 j', balance:0, limit:1000000, org:'Mamadou Sylla' },
+  { id:'cli3', name:'Fatoumata Camara', phone:'+224 611 22 33 44', count:6, total:'780 000 GNF', delay:'11,4 j', balance:220000, limit:250000, org:'Fatoumata Camara',
+    risk:'2 retards de paiement sur les 3 derniers mois. Encours à 88 % du plafond autorisé — toute nouvelle facture à crédit rapprochera du seuil.' },
+  { id:'cli4', name:'Boutique Sory', phone:'+224 666 77 88 99', count:3, total:'610 000 GNF', delay:'—', balance:610000, limit:610000, org:'Boutique Sory',
+    risk:'Facture FG-2026-000408 contestée — encours entièrement bloqué en litige. Fiche possiblement en double avec un client existant, à vérifier avant fusion.', duplicate:true },
+];
+
+function renderClientsList(){
+  document.getElementById('clients-list').innerHTML = CLIENTS.map(c => `
+    <div class="client-row" onclick="s1_showClientDetail('${c.id}')">
+      <div class="row-main"><span class="name">${c.name}</span><span class="sub">${c.phone} · ${c.risk ? c.risk.split('.')[0] : c.count + ' factures'}</span></div>
+      <div class="row-side"><span class="amount" style="${c.balance > 0 ? 'color:var(--bad);' : ''}">${c.balance.toLocaleString('fr-FR')}</span></div>
+    </div>`).join('');
+}
+
+function showClientDetail(id){
+  const c = CLIENTS.find(x => x.id === id);
+  document.getElementById('cd-name').textContent = c.name;
+  document.getElementById('cd-phone').textContent = c.phone;
+  document.getElementById('cd-count').textContent = c.count;
+  document.getElementById('cd-total').textContent = c.total.replace(' GNF','');
+  document.getElementById('cd-delay').textContent = c.delay;
+
+  const riskBanner = document.getElementById('cd-risk-banner');
+  riskBanner.hidden = !c.risk;
+  if (c.risk) document.getElementById('cd-risk-text').textContent = c.risk;
+
+  document.getElementById('cd-balance').textContent = c.balance.toLocaleString('fr-FR') + ' GNF';
+  document.getElementById('cd-limit').textContent = c.limit.toLocaleString('fr-FR') + ' GNF';
+  const pct = c.limit > 0 ? Math.min(100, Math.round((c.balance / c.limit) * 100)) : 0;
+  const bar = document.getElementById('cd-balance-bar');
+  bar.style.width = pct + '%';
+  bar.style.background = pct >= 80 ? 'var(--bad)' : 'var(--accent)';
+
+  const related = INVOICES.filter(i => i.org.includes(c.org) || c.org.includes(i.org.split(' — ')[0]));
+  document.getElementById('cd-invoices').innerHTML = related.length
+    ? related.map(inv => `<div class="invoice-row" onclick="s1_showInvoiceDetail('${inv.id}')"><div class="row-main"><span class="name">${inv.num}</span><span class="sub">${inv.date}</span></div><div class="row-side"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.status}">${STATUS_LABEL[inv.status]}</span></div></div>`).join('')
+    : '<div class="queue-empty">Aucune facture rattachée dans cet aperçu.</div>';
+
+  document.getElementById('cd-actions').innerHTML = c.duplicate
+    ? '<button class="go ghost" style="width:100%;">Fusionner avec un doublon (customer:merge_duplicate)</button>'
+    : '';
+
+  showScreen('s-client-detail');
+}
 
 // ===== File d'action (par rôle) =====
 const QUEUE_ITEMS = [
@@ -1875,9 +2082,15 @@ window.addEventListener('DOMContentLoaded', () => {
     arc.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
     arc.style.strokeDashoffset = String(circumference * (1 - pct));
   });
+  renderInvoicesList();
+  renderClientsList();
   applyRoleFilter();
   showScreen('s-accueil');
 });
+
+window.s1_showScreen = showScreen;
+window.s1_showInvoiceDetail = showInvoiceDetail;
+window.s1_showClientDetail = showClientDetail;
 })();
 
 (function(){
@@ -1923,6 +2136,8 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.add('active');
   });
 });
+
+window.daf_showScreen = showScreen;
 })();
 
 (function(){
@@ -1943,6 +2158,8 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.add('active');
   });
 });
+
+window.cli_showScreen = showScreen;
 })();
 
 (function(){
