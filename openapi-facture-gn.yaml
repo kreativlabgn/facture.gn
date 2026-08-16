@@ -1,0 +1,1461 @@
+openapi: 3.0.3
+info:
+  title: facture.gn API
+  description: >
+    API de l'Infrastructure Nationale de Confiance Transactionnelle de Guinée.
+    Toute mutation exige une double authentification : JWT RS256 (identité de session)
+    et signature Ed25519 (X-Facture-Signature) prouvant l'origine organisationnelle (ADR-011).
+    Les webhooks partenaires (APIP, providers de paiement) suivent un schéma d'authentification
+    distinct — voir la section Security Schemes.
+  version: "2.1"
+  contact:
+    name: facture.gn — Équipe technique
+  x-adr-references: ["ADR-001", "ADR-011", "ADR-020", "ADR-073", "ADR-082", "ADR-087", "ADR-088", "ADR-089", "ADR-090"]
+servers:
+  - url: https://api.facture.gn/v1
+    description: Production
+  - url: https://sandbox.facture.gn/v1
+    description: Sandbox partenaires (DGI, opérateurs Mobile Money, Djomy, Moneroo, APIP)
+
+tags:
+  - name: Organizations
+    description: Gestion des organisations (PME émettrices)
+  - name: Invoices
+    description: Cycle de vie complet de la facture (draft, proforma, devis, avoir)
+  - name: Payments
+    description: Encaissement — cash, lien de paiement orchestré, virement
+  - name: Verification
+    description: Vérification publique, sans authentification
+  - name: Customers
+    description: Clients/payeurs, y compris entités publiques (B2G, V2)
+  - name: Practices
+    description: Cabinets comptables, gestionnaires, CGA — professional_practice (ADR-068, ADR-078)
+  - name: Mandates
+    description: Mandat d'accès practice → organization (ADR-069)
+  - name: Partners
+    description: Intégrations partenaires institutionnels — APIP, FODIP, 3AE (ADR-077, ADR-082)
+  - name: PublicBuyer
+    description: Portail acheteur public — validation B2G, V1-V2 (ADR-080, ADR-081)
+  - name: Financing
+    description: Financement B2G à deux rails, FINANCIAL_PARTNER, V2 (ADR-088, ADR-089)
+  - name: UserAccess
+    description: Multi-numéros par utilisateur, USER_PHONE, MVP (ADR-087)
+  - name: Webhooks
+    description: Réception des notifications providers de paiement (ADR-075)
+
+security:
+  - bearerAuth: []
+    signatureAuth: []
+
+paths:
+  # ============================================================
+  # ORGANIZATIONS
+  # ============================================================
+  /organizations:
+    post:
+      tags: [Organizations]
+      summary: Créer une organisation
+      description: >
+        Inscription self-service ou assistée (Parcours 0, ADR-045). NIF et eTax
+        optionnels à l'inscription (ADR-035, story B4) — l'organisation démarre
+        en statut `unverified`, palier de vélocité T0.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationCreate'
+      responses:
+        '201':
+          description: Organisation créée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    get:
+      tags: [Organizations]
+      summary: Lister les organisations accessibles à l'utilisateur authentifié
+      parameters:
+        - name: registration_source
+          in: query
+          schema:
+            $ref: '#/components/schemas/RegistrationSource'
+      responses:
+        '200':
+          description: Liste paginée
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Organization'
+
+  /organizations/{organizationId}:
+    get:
+      tags: [Organizations]
+      summary: Détail d'une organisation
+      parameters:
+        - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        '200':
+          description: Détail organisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+
+  /organizations/{organizationId}/verify-dgi:
+    post:
+      tags: [Organizations]
+      summary: Déclencher la vérification NIF+eTax
+      description: >
+        Passage à `dgi_verification_status = verified` déclenche le palier
+        de vélocité T0 → T1 (ADR-036). Ne conditionne jamais l'accès aux
+        formules payantes (ADR-049) — uniquement les plafonds de transaction.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        '202':
+          description: Vérification en cours
+
+  # ============================================================
+  # INVOICES
+  # ============================================================
+  /invoices:
+    post:
+      tags: [Invoices]
+      summary: Créer une facture en brouillon
+      description: >
+        Crée un document en statut `draft`. `document_type` détermine s'il
+        s'agit d'une facture, d'une proforma ou d'un devis (ADR-064).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceCreate'
+      responses:
+        '201':
+          description: Facture créée en brouillon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+    get:
+      tags: [Invoices]
+      summary: Lister les factures de l'organisation courante
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/InvoiceStatus'
+        - name: document_type
+          in: query
+          schema:
+            $ref: '#/components/schemas/DocumentType'
+      responses:
+        '200':
+          description: Liste paginée
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invoice'
+
+  /invoices/{invoiceId}:
+    get:
+      tags: [Invoices]
+      summary: Détail d'une facture
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '200':
+          description: Détail facture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+
+  /invoices/{invoiceId}/issue:
+    post:
+      tags: [Invoices]
+      summary: Émettre et certifier la facture
+      description: >
+        Transition `draft → issued`. Attribue `number` (FG-YYYY-NNNNNN) et
+        `certification_id` (GN-{NIF8}-{YYYY}-{HASH6}). Signe le payload
+        canonicalisé (FGN-Canon-v1) en Ed25519, chaîne au hash précédent
+        (SHA-256). Rejeté si `document_type ≠ invoice` (ADR-064). Génère
+        automatiquement un lien de paiement orchestré (ADR-060, ADR-072).
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Facture émise et certifiée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '409':
+          description: Facture déjà émise (idempotence)
+
+  /invoices/{invoiceId}/void:
+    post:
+      tags: [Invoices]
+      summary: Annuler une facture sans paiement
+      description: >
+        Transition vers `voided`, réservée aux factures sans aucun `payment`
+        associé (ADR-065). Le `number` FG- n'est jamais réutilisé. Rejeté
+        (409) si un paiement, même partiel, existe — un avoir est requis
+        à la place.
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '200':
+          description: Facture annulée
+        '409':
+          description: Un paiement existe — utiliser /credit-notes
+
+  /invoices/{invoiceId}/convert:
+    post:
+      tags: [Invoices]
+      summary: Convertir une proforma ou un devis en facture
+      description: >
+        Crée une NOUVELLE facture en `draft`, recalcule le régime fiscal
+        au moment de la conversion (ADR-064). Le document source passe à
+        `converted`, jamais modifié rétroactivement.
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '201':
+          description: Nouvelle facture créée depuis la conversion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+
+  /invoices/{invoiceId}/events:
+    get:
+      tags: [Invoices]
+      summary: Historique des événements append-only de la facture
+      description: >
+        Retourne le journal complet `invoice_event` (24 types au catalogue,
+        22 MVP/V1 + 2 V2 B2G — ADR-015, ADR-081). Jamais modifiable.
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '200':
+          description: Journal d'événements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InvoiceEvent'
+
+  /invoices/{invoiceId}/payment-link:
+    post:
+      tags: [Payments]
+      summary: (Ré)générer le lien de paiement
+      description: >
+        Génère ou régénère (si expiré, TTL 30j — ADR-066) un lien de paiement
+        hébergé. Le provider par défaut est résolu par l'orchestrateur —
+        Djomy primary, Moneroo fallback (ADR-072, ADR-073). Le choix du
+        provider est invisible au marchand et au payeur.
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '200':
+          description: Lien de paiement généré
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment_link_url:
+                    type: string
+                    format: uri
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  # ============================================================
+  # PAYMENTS
+  # ============================================================
+  /payments:
+    post:
+      tags: [Payments]
+      summary: Enregistrer un paiement manuel (cash ou virement)
+      description: >
+        Rejette (422) toute valeur de `method` autre que `cash` ou
+        `bank_transfer` — le marquage manuel est restreint pour empêcher
+        la fuite de commission (ADR-061). Tout paiement non-cash doit
+        transiter par /invoices/{id}/payment-link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreate'
+      responses:
+        '201':
+          description: Paiement enregistré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '422':
+          description: method non autorisé en saisie manuelle
+
+  /payments/{paymentId}:
+    get:
+      tags: [Payments]
+      summary: Détail d'un paiement
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détail paiement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /payments/{paymentId}/provider-attempts:
+    get:
+      tags: [Payments]
+      summary: Historique des tentatives par provider
+      description: >
+        Retourne chaque tentative enregistrée dans `payment_provider_attempts`,
+        y compris les bascules primary→fallback (ADR-076).
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Liste des tentatives
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentProviderAttempt'
+
+  # ============================================================
+  # CREDIT NOTES & REFUNDS
+  # ============================================================
+  /credit-notes:
+    post:
+      tags: [Invoices]
+      summary: Émettre un avoir
+      description: Document comptable distinct du remboursement (ADR-063).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditNoteCreate'
+      responses:
+        '201':
+          description: Avoir créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditNote'
+
+  /refunds:
+    post:
+      tags: [Payments]
+      summary: Enregistrer un remboursement
+      description: >
+        Exige un `credit_note_id` préalable existant (ADR-063). `method`
+        accepte `payment_link_payout` (Djomy Payout, fallback Moneroo),
+        `cash`, `bank_transfer`, ou `credit_on_account`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundCreate'
+      responses:
+        '201':
+          description: Remboursement enregistré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '422':
+          description: Aucun credit_note associé
+
+  # ============================================================
+  # VERIFICATION (public, sans authentification)
+  # ============================================================
+  /verify/{certificationId}:
+    get:
+      tags: [Verification]
+      summary: Vérifier publiquement l'authenticité d'une facture
+      description: >
+        Aucune authentification requise. Fonctionne offline via verify-gn.js.
+        Affiche l'authenticité cryptographique, le statut de paiement, le
+        statut de contestation, et la validation administrative B2G si
+        applicable — jamais le contenu commercial intégral.
+      security: []
+      parameters:
+        - name: certificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "GN-12345678-2026-A3F9C1"
+      responses:
+        '200':
+          description: Résultat de vérification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResult'
+        '404':
+          description: certification_id inconnu
+
+  # ============================================================
+  # CUSTOMERS
+  # ============================================================
+  /customers:
+    post:
+      tags: [Customers]
+      summary: Créer un client/payeur
+      description: >
+        N'importe quelle entité — particulier ou entreprise, avec ou sans
+        compte facture.gn — peut être client sur une facture. `is_public_entity`
+        active le rattachement à un `public_buyer_account` (V2, B2G).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+      responses:
+        '201':
+          description: Client créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+
+  /customers/{customerId}/credit-limit:
+    patch:
+      tags: [Customers]
+      summary: Définir ou augmenter la limite de crédit d'un client
+      description: >
+        Requiert la permission `customer:manage_credit_limit` (admin/owner
+        uniquement, ADR-083, V1). Toute augmentation au-delà du seuil
+        `credit_limit_approval_threshold_gnf` (paramètre config, ADR-058)
+        exige une validation par le rôle `approver` — jamais une décision
+        unilatérale d'un admin seul.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                credit_limit:
+                  type: integer
+                  description: Centimes GNF
+      responses:
+        '200':
+          description: Limite mise à jour directement (sous le seuil)
+        '202':
+          description: Au-delà du seuil — en attente de validation approver
+        '403':
+          description: Permission customer:manage_credit_limit manquante
+
+  /customers/{customerId}/merge:
+    post:
+      tags: [Customers]
+      summary: Fusionner un client dupliqué dans un client cible
+      description: >
+        Requiert la permission `customer:merge_duplicate` (admin/owner
+        uniquement, ADR-083, V1). Jamais automatique (ADR-038) — toujours
+        une action explicite. L'historique de facturation du doublon est
+        rattaché au client cible ; le doublon est marqué `possible_duplicate_of`
+        plutôt que supprimé.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Le client dupliqué (source), à fusionner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target_customer_id:
+                  type: string
+                  format: uuid
+                  description: Le client cible qui conserve l'historique fusionné
+      responses:
+        '200':
+          description: Fusion effectuée
+        '403':
+          description: Permission customer:merge_duplicate manquante
+
+  # ============================================================
+  # PROFESSIONAL PRACTICES (cabinets, gestionnaires, CGA)
+  # ============================================================
+  /practices:
+    post:
+      tags: [Practices]
+      summary: Créer un cabinet, gestionnaire ou CGA
+      description: >
+        `type` ∈ {cabinet_comptable, gestionnaire, fiduciaire, cga} — le
+        4e type `cga` couvre les Centres de Gestion Agréés (ADR-078), qui
+        réutilisent exactement le mécanisme mandate/dashboard/revenue_share
+        des cabinets comptables.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PracticeCreate'
+      responses:
+        '201':
+          description: Practice créée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Practice'
+
+  /practices/{practiceId}/mandates:
+    post:
+      tags: [Mandates]
+      summary: Demander un mandat sur une organisation
+      description: Déclenche l'événement `mandate_requested` (ADR-069).
+      parameters:
+        - name: practiceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id:
+                  type: string
+                  format: uuid
+                granted_role:
+                  type: string
+                  enum: [accountant_external, business_manager]
+      responses:
+        '201':
+          description: Mandat en attente d'acceptation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mandate'
+
+  /mandates/{mandateId}/accept:
+    post:
+      tags: [Mandates]
+      summary: Accepter un mandat
+      description: >
+        Acceptation explicite obligatoire par l'organisation — via PWA ou
+        *620# option 5.3 + PIN (ADR-069). Déclenche `mandate_granted`.
+      parameters:
+        - name: mandateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Mandat actif
+
+  /mandates/{mandateId}/revoke:
+    post:
+      tags: [Mandates]
+      summary: Révoquer un mandat
+      description: >
+        Révocation par l'organisation OU par la practice. Tous les
+        collaborateurs de la practice perdent l'accès immédiatement
+        (ADR-069). Déclenche `mandate_revoked`.
+      parameters:
+        - name: mandateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Mandat révoqué
+
+  # ============================================================
+  # PARTNERS (APIP, FODIP, 3AE)
+  # ============================================================
+  /partners/{partnerType}/{event}:
+    post:
+      tags: [Partners]
+      summary: Webhook d'événement partenaire entrant
+      description: >
+        Point d'entrée générique pour les partenaires institutionnels.
+        Exemple concret : `POST /partners/apip/company-created` déclenche
+        l'auto-création d'une organisation avec `registration_source = apip`
+        (ADR-077). Authentification par API key (header `X-Partner-Key`) +
+        signature HMAC-SHA256 du corps (header `X-Partner-Signature`) —
+        ADR-082. Distinct de l'authentification utilisateur (JWT + Ed25519).
+      security:
+        - partnerAuth: []
+      parameters:
+        - name: partnerType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [apip, fodip, partner_3ae]
+        - name: event
+          in: path
+          required: true
+          schema:
+            type: string
+            example: company-created
+        - name: X-Partner-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Partner-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+            description: HMAC-SHA256 du corps de la requête
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Événement traité (ex. organisation auto-créée)
+        '401':
+          description: Signature HMAC invalide ou API key inconnue
+
+  # ============================================================
+  # PUBLIC BUYER PORTAL (B2G, V1-V2)
+  # ============================================================
+  /public-buyer/invoices:
+    get:
+      tags: [PublicBuyer]
+      summary: Lister les factures certifiées reçues (encours fournisseurs)
+      description: >
+        Réservé au rôle `public_buyer_validator`, authentifié via
+        `public_buyer_account` (ADR-080). V1 pour la lecture, V2 pour
+        l'intégration au scoring `is_financeable()`.
+      responses:
+        '200':
+          description: Liste des factures reçues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invoice'
+
+  /public-buyer/invoices/{invoiceId}/validate-liquidation:
+    post:
+      tags: [PublicBuyer]
+      summary: Valider la liquidation d'une facture fournisseur
+      description: >
+        Acte du DAF / chef de service dépense (Niveau 2 de la chaîne de
+        validation B2G, ADR-080). Déclenche `invoice.validated_by_administration
+        = true` et l'événement `liquidation_validated` (ADR-081). Ne
+        constate JAMAIS le paiement effectif par le Trésor — uniquement
+        la reconnaissance de la liquidation de la dette.
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '200':
+          description: Liquidation validée
+        '403':
+          description: Le rôle de l'appelant n'est pas public_buyer_validator
+
+  # ============================================================
+  # FINANCEMENT B2G — deux rails (ADR-088, ADR-089)
+  # ============================================================
+  /financial-partners:
+    get:
+      tags: [Financing]
+      summary: Lister les partenaires financiers disponibles pour le Rail A
+      description: >
+        Banques et MFI pouvant avancer le montant d'une facture B2G validée.
+        Partenaires initiaux : Ecobank, UBA (banque), COFINA, Akiba Finance
+        (mfi) — voir Grille-Offres §6.1.
+      responses:
+        '200':
+          description: Liste des partenaires actifs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FinancialPartner'
+
+  /invoices/{invoiceId}/financing:
+    post:
+      tags: [Financing]
+      summary: Choisir un rail de paiement pour une facture B2G validée
+      description: >
+        Disponible uniquement après `liquidation_validated` (403 sinon —
+        le choix du rail ne précède jamais la validation DAF, ADR-088).
+        **Rail A** : `financial_partner_id` renseigné → avance immédiate,
+        disbursement via Djomy Payout (Mobile Money) ou virement au choix
+        de la PME, déclenche l'événement `financing_disbursed` (V2) et
+        renseigne `invoice.financed_by_partner_id` + `financed_at`.
+        **Rail B** : `financial_partner_id` omis → confirmation explicite
+        d'attente du virement Trésor direct, aucun changement d'état côté
+        facture.gn au-delà de la confirmation. Toute tentative sur une
+        facture où `financed_by_partner_id` est déjà renseigné est rejetée
+        — anti-double financement (ADR-089).
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                financial_partner_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Omis = Rail B (attente Trésor)
+                disbursement_method:
+                  type: string
+                  enum: [payment_link_payout, bank_transfer]
+                  description: Requis si financial_partner_id renseigné (Rail A)
+      responses:
+        '200':
+          description: Rail confirmé (B), ou avance déclenchée (A)
+        '403':
+          description: Facture pas encore validée par le DAF (liquidation_validated absent)
+        '409':
+          description: Facture déjà financée — financed_by_partner_id déjà renseigné
+
+  # ============================================================
+  # ACCÈS UTILISATEUR — multi-numéros (ADR-087, MVP)
+  # ============================================================
+  /users/{userId}/phones:
+    get:
+      tags: [UserAccess]
+      summary: Lister les numéros associés à un utilisateur
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Liste des numéros
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserPhone'
+    post:
+      tags: [UserAccess]
+      summary: Associer un nouveau numéro à un utilisateur
+      description: >
+        Un même utilisateur est reconnu sur plusieurs numéros (ADR-087) —
+        l'authentification USSD résout contre `USER_PHONE`, jamais contre
+        un champ `phone` unique. Aucun impact sur la clé cryptographique,
+        toujours par organisation et par canal (ADR-026).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [msisdn]
+              properties:
+                msisdn:
+                  type: string
+      responses:
+        '201':
+          description: Numéro ajouté, non vérifié
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPhone'
+
+  /users/{userId}/phones/{phoneId}/set-primary:
+    post:
+      tags: [UserAccess]
+      summary: Définir un numéro comme principal
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: phoneId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Numéro principal mis à jour — un seul is_primary=true par utilisateur
+
+  # ============================================================
+  # WEBHOOKS ENTRANTS — providers de paiement
+  # ============================================================
+  /webhooks/djomy:
+    post:
+      tags: [Webhooks]
+      summary: Réception webhook Djomy (provider primary)
+      description: >
+        Normalisé via `DjomyProvider.handleWebhook`. `processed_at` sert
+        de clé d'idempotence sur `payment_webhooks` — un webhook reçu deux
+        fois n'est traité qu'une fois (ADR-075).
+      security:
+        - providerWebhookAuth: []
+      responses:
+        '200':
+          description: Webhook traité (ou déjà traité — idempotent)
+
+  /webhooks/moneroo:
+    post:
+      tags: [Webhooks]
+      summary: Réception webhook Moneroo (provider fallback)
+      security:
+        - providerWebhookAuth: []
+      responses:
+        '200':
+          description: Webhook traité (ou déjà traité — idempotent)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT RS256 — identité de session utilisateur (ADR-011)
+    signatureAuth:
+      type: apiKey
+      in: header
+      name: X-Facture-Signature
+      description: Signature Ed25519 prouvant l'origine organisationnelle sur toute mutation (ADR-011)
+    partnerAuth:
+      type: apiKey
+      in: header
+      name: X-Partner-Key
+      description: API key dédiée par partenaire institutionnel, complétée par HMAC-SHA256 (ADR-082)
+    providerWebhookAuth:
+      type: apiKey
+      in: header
+      name: X-Provider-Signature
+      description: Signature spécifique au provider de paiement (Djomy ou Moneroo), vérifiée avant tout traitement
+
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InvoiceId:
+      name: invoiceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    ValidationError:
+      description: Erreur de validation des champs
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field:
+                      type: string
+                    message:
+                      type: string
+
+  schemas:
+    RegistrationSource:
+      type: string
+      enum: [organic, apip, cga_referral, fodip, partner_3ae]
+      description: Canal d'acquisition de l'organisation (ADR-077)
+
+    RegimeFiscal:
+      type: string
+      enum: [normal_tva, tpu, normal_sans_tva, non_assujetti_association]
+      description: Quatre valeurs (ADR-033, ADR-057) — jamais un taux TVA plat par défaut
+
+    CommercialTier:
+      type: string
+      enum: [freemium, starter, pro, enterprise, custom]
+      description: Grille à 5 paliers (ADR-074) — différenciation par fonctionnalités, jamais par volume (ADR-049)
+
+    VelocityTier:
+      type: string
+      enum: [T0, T1, T2, T3]
+      description: Gouverne les plafonds de montant, indépendant du palier commercial (ADR-049, ADR-050)
+
+    DocumentType:
+      type: string
+      enum: [invoice, proforma, quote]
+      description: ADR-064
+
+    InvoiceStatus:
+      type: string
+      enum: [draft, issued, partially_paid, paid, voided, converted, expired]
+
+    Organization:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        regime_fiscal:
+          $ref: '#/components/schemas/RegimeFiscal'
+        legal_form:
+          type: string
+          enum: [commercial, association]
+        nif:
+          type: string
+        etax_number:
+          type: string
+          nullable: true
+          description: Nullable à l'inscription (ADR-035, story B4)
+        rccm:
+          type: string
+          nullable: true
+        registration_source:
+          $ref: '#/components/schemas/RegistrationSource'
+        dgi_verification_status:
+          type: string
+          enum: [unverified, pending, verified]
+        commercial_tier:
+          $ref: '#/components/schemas/CommercialTier'
+        preferred_language:
+          type: string
+          enum: [fr, pular, malinke, soussou]
+        created_at:
+          type: string
+          format: date-time
+
+    OrganizationCreate:
+      type: object
+      required: [name, regime_fiscal]
+      properties:
+        name:
+          type: string
+        regime_fiscal:
+          $ref: '#/components/schemas/RegimeFiscal'
+        nif:
+          type: string
+          nullable: true
+        etax_number:
+          type: string
+          nullable: true
+        preferred_language:
+          type: string
+          enum: [fr, pular, malinke, soussou]
+
+    InvoiceCreate:
+      type: object
+      required: [document_type, customer_id, lines]
+      properties:
+        document_type:
+          $ref: '#/components/schemas/DocumentType'
+        customer_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Nullable pour une facture anonyme (plafond T0, ADR-054)
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceLineCreate'
+        recurring_template_id:
+          type: string
+          format: uuid
+          nullable: true
+        reference_marche:
+          type: string
+          nullable: true
+          description: >
+            Référence d'attribution TELEMO, recopiée manuellement par la PME
+            (ADR-090). Optionnelle — tous les achats publics ne passent pas
+            par appel d'offres formel. Aucune vérification automatique
+            aujourd'hui, aucune API TELEMO consommée.
+
+    InvoiceLineCreate:
+      type: object
+      required: [description, quantity, unit_price]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          nullable: true
+        description:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: integer
+          description: Centimes GNF
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: "FG-2026-000042"
+        certification_id:
+          type: string
+          nullable: true
+          example: "GN-12345678-2026-A3F9C1"
+        document_type:
+          $ref: '#/components/schemas/DocumentType'
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        dispute_status:
+          type: string
+          enum: [none, disputed, resolved]
+        validated_by_administration:
+          type: boolean
+          description: V2 — déclenché par l'événement liquidation_validated (ADR-080/081)
+        reference_marche:
+          type: string
+          nullable: true
+          description: Référence TELEMO recopiée manuellement (ADR-090), non vérifiée
+        financed_by_partner_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            V2 — présence seule bloque un second financement (ADR-089).
+            Renseigné uniquement si le Rail A a été choisi via
+            POST /invoices/{id}/financing.
+        financed_at:
+          type: string
+          format: date-time
+          nullable: true
+        total_ht:
+          type: integer
+          description: Centimes GNF
+        total_tva:
+          type: integer
+        total_ttc:
+          type: integer
+          description: Montant certifié signé — jamais pollué par les frais plateforme (ADR-059)
+        amount_paid:
+          type: integer
+        amount_due:
+          type: integer
+        payment_link_url:
+          type: string
+          format: uri
+          nullable: true
+        payment_link_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        issued_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    InvoiceEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          description: 24 types au catalogue — voir DAT §4.1
+          example: payment_link_generated
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: integer
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PaymentCreate:
+      type: object
+      required: [invoice_id, amount, method]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          description: Centimes GNF
+        method:
+          type: string
+          enum: [cash, bank_transfer]
+          description: Seules valeurs acceptées en saisie manuelle (ADR-061)
+        deposit_type:
+          type: string
+          enum: [arrhes, acompte]
+          nullable: true
+        proof:
+          type: object
+          nullable: true
+          description: Photo/GPS/signature — obligatoire au-delà de 1M GNF
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          description: Ce que le marchand reçoit
+        amount_collected:
+          type: integer
+          description: Ce que le payeur a payé (inclut les frais)
+        platform_fee_amount:
+          type: integer
+        gateway_fee_amount:
+          type: integer
+        method:
+          type: string
+          enum: [cash, payment_link, bank_transfer]
+        provider_sub_method:
+          type: string
+          enum: [orange_money, mtn_momo, card, wave]
+          nullable: true
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        collected_at:
+          type: string
+          format: date-time
+
+    PaymentProviderAttempt:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          enum: [djomy, moneroo, orange_direct, mtn_direct]
+        status:
+          type: string
+          enum: [pending, success, failed, timeout]
+        provider_ref:
+          type: string
+        amount_gnf:
+          type: integer
+        fee_gateway:
+          type: integer
+        fee_platform:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        settled_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreditNoteCreate:
+      type: object
+      required: [invoice_id, amount, reason]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        refund_multiplier:
+          type: integer
+          enum: [1, 2]
+          description: 2 pour arrhes + annulation professionnelle
+        reason:
+          type: string
+
+    CreditNote:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    RefundCreate:
+      type: object
+      required: [credit_note_id, amount, method]
+      properties:
+        credit_note_id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        method:
+          type: string
+          enum: [cash, payment_link_payout, bank_transfer, credit_on_account]
+          description: payment_link_payout = Djomy Payout, fallback Moneroo
+
+    Refund:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+
+    VerificationResult:
+      type: object
+      properties:
+        certification_id:
+          type: string
+        authentic:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        dispute_status:
+          type: string
+          enum: [none, disputed, resolved]
+        validated_by_administration:
+          type: boolean
+          nullable: true
+        issued_at:
+          type: string
+          format: date-time
+
+    CustomerCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        nif:
+          type: string
+          nullable: true
+        is_public_entity:
+          type: boolean
+          default: false
+          description: V2 — active le rattachement public_buyer_account
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        is_public_entity:
+          type: boolean
+        running_balance:
+          type: integer
+        credit_limit:
+          type: integer
+          nullable: true
+
+    FinancialPartner:
+      type: object
+      description: Banque ou MFI pouvant financer une facture B2G (ADR-089, V2)
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Ecobank
+        type:
+          type: string
+          enum: [banque, mfi]
+        status:
+          type: string
+          enum: [active, suspended]
+
+    UserPhone:
+      type: object
+      description: Numéro associé à un utilisateur — multi-numéros (ADR-087, MVP)
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        msisdn:
+          type: string
+        is_primary:
+          type: boolean
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    PracticeCreate:
+      type: object
+      required: [type, name]
+      properties:
+        type:
+          type: string
+          enum: [cabinet_comptable, gestionnaire, fiduciaire, cga]
+          description: 4e type cga ajouté par ADR-078
+        name:
+          type: string
+        registration_number:
+          type: string
+          nullable: true
+          description: N° Ordre OCAECG, agrément CGA, ou RCCM selon le type
+
+    Practice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [cabinet_comptable, gestionnaire, fiduciaire, cga]
+        name:
+          type: string
+        ordre_verified:
+          type: boolean
+        tier:
+          type: string
+          enum: [partner_free, partner_starter, partner_pro, partner_institutional]
+
+    Mandate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        practice_id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, active, revoked, expired]
+        granted_role:
+          type: string
+          enum: [accountant_external, business_manager]
+
+x-security-notes: |
+  Toute réponse d'erreur suit le format standard { errors: [{ field, message }] }.
+  Les codes 401/403 distinguent systématiquement absence d'authentification (401)
+  et authentification valide mais permission insuffisante (403) — jamais confondus,
+  conformément au modèle RBAC à 61 permissions MVP (65 en V1, DAT §3.4).
