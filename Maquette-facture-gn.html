@@ -1365,8 +1365,9 @@ button{font-family:inherit;}
     <div class="card">
       <div class="panel-head">
         <span class="panel-title">Boutique Aissatou — factures</span>
-        <button class="btn-ghost">Exporter le FEC</button>
+        <button class="btn-ghost" id="cab-fec-btn" onclick="cab_exportFec()">Exporter le FEC</button>
       </div>
+      <p id="cab-fec-confirm" hidden style="font-size:11px; color:var(--good); font-weight:600; margin:0; padding:8px 16px 0;">Export généré — fec_boutique-aissatou_2026-08.txt (SYSCOHADA)</p>
       <div class="inv-row"><div class="inv-main"><span class="inv-name">Mamadou Sylla</span><span class="inv-sub">FG-2026-000412 · il y a 2h</span></div><div style="text-align:right;"><span class="amount">180 000</span><br><span class="pill paid" style="margin-top:4px;">Payée</span></div></div>
       <div class="inv-row"><div class="inv-main"><span class="inv-name">Restaurant Le Damier</span><span class="inv-sub">FG-2026-000411 · hier</span></div><div style="text-align:right;"><span class="amount">95 000</span><br><span class="pill pending" style="margin-top:4px;">Attente</span></div></div>
       <div class="inv-row"><div class="inv-main"><span class="inv-name">Fatoumata Camara</span><span class="inv-sub">FG-2026-000410 · 24 juil.</span></div><div style="text-align:right;"><span class="amount">220 000</span><br><span class="pill paid" style="margin-top:4px;">Partiel</span></div></div>
@@ -1421,10 +1422,17 @@ button{font-family:inherit;}
     <div class="card" style="margin-bottom:16px;">
       <div class="panel-head">
         <span class="panel-title">Collaborateurs</span>
-        <button class="btn-ghost">+ Inviter</button>
+        <button class="btn-ghost" onclick="cab_toggleInvite()">+ Inviter</button>
       </div>
-      <div class="team-row" onclick="cab_showMemberDetail('Ibrahima Bah','Associé','practice_admin')"><div><div style="font-weight:600; font-size:13.5px;">Ibrahima Bah</div><div class="inv-sub">Associé · practice_admin</div></div><button class="btn-ghost">Gérer</button></div>
-      <div class="team-row" onclick="cab_showMemberDetail('Fatou Camara','Comptable junior','accountant_external')"><div><div style="font-weight:600; font-size:13.5px;">Fatou Camara</div><div class="inv-sub">Comptable junior · accountant_external</div></div><button class="btn-ghost">Gérer</button></div>
+      <div id="cab-invite-form" hidden style="padding:12px 16px; border-bottom:1px solid var(--border);">
+        <input class="btn-ghost" style="width:100%; padding:9px 11px; text-align:left; font-weight:400; margin-bottom:8px;" id="cab-invite-phone" placeholder="+224 6…">
+        <select id="cab-invite-role" style="width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:8px; font-size:12.5px; margin-bottom:8px;">
+          <option value="accountant_external">accountant_external — Comptable</option>
+          <option value="practice_admin">practice_admin — Associé</option>
+        </select>
+        <button class="btn-ghost" style="width:100%;" onclick="cab_sendInvite()">Envoyer l'invitation</button>
+      </div>
+      <div id="cab-team-list"></div>
     </div>
 
     <div class="card" style="padding:15px 16px;">
@@ -1445,8 +1453,8 @@ button{font-family:inherit;}
     <div class="panel-title" style="margin-bottom:10px;">Permissions</div>
     <div id="cab-ms-perms" style="margin-bottom:16px;"></div>
     <div style="display:flex; gap:8px;">
-      <button class="btn-ghost" style="flex:1;">Changer le rôle</button>
-      <button class="btn-ghost" style="flex:1; color:var(--bad); border-color:var(--bad);">Retirer l'accès</button>
+      <button class="btn-ghost" style="flex:1;" onclick="cab_changeMemberRole()">Changer le rôle</button>
+      <button class="btn-ghost" style="flex:1; color:var(--bad); border-color:var(--bad);" onclick="cab_revokeMember()">Retirer l'accès</button>
     </div>
   </div>
 </div>
@@ -1479,10 +1487,10 @@ button{font-family:inherit;}
       <div class="stat-mini"><div class="lbl">Délai moyen</div><div class="val mono">3,2 j</div></div>
     </div>
 
-    <div class="filter-row">
-      <button class="filter-chip active">Toutes · 3</button>
-      <button class="filter-chip">Non validées · 2</button>
-      <button class="filter-chip">Validées · 1</button>
+    <div class="filter-row" id="daf-filter-row">
+      <button class="filter-chip active" data-filter="all">Toutes · 3</button>
+      <button class="filter-chip" data-filter="pending">Non validées · 2</button>
+      <button class="filter-chip" data-filter="validated">Validées · 1</button>
     </div>
 
     <div class="card" id="daf-daf-invoices-list"></div>
@@ -1632,8 +1640,17 @@ button{font-family:inherit;}
         <div class="fee-row"><span>Frais de transaction</span><span class="mono" id="cli-pm-fee"></span></div>
         <div class="fee-row total"><span>Total à payer</span><span class="mono" id="cli-pm-total"></span></div>
       </div>
-      <button class="btn-primary" id="cli-pm-confirm" style="margin-top:4px;"></button>
+      <button class="btn-primary" id="cli-pm-confirm" style="margin-top:4px;" onclick="cli_confirmPayment()"></button>
       <p style="font-size:10.5px; color:var(--text-dim); margin-top:10px; text-align:center;">Le commerçant reçoit l'intégralité du montant facturé — les frais sont portés par vous, le payeur.</p>
+    </div>
+
+    <div id="cli-pay-success" hidden style="text-align:center; padding:20px 4px;">
+      <div style="width:52px; height:52px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 14px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h2 style="font-size:16px; margin-bottom:6px;">Paiement confirmé</h2>
+      <p style="font-size:12px; color:var(--text-dim); margin:0 0 18px;" id="cli-pay-success-amount"></p>
+      <button class="btn-ghost" style="width:100%;" onclick="cli_showScreen('cli-s-liste')">Retour à mes factures</button>
     </div>
 
     <div class="cert-block">
@@ -1796,11 +1813,11 @@ button{font-family:inherit;}
     <!-- ================= TICKETS (support) ================= -->
     <section class="view" id="ops-v-tickets">
       <div class="page-head"><p class="eyebrow">Support · SLA par sévérité (ADR-085)</p><h1 style="font-size:19px;">Tickets</h1></div>
-      <div class="filter-row">
-        <button class="filter-chip active">Tous · 3</button>
-        <button class="filter-chip">Critique · 1</button>
-        <button class="filter-chip">Élevée · 1</button>
-        <button class="filter-chip">Moyenne · 1</button>
+      <div class="filter-row" id="ops-ticket-filter-row">
+        <button class="filter-chip active" data-sev="all">Tous · 3</button>
+        <button class="filter-chip" data-sev="critique">Critique · 1</button>
+        <button class="filter-chip" data-sev="elevee">Élevée · 1</button>
+        <button class="filter-chip" data-sev="moyenne">Moyenne · 1</button>
       </div>
       <div class="card" id="ops-tickets-list"></div>
     </section>
@@ -2938,28 +2955,81 @@ function sendMandateRequest(){
   document.getElementById('cab-mandat-sent-card').hidden = false;
 }
 
+// ===== Export FEC =====
+function exportFec(){
+  document.getElementById('cab-fec-confirm').hidden = false;
+  const btn = document.getElementById('cab-fec-btn');
+  btn.textContent = 'Exporté ✓';
+  setTimeout(() => { btn.textContent = 'Exporter le FEC'; }, 2000);
+}
+
+// ===== Collaborateurs — invitation + détail =====
+const COLLABORATORS = [
+  { id:'m1', name:'Ibrahima Bah', title:'Associé', role:'practice_admin' },
+  { id:'m2', name:'Fatou Camara', title:'Comptable junior', role:'accountant_external' },
+];
+function renderCollaborators(){
+  document.getElementById('cab-team-list').innerHTML = COLLABORATORS.map(m => `
+    <div class="team-row" onclick="cab_showMemberDetail('${m.id}')"><div><div style="font-weight:600; font-size:13.5px;">${m.name}</div><div class="inv-sub">${m.title} · ${m.role}</div></div><button class="btn-ghost">Gérer</button></div>`).join('');
+}
+function toggleInvite(){
+  document.getElementById('cab-invite-form').hidden = !document.getElementById('cab-invite-form').hidden;
+}
+function sendInvite(){
+  const phone = document.getElementById('cab-invite-phone').value.trim();
+  const role = document.getElementById('cab-invite-role').value;
+  if (!phone) return;
+  COLLABORATORS.push({ id:'m' + (COLLABORATORS.length + 1), name:'Invité — ' + phone, title:"En attente d'acceptation", role });
+  renderCollaborators();
+  document.getElementById('cab-invite-form').hidden = true;
+  document.getElementById('cab-invite-phone').value = '';
+}
+
 // ===== Détail collaborateur =====
 const MEMBER_PERMS = {
   practice_admin: ['practice:manage','practice:invite_member','practice:view_billing','practice:view_revenue_share','mandate:request','mandate:accept','mandate:revoke'],
   accountant_external: ['mandate:request'],
 };
 const ALL_PERMS = ['practice:manage','practice:invite_member','practice:view_billing','practice:view_revenue_share','mandate:request','mandate:accept','mandate:revoke'];
-function showMemberDetail(name, title, role){
-  document.getElementById('cab-ms-name').textContent = name;
-  document.getElementById('cab-ms-role').textContent = title + ' · ' + role;
-  const granted = MEMBER_PERMS[role] || [];
+let currentMemberId = null;
+function showMemberDetail(id){
+  currentMemberId = id;
+  const m = COLLABORATORS.find(x => x.id === id);
+  document.getElementById('cab-ms-name').textContent = m.name;
+  document.getElementById('cab-ms-role').textContent = m.title + ' · ' + m.role;
+  const granted = MEMBER_PERMS[m.role] || [];
   document.getElementById('cab-ms-perms').innerHTML = ALL_PERMS.map(p => {
     const has = granted.includes(p);
     return `<div class="perm-row ${has ? 'yes' : 'no'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">${has ? '<path d="M20 6L9 17l-5-5"/>' : '<path d="M6 6l12 12M18 6L6 18"/>'}</svg><span class="mono" style="font-size:11.5px;">${p}</span></div>`;
   }).join('');
   document.getElementById('cab-member-sheet').classList.add('open');
 }
+function changeMemberRole(){
+  const m = COLLABORATORS.find(x => x.id === currentMemberId);
+  if (!m) return;
+  m.role = m.role === 'practice_admin' ? 'accountant_external' : 'practice_admin';
+  renderCollaborators();
+  showMemberDetail(currentMemberId);
+}
+function revokeMember(){
+  const idx = COLLABORATORS.findIndex(x => x.id === currentMemberId);
+  if (idx === -1) return;
+  COLLABORATORS.splice(idx, 1);
+  renderCollaborators();
+  document.getElementById('cab-member-sheet').classList.remove('open');
+}
 document.getElementById('cab-member-sheet').addEventListener('click', (e) => {
   if (e.target.id === 'member-sheet') e.target.classList.remove('open');
 });
+renderCollaborators();
 
 window.cab_sendMandateRequest = sendMandateRequest;
 window.cab_showMemberDetail = showMemberDetail;
+window.cab_exportFec = exportFec;
+window.cab_toggleInvite = toggleInvite;
+window.cab_sendInvite = sendInvite;
+window.cab_changeMemberRole = changeMemberRole;
+window.cab_revokeMember = revokeMember;
 })();
 
 (function(){
@@ -2971,10 +3041,13 @@ function showScreen(id){
 document.querySelectorAll('.proto-bar [data-go]').forEach(btn => {
   btn.addEventListener('click', () => showScreen(btn.dataset.go));
 });
-document.querySelectorAll('.filter-chip').forEach(chip => {
+let dafFilter = 'all';
+document.querySelectorAll('#daf-filter-row .filter-chip').forEach(chip => {
   chip.addEventListener('click', () => {
-    chip.parentElement.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('#daf-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
+    dafFilter = chip.dataset.filter;
+    renderDafList();
   });
 });
 
@@ -2996,11 +3069,12 @@ const DAF_INVOICES = [
 function renderDafList(){
   document.getElementById('daf-encours-total').textContent = (DAF_INVOICES.filter(i => !i.validated).reduce((s,i)=>s+i.amount,0)/1000000).toFixed(1).replace('.',',') + 'M';
   document.getElementById('daf-encours-sub').textContent = 'GNF · ' + DAF_INVOICES.filter(i => !i.validated).length + ' factures en attente de validation';
-  document.getElementById('daf-daf-invoices-list').innerHTML = DAF_INVOICES.map(inv => `
+  const list = dafFilter === 'all' ? DAF_INVOICES : DAF_INVOICES.filter(i => dafFilter === 'validated' ? i.validated : !i.validated);
+  document.getElementById('daf-daf-invoices-list').innerHTML = list.length ? list.map(inv => `
     <div class="inv-row" onclick="daf_showDafDetail('${inv.id}')">
       <div class="inv-main"><span class="inv-name">${inv.org}</span><span class="inv-sub">${inv.num} · marché ${inv.marche}</span></div>
       <div style="text-align:right;"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.validated ? 'paid' : 'pending'}" style="display:block; margin-top:4px;">${inv.validated ? 'Validée' : 'Non validée'}</span></div>
-    </div>`).join('');
+    </div>`).join('') : '<div style="padding:16px; font-size:12.5px; color:var(--text-dim); text-align:center;">Aucune facture dans cette catégorie.</div>';
 }
 
 function showDafDetail(id){
@@ -3104,7 +3178,10 @@ function renderInvoices(){
     </div>`).join('');
 }
 
+let currentInvoiceId = null;
 function showDetail(id){
+  currentInvoiceId = id;
+  document.getElementById('cli-pay-success').hidden = true;
   const inv = CLIENT_INVOICES.find(i => i.id === id);
   document.getElementById('cli-dt-org').textContent = inv.org;
   document.getElementById('cli-dt-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
@@ -3149,6 +3226,23 @@ function updateFee(base, feePct){
   document.getElementById('cli-pm-total').textContent = total.toLocaleString('fr-FR') + ' GNF';
   document.getElementById('cli-pm-confirm').textContent = 'Payer ' + total.toLocaleString('fr-FR') + ' GNF';
 }
+function confirmPayment(){
+  const inv = CLIENT_INVOICES.find(i => i.id === currentInvoiceId);
+  if (!inv) return;
+  const total = document.getElementById('cli-pm-total').textContent;
+  inv.status = 'paid';
+  delete inv.paid;
+  document.getElementById('cli-dt-pay-methods').hidden = true;
+  document.getElementById('cli-dt-pay-block').hidden = true;
+  document.getElementById('cli-dt-remaining-row').hidden = true;
+  const pill = document.getElementById('cli-dt-status');
+  pill.className = 'pill paid';
+  pill.textContent = STATUS_LABEL.paid;
+  document.getElementById('cli-pay-success-amount').textContent = total + ' réglés — la facture est maintenant soldée.';
+  document.getElementById('cli-pay-success').hidden = false;
+  renderOrgFilter();
+  renderInvoices();
+}
 document.querySelectorAll('.pay-method').forEach(el => {
   el.addEventListener('click', () => {
     document.querySelectorAll('.pay-method').forEach(m => m.classList.remove('selected'));
@@ -3173,6 +3267,7 @@ renderOrgFilter();
 renderInvoices();
 
 window.cli_confirmAddNumber = confirmAddNumber;
+window.cli_confirmPayment = confirmPayment;
 window.cli_openPayMethods = openPayMethods;
 window.cli_showDetail = showDetail;
 window.cli_showScreen = showScreen;
@@ -3312,15 +3407,28 @@ function slaText(min){
   return (h > 0 ? h + 'h ' : '') + m + ' min restantes';
 }
 
+let ticketSevFilter = 'all';
 function renderTickets(){
-  document.getElementById('ops-tickets-list').innerHTML = TICKETS.map(t => `
+  const list = ticketSevFilter === 'all' ? TICKETS : TICKETS.filter(t => t.sev === ticketSevFilter);
+  document.getElementById('ops-tickets-list').innerHTML = list.length ? list.map(t => `
     <div class="ticket-row" onclick="ops_showTicketDetail('${t.id}')" style="cursor:pointer;">
       <div class="sev ${t.sev}"></div>
       <div class="ticket-main"><div class="subj">${t.subj}</div><div class="meta">${t.org} · ${t.opened}</div></div>
       <div class="sla ${slaClass(t.slaMinutes)}">${t.slaTotal}<br>${slaText(t.slaMinutes)}</div>
       <button class="btn-ghost" onclick="event.stopPropagation(); ops_showTicketDetail('${t.id}')">${t.slaMinutes < 0 ? 'Prendre en charge' : 'Voir'}</button>
-    </div>`).join('');
+    </div>`).join('') : '<div style="padding:16px; font-size:12.5px; color:var(--text-dim); text-align:center;">Aucun ticket dans cette catégorie.</div>';
 }
+document.getElementById('ops-ticket-filter-row').addEventListener('click', (e) => {
+  const chip = e.target.closest('.filter-chip');
+  if (!chip) return;
+  document.querySelectorAll('#ops-ticket-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  ticketSevFilter = chip.dataset.sev;
+  renderTickets();
+});
+document.querySelectorAll('.switch').forEach(sw => {
+  sw.addEventListener('click', () => sw.classList.toggle('on'));
+});
 
 function showTicketDetail(id){
   const t = TICKETS.find(x => x.id === id);
