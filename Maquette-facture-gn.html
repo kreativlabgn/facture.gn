@@ -301,6 +301,10 @@ button{font-family:inherit;}
 .encours-card .sub{font-size:11.5px; color:var(--text-dim); margin-top:4px;}
 
 .filter-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
+.stats-strip{display:flex; gap:10px;}
+.stat-mini{flex:1; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 14px;}
+.stat-mini .lbl{font-family:'JetBrains Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim);}
+.stat-mini .val{font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:17px; margin-top:4px;}
 .filter-chip{font-size:12px; font-weight:600; padding:7px 13px; border-radius:100px; border:1px solid var(--border-strong); background:var(--surface); color:var(--text-dim); cursor:pointer;}
 .filter-chip.active{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
 
@@ -1339,8 +1343,8 @@ button{font-family:inherit;}
 <div class="proto-bar">
   <span class="proto-label">Aperçu prototype</span>
   <button data-go="daf-s-liste" class="active">1 · Factures reçues</button>
-  <button data-go="daf-s-detail">2 · Détail — non validée</button>
-  <button data-go="daf-s-detail-valide">3 · Détail — validée</button>
+  <button onclick="daf_showDafDetail('d1')">2 · Détail — non validée</button>
+  <button onclick="daf_showDafDetail('d3')">3 · Détail — validée</button>
 </div>
 
 <div class="page">
@@ -1353,8 +1357,13 @@ button{font-family:inherit;}
 
     <div class="encours-card">
       <div class="lbl">Encours fournisseurs</div>
-      <div class="amt mono">17,3M</div>
-      <div class="sub">GNF · 2 factures en attente de validation</div>
+      <div class="amt mono" id="daf-encours-total"></div>
+      <div class="sub" id="daf-encours-sub"></div>
+    </div>
+
+    <div class="stats-strip" style="margin:14px 0 16px;">
+      <div class="stat-mini"><div class="lbl">Validées ce mois</div><div class="val mono">4</div></div>
+      <div class="stat-mini"><div class="lbl">Délai moyen</div><div class="val mono">3,2 j</div></div>
     </div>
 
     <div class="filter-row">
@@ -1363,23 +1372,10 @@ button{font-family:inherit;}
       <button class="filter-chip">Validées · 1</button>
     </div>
 
-    <div class="card">
-      <div class="inv-row" onclick="daf_showScreen('daf-s-detail')">
-        <div class="inv-main"><span class="inv-name">Entreprise Sylla &amp; Fils</span><span class="inv-sub">FG-2026-000388 · marché MPA-2026-00417</span></div>
-        <div style="text-align:right;"><span class="amount">14 200 000</span><span class="pill pending" style="display:block; margin-top:4px;">Non validée</span></div>
-      </div>
-      <div class="inv-row">
-        <div class="inv-main"><span class="inv-name">Coopérative Agricole Kindia</span><span class="inv-sub">FG-2026-000401 · marché MPA-2026-00422</span></div>
-        <div style="text-align:right;"><span class="amount">3 100 000</span><span class="pill pending" style="display:block; margin-top:4px;">Non validée</span></div>
-      </div>
-      <div class="inv-row" onclick="daf_showScreen('daf-s-detail-valide')">
-        <div class="inv-main"><span class="inv-name">Établissements Diakité</span><span class="inv-sub">FG-2026-000350 · marché MPA-2026-00390</span></div>
-        <div style="text-align:right;"><span class="amount">8 500 000</span><span class="pill paid" style="display:block; margin-top:4px;">Validée</span></div>
-      </div>
-    </div>
+    <div class="card" id="daf-daf-invoices-list"></div>
   </section>
 
-  <!-- ================= DÉTAIL — NON VALIDÉE ================= -->
+  <!-- ================= DÉTAIL FACTURE (unifié pending/validée) ================= -->
   <section class="screen" id="daf-s-detail">
     <div class="back-row" onclick="daf_showScreen('daf-s-liste')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
@@ -1387,49 +1383,48 @@ button{font-family:inherit;}
     </div>
 
     <div class="detail-hero">
-      <div class="org">Entreprise Sylla &amp; Fils</div>
-      <div class="amt mono">14 200 000 GNF</div>
-      <span class="pill pending" style="margin-top:10px;">Non validée</span>
+      <div class="org" id="daf-dd-org"></div>
+      <div class="amt mono" id="daf-dd-amount"></div>
+      <span class="pill" id="daf-dd-status"></span>
     </div>
 
-    <div class="card">
-      <div class="detail-row"><span class="k">Numéro</span><span class="mono">FG-2026-000388</span></div>
-      <div class="detail-row"><span class="k">Émise le</span><span>18 juillet 2026</span></div>
-      <div class="detail-row"><span class="k">Référence marché (TELEMO)</span><span class="mono" style="font-size:11.5px;">MPA-2026-00417</span></div>
-      <div class="detail-row"><span class="k">Objet</span><span>Fourniture d'intrants agricoles</span></div>
+    <div class="card" style="margin-bottom:14px;">
+      <div class="detail-row"><span class="k">Numéro</span><span class="mono" id="daf-dd-num"></span></div>
+      <div class="detail-row"><span class="k">Émise le</span><span id="daf-dd-date"></span></div>
+      <div class="detail-row"><span class="k">Référence marché (TELEMO)</span><span class="mono" style="font-size:11.5px;" id="daf-dd-marche"></span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Objet</span><span id="daf-dd-objet"></span></div>
     </div>
 
-    <div class="constraint-note">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
-      <div>Cette action confirme uniquement la <b>liquidation</b> — la reconnaissance de dette. Elle ne déclenche <b>aucun paiement</b> : le paiement effectif reste un acte distinct, hors de facture.gn (Trésor ou financement bancaire, ADR-088).</div>
+    <div class="card" style="padding:14px 16px; margin-bottom:14px;">
+      <div class="panel-title" style="margin-bottom:8px; font-size:12px;">Niveau 1 — service fait (optionnel, ADR-080)</div>
+      <div id="daf-dd-servicefait" style="font-size:12px; line-height:1.5;"></div>
     </div>
 
-    <button class="btn-primary" onclick="daf_showScreen('daf-s-detail-valide')">Valider la liquidation</button>
-  </section>
-
-  <!-- ================= DÉTAIL — VALIDÉE ================= -->
-  <section class="screen" id="daf-s-detail-valide">
-    <div class="back-row" onclick="daf_showScreen('daf-s-liste')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
-      Factures reçues
+    <div id="daf-dd-pending-block" hidden>
+      <div class="constraint-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+        <div>Cette action confirme uniquement la <b>liquidation</b> — la reconnaissance de dette. Elle ne déclenche <b>aucun paiement</b> : le paiement effectif reste un acte distinct, hors de facture.gn (Trésor ou financement bancaire, ADR-088).</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-primary" style="flex:2; margin-top:0;" onclick="daf_validateLiquidation()">Valider la liquidation</button>
+        <button class="btn-ghost" style="flex:1;" onclick="daf_openDispute()">Contester</button>
+      </div>
     </div>
 
-    <div class="detail-hero">
-      <div class="org">Établissements Diakité</div>
-      <div class="amt mono">8 500 000 GNF</div>
-      <span class="pill paid" style="margin-top:10px;">Validée</span>
+    <div id="daf-dd-dispute-block" hidden style="padding:14px 15px; background:color-mix(in srgb, var(--bad) 10%, var(--surface)); border:1px solid var(--border); border-radius:12px; font-size:12px; color:var(--text-dim); line-height:1.55;">
+      <b style="color:var(--bad); display:block; margin-bottom:4px;">Objection signalée</b>
+      Le fournisseur est notifié — la facture reste non liquidée jusqu'à résolution. Ce n'est pas une contestation de paiement (aucun paiement n'a eu lieu) : c'est un désaccord sur le service rendu, à clarifier avant toute validation.
     </div>
 
-    <div class="card">
-      <div class="detail-row"><span class="k">Numéro</span><span class="mono">FG-2026-000350</span></div>
-      <div class="detail-row"><span class="k">Émise le</span><span>2 juillet 2026</span></div>
-      <div class="detail-row"><span class="k">Référence marché (TELEMO)</span><span class="mono" style="font-size:11.5px;">MPA-2026-00390</span></div>
-      <div class="detail-row"><span class="k">Objet</span><span>Réhabilitation de périmètre irrigué</span></div>
-    </div>
-
-    <div class="validated-badge">
-      <div class="check"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <div class="txt"><b>Liquidation validée le 5 juillet 2026</b>La facture est désormais finançable (is_financeable) — le choix du rail de paiement reste entre les mains du fournisseur.</div>
+    <div id="daf-dd-validated-block" hidden>
+      <div class="validated-badge">
+        <div class="check"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="txt"><b id="daf-dd-validated-date"></b>La facture est désormais finançable (is_financeable) — le choix du rail de paiement reste entre les mains du fournisseur.</div>
+      </div>
+      <div class="card" style="padding:14px 16px; margin-top:14px;">
+        <div class="panel-title" style="margin-bottom:8px; font-size:12px;">Rail de paiement</div>
+        <div id="daf-dd-rail" style="font-size:12px; line-height:1.5;"></div>
+      </div>
     </div>
   </section>
 
@@ -2245,7 +2240,80 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
   });
 });
 
+// ===== Factures reçues — données (ADR-080/086/088/090) =====
+const DAF_INVOICES = [
+  { id:'d1', org:'Entreprise Sylla & Fils', num:'FG-2026-000388', amount:14200000, date:'18 juillet 2026',
+    marche:'MPA-2026-00417', objet:"Fourniture d'intrants agricoles",
+    serviceFait:null, validated:false },
+  { id:'d2', org:'Coopérative Agricole Kindia', num:'FG-2026-000401', amount:3100000, date:'20 juillet 2026',
+    marche:'MPA-2026-00422', objet:'Formation agricole — 40 bénéficiaires',
+    serviceFait:{by:'Direction régionale Kindia', date:'19 juillet 2026'}, validated:false },
+  { id:'d3', org:'Établissements Diakité', num:'FG-2026-000350', amount:8500000, date:'2 juillet 2026',
+    marche:'MPA-2026-00390', objet:'Réhabilitation de périmètre irrigué',
+    serviceFait:{by:'Direction régionale Faranah', date:'1 juillet 2026'},
+    validated:true, validatedDate:'5 juillet 2026',
+    rail:{type:'A', partner:'Ecobank', date:'6 juillet 2026'} },
+];
+
+function renderDafList(){
+  document.getElementById('daf-encours-total').textContent = (DAF_INVOICES.filter(i => !i.validated).reduce((s,i)=>s+i.amount,0)/1000000).toFixed(1).replace('.',',') + 'M';
+  document.getElementById('daf-encours-sub').textContent = 'GNF · ' + DAF_INVOICES.filter(i => !i.validated).length + ' factures en attente de validation';
+  document.getElementById('daf-daf-invoices-list').innerHTML = DAF_INVOICES.map(inv => `
+    <div class="inv-row" onclick="daf_showDafDetail('${inv.id}')">
+      <div class="inv-main"><span class="inv-name">${inv.org}</span><span class="inv-sub">${inv.num} · marché ${inv.marche}</span></div>
+      <div style="text-align:right;"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.validated ? 'paid' : 'pending'}" style="display:block; margin-top:4px;">${inv.validated ? 'Validée' : 'Non validée'}</span></div>
+    </div>`).join('');
+}
+
+function showDafDetail(id){
+  const inv = DAF_INVOICES.find(i => i.id === id);
+  document.getElementById('daf-dd-org').textContent = inv.org;
+  document.getElementById('daf-dd-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
+  const pill = document.getElementById('daf-dd-status');
+  pill.className = 'pill ' + (inv.validated ? 'paid' : 'pending');
+  pill.textContent = inv.validated ? 'Validée' : 'Non validée';
+  document.getElementById('daf-dd-num').textContent = inv.num;
+  document.getElementById('daf-dd-date').textContent = inv.date;
+  document.getElementById('daf-dd-marche').textContent = inv.marche;
+  document.getElementById('daf-dd-objet').textContent = inv.objet;
+
+  document.getElementById('daf-dd-servicefait').innerHTML = inv.serviceFait
+    ? `<span style="color:var(--good); font-weight:600;">Confirmé</span> par ${inv.serviceFait.by}, le ${inv.serviceFait.date}.`
+    : `<span style="color:var(--text-dim);">Non confirmé — facultatif, non requis pour la validation de la liquidation (ADR-080).</span>`;
+
+  document.getElementById('daf-dd-pending-block').hidden = inv.validated;
+  document.getElementById('daf-dd-dispute-block').hidden = true;
+  document.getElementById('daf-dd-validated-block').hidden = !inv.validated;
+  if (inv.validated) {
+    document.getElementById('daf-dd-validated-date').textContent = 'Liquidation validée le ' + inv.validatedDate;
+    document.getElementById('daf-dd-rail').innerHTML = inv.rail
+      ? `<span style="color:var(--good); font-weight:600;">Rail ${inv.rail.type}</span> — financé par ${inv.rail.partner}, le ${inv.rail.date}.`
+      : `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts.</span>`;
+  }
+
+  showScreen('daf-s-detail');
+}
+
+function validateLiquidation(){
+  document.getElementById('daf-dd-status').className = 'pill paid';
+  document.getElementById('daf-dd-status').textContent = 'Validée';
+  document.getElementById('daf-dd-pending-block').hidden = true;
+  document.getElementById('daf-dd-validated-block').hidden = false;
+  document.getElementById('daf-dd-validated-date').textContent = "Liquidation validée à l'instant";
+  document.getElementById('daf-dd-rail').innerHTML = `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts.</span>`;
+}
+
+function openDispute(){
+  document.getElementById('daf-dd-pending-block').hidden = true;
+  document.getElementById('daf-dd-dispute-block').hidden = false;
+}
+
+renderDafList();
+
+window.daf_openDispute = openDispute;
+window.daf_showDafDetail = showDafDetail;
 window.daf_showScreen = showScreen;
+window.daf_validateLiquidation = validateLiquidation;
 })();
 
 (function(){
