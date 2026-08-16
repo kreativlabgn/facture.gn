@@ -430,6 +430,14 @@ button{font-family:inherit;}
 .phone-row{display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--border);}
 .phone-row:last-of-type{border-bottom:none;}
 
+.pay-method{display:flex; align-items:center; gap:12px; padding:12px 14px; border:1.5px solid var(--border-strong); border-radius:12px; margin-bottom:9px; cursor:pointer;}
+.pay-method.selected{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent);}
+.pay-icon{width:32px; height:32px; border-radius:8px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:15px; flex:none;}
+.fee-breakdown{background:var(--surface-2); border-radius:10px; padding:12px 14px; margin:12px 0; font-size:12.5px;}
+.fee-row{display:flex; justify-content:space-between; padding:3px 0;}
+.fee-row.total{font-weight:700; border-top:1px solid var(--border-strong); margin-top:5px; padding-top:7px;}
+.add-number-form{margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-strong);}
+
 :root{
   --bg:#F5F7F9; --surface:#FFFFFF; --surface-2:rgba(11,29,58,.05);
   --text:#0B1D3A; --text-dim:rgba(11,29,58,.66);
@@ -469,10 +477,23 @@ button{font-family:inherit;}
 .pill{display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:100px; font-family:'JetBrains Mono'; font-size:10px; font-weight:600; margin-top:4px;}
 .pill.paid{background:color-mix(in srgb, var(--good) 18%, transparent); color:var(--good);}
 .pill.pending{background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent);}
+.pill.partial{background:var(--surface-3); color:var(--text);}
 
 .divergence-note{display:flex; gap:10px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:12px; margin-top:18px; font-size:11.5px; color:var(--text-dim); line-height:1.55;}
 .divergence-note svg{flex:none; width:16px; height:16px; color:var(--text-dim); margin-top:1px;}
 .divergence-note b{color:var(--text);}
+
+.screen{display:none;}
+.screen.active{display:block; animation:fadein .3s ease;}
+@keyframes fadein{from{opacity:0;} to{opacity:1;}}
+.back-row{display:flex; align-items:center; gap:8px; margin-bottom:14px; cursor:pointer; color:var(--text-dim); font-size:13px; font-weight:600;}
+.back-row svg{width:16px; height:16px;}
+.detail-hero{background:var(--surface-2); border-radius:16px; padding:22px; margin-bottom:16px;}
+.detail-hero .org{font-family:'JetBrains Mono'; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
+.detail-hero .amt{font-family:'Space Grotesk'; font-weight:600; font-size:30px; margin-top:6px;}
+.detail-row{display:flex; justify-content:space-between; padding:11px 16px; border-bottom:1px solid var(--border); font-size:13px;}
+.detail-row .k{color:var(--text-dim);}
+.go{font-size:12px; font-weight:600; color:var(--accent-ink); background:var(--accent); border:none; border-radius:9px; padding:9px 12px; cursor:pointer; font-family:'Inter';}
 
 :root{
   --bg:#F5F7F9; --surface:#FFFFFF; --surface-2:rgba(11,29,58,.05); --surface-3:rgba(11,29,58,.08);
@@ -1476,30 +1497,13 @@ button{font-family:inherit;}
     </div>
 
     <div class="due-banner">
-      <div><div class="lbl">Total dû</div><div class="amt mono">120 000 GNF</div></div>
+      <div><div class="lbl">Total dû</div><div class="amt mono" id="cli-total-due"></div></div>
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.6 18a1.5 1.5 0 001.3 2.2h16.2a1.5 1.5 0 001.3-2.2L13.7 3.9a1.5 1.5 0 00-2.6 0z"/></svg>
     </div>
 
-    <div class="filter-row">
-      <button class="filter-chip active">Toutes · 3</button>
-      <button class="filter-chip">Boutique Aissatou · 2</button>
-      <button class="filter-chip">Pharmacie Centrale · 1</button>
-    </div>
+    <div class="filter-row" id="cli-org-filter-row"></div>
 
-    <div class="card">
-      <div class="inv-row" onclick="cli_showScreen('cli-s-detail')">
-        <div class="inv-main"><span class="inv-org">Boutique Aissatou</span><span class="inv-sub">FG-2026-000420 · 22 juil.</span></div>
-        <div class="inv-side"><span class="amount">120 000</span><span class="pill pending">En attente</span></div>
-      </div>
-      <div class="inv-row">
-        <div class="inv-main"><span class="inv-org">Boutique Aissatou</span><span class="inv-sub">FG-2026-000415 · 12 juil.</span></div>
-        <div class="inv-side"><span class="amount">65 000</span><span class="pill paid">Payée</span></div>
-      </div>
-      <div class="inv-row">
-        <div class="inv-main"><span class="inv-org">Pharmacie Centrale</span><span class="inv-sub">FG-2026-000091 · 3 juil.</span></div>
-        <div class="inv-side"><span class="amount">38 500</span><span class="pill paid">Payée</span></div>
-      </div>
-    </div>
+    <div class="card" id="cli-invoices-list"></div>
   </section>
 
   <!-- ================= DÉTAIL FACTURE ================= -->
@@ -1510,23 +1514,42 @@ button{font-family:inherit;}
     </div>
 
     <div class="detail-hero">
-      <div class="org">Boutique Aissatou</div>
-      <div class="amt mono">120 000 GNF</div>
-      <div class="pill pending" style="margin-top:10px;">En attente</div>
+      <div class="org" id="cli-dt-org"></div>
+      <div class="amt mono" id="cli-dt-amount"></div>
+      <div class="pill" id="cli-dt-status" style="margin-top:10px;"></div>
     </div>
 
     <div class="card">
-      <div class="detail-row"><span class="k">Numéro</span><span class="mono">FG-2026-000420</span></div>
-      <div class="detail-row"><span class="k">Émise le</span><span>22 juillet 2026</span></div>
-      <div class="detail-row"><span class="k">Détail</span><span>2 × Huile 5L, 1 × Savon</span></div>
-      <div class="detail-row"><span class="k">Identifiant de vérification</span><span class="mono" style="font-size:11.5px;">GN-88451203-2026-B71E4A</span></div>
+      <div class="detail-row"><span class="k">Numéro</span><span class="mono" id="cli-dt-num"></span></div>
+      <div class="detail-row"><span class="k">Émise le</span><span id="cli-dt-date"></span></div>
+      <div class="detail-row"><span class="k">Détail</span><span id="cli-dt-lines"></span></div>
+      <div class="detail-row" id="cli-dt-remaining-row" hidden style="border-bottom:none;"><span class="k">Reste dû</span><span class="mono" style="color:var(--accent); font-weight:600;" id="cli-dt-remaining"></span></div>
     </div>
 
-    <button class="btn-primary" style="margin-top:16px;">Payer 120 000 GNF</button>
+    <div id="cli-dt-pay-block" style="margin-top:16px;">
+      <button class="btn-primary" id="cli-dt-pay-btn" onclick="cli_openPayMethods()"></button>
+    </div>
+
+    <div class="card" id="cli-dt-pay-methods" hidden style="padding:16px; margin-top:14px;">
+      <div class="panel-title" style="margin-bottom:12px;">Choisir un moyen de paiement</div>
+      <div class="pay-method selected" data-fee="1"><div class="pay-icon">🟠</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Orange Money (Djomy)</div><div style="font-size:10.5px; color:var(--text-dim);">Confirmation par OTP</div></div></div>
+      <div class="pay-method" data-fee="1"><div class="pay-icon">🟡</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">MTN MoMo (Djomy)</div></div></div>
+      <div class="pay-method" data-fee="2"><div class="pay-icon">💳</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Carte bancaire (Moneroo)</div></div></div>
+      <div class="fee-breakdown">
+        <div class="fee-row"><span>Montant de la facture</span><span class="mono" id="cli-pm-base"></span></div>
+        <div class="fee-row"><span>Frais de transaction</span><span class="mono" id="cli-pm-fee"></span></div>
+        <div class="fee-row total"><span>Total à payer</span><span class="mono" id="cli-pm-total"></span></div>
+      </div>
+      <button class="btn-primary" id="cli-pm-confirm" style="margin-top:4px;"></button>
+      <p style="font-size:10.5px; color:var(--text-dim); margin-top:10px; text-align:center;">Le commerçant reçoit l'intégralité du montant facturé — les frais sont portés par vous, le payeur.</p>
+    </div>
 
     <div class="cert-block">
       <div class="cert-check"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;">Facture certifiée et vérifiable publiquement — sans compte, y compris hors ligne.</div>
+      <div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;">
+        <span class="mono" id="cli-dt-certid" style="display:block; margin-bottom:4px; color:var(--text);"></span>
+        Facture certifiée et vérifiable publiquement — sans compte, y compris hors ligne.
+      </div>
     </div>
   </section>
 
@@ -1537,8 +1560,14 @@ button{font-family:inherit;}
   <div class="sheet">
     <div class="sheet-handle"></div>
     <h2 style="font-size:16px; margin-bottom:14px;">Mon profil</h2>
-    <div class="phone-row"><div><div style="font-weight:600; font-size:13.5px;">+224 655 12 34 56</div><div style="font-size:11px; color:var(--text-dim);">Numéro principal · vérifié</div></div><span class="pill paid">Vérifié</span></div>
-    <div class="phone-row"><div><div style="font-weight:600; font-size:13.5px; color:var(--text-dim);">+ Ajouter un numéro</div><div style="font-size:11px; color:var(--text-dim);">Utile si vous changez de téléphone (ADR-087)</div></div></div>
+    <div id="cli-phone-list">
+      <div class="phone-row"><div><div style="font-weight:600; font-size:13.5px;">+224 655 12 34 56</div><div style="font-size:11px; color:var(--text-dim);">Numéro principal · vérifié</div></div><span class="pill paid">Vérifié</span></div>
+    </div>
+    <div class="phone-row" id="cli-add-number-trigger" onclick="cli_toggleAddNumber()"><div><div style="font-weight:600; font-size:13.5px; color:var(--accent-ink); background:none;">+ Ajouter un numéro</div><div style="font-size:11px; color:var(--text-dim);">Utile si vous changez de téléphone (ADR-087)</div></div></div>
+    <div class="add-number-form" id="cli-add-number-form" hidden>
+      <div class="field" style="margin-bottom:10px;"><label>Nouveau numéro</label><input type="text" placeholder="+224 6…"></div>
+      <button class="btn-primary" style="margin:0;" onclick="cli_confirmAddNumber()">Recevoir un code de vérification</button>
+    </div>
     <button class="btn-ghost" style="width:100%; margin-top:14px; padding:11px; text-align:center;" onclick="document.getElementById('cli-profil-sheet').classList.remove('open')">Fermer</button>
   </div>
 </div>
@@ -1553,24 +1582,61 @@ button{font-family:inherit;}
     <div><b>Hypothèse de travail, non validée (ADR-097)</b>Ce rôle n'a jamais été confirmé par le propriétaire produit. Cette maquette débloque la réflexion — elle ne doit pas être construite telle quelle sans validation préalable.</div>
   </div>
 
-  <p class="eyebrow">Portail lecture DGI</p>
-  <h1 style="font-size:19px; margin-bottom:14px;">Boutique Aissatou</h1>
-  <span class="readonly-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>Lecture seule — invité par l'organisation</span>
+  <div class="screen active" id="dgi-s-liste">
+    <p class="eyebrow">Portail lecture DGI</p>
+    <h1 style="font-size:19px; margin-bottom:14px;">Boutique Aissatou</h1>
+    <span class="readonly-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>Lecture seule — invité par l'organisation</span>
 
-  <div class="card">
-    <div class="panel-head">
-      <span class="panel-title">Factures</span>
-      <button class="btn-ghost">Exporter le FEC</button>
+    <div class="card" style="padding:13px 16px; margin:14px 0;">
+      <div style="font-size:11px; color:var(--text-dim); line-height:1.6;">
+        Invité par <b style="color:var(--text);">Aissatou Diallo</b> (owner), le <b style="color:var(--text);">10 août 2026</b><br>
+        Motif renseigné : contrôle fiscal local
+      </div>
     </div>
-    <div class="inv-row"><div class="inv-main"><span class="inv-name">Mamadou Sylla</span><span class="inv-sub">FG-2026-000412 · il y a 2h</span></div><div style="text-align:right;"><span class="amount">180 000</span><span class="pill paid" style="display:block; margin-top:4px;">Payée</span></div></div>
-    <div class="inv-row"><div class="inv-main"><span class="inv-name">Restaurant Le Damier</span><span class="inv-sub">FG-2026-000411 · hier</span></div><div style="text-align:right;"><span class="amount">95 000</span><span class="pill pending" style="display:block; margin-top:4px;">Attente</span></div></div>
-    <div class="inv-row"><div class="inv-main"><span class="inv-name">Fatoumata Camara</span><span class="inv-sub">FG-2026-000410 · 24 juil.</span></div><div style="text-align:right;"><span class="amount">220 000</span><span class="pill paid" style="display:block; margin-top:4px;">Partiel</span></div></div>
-    <div class="inv-row"><div class="inv-main"><span class="inv-name">Client anonyme</span><span class="inv-sub">FG-2026-000409 · 23 juil.</span></div><div style="text-align:right;"><span class="amount">45 000</span><span class="pill paid" style="display:block; margin-top:4px;">Payée</span></div></div>
+
+    <div class="card">
+      <div class="panel-head">
+        <span class="panel-title">Factures</span>
+        <button class="btn-ghost" onclick="dgi_openFecPreview()">Exporter le FEC</button>
+      </div>
+      <div id="dgi-dgi-invoices-list"></div>
+    </div>
+
+    <div class="divergence-note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+      <div>Distinct de la vue nationale agrégée de la persona institutionnelle <b>DGI</b> (PRD §4.3) — celle-ci reste hors RBAC utilisateur, jamais un compte comme celui-ci.</div>
+    </div>
   </div>
 
-  <div class="divergence-note">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
-    <div>Distinct de la vue nationale agrégée de la persona institutionnelle <b>DGI</b> (PRD §4.3) — celle-ci reste hors RBAC utilisateur, jamais un compte comme celui-ci.</div>
+  <div class="screen" id="dgi-s-detail">
+    <div class="back-row" onclick="dgi_showDgiScreen('s-liste')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
+      Factures
+    </div>
+    <span class="readonly-tag" style="margin-bottom:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>Lecture seule — aucune action d'écriture possible ici</span>
+
+    <div class="detail-hero">
+      <div class="org" id="dgi-dg-org"></div>
+      <div class="amt mono" id="dgi-dg-amount"></div>
+      <span class="pill" id="dgi-dg-status"></span>
+    </div>
+
+    <div class="card">
+      <div class="detail-row"><span class="k">Numéro</span><span class="mono" id="dgi-dg-num"></span></div>
+      <div class="detail-row"><span class="k">Émise le</span><span id="dgi-dg-date"></span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Identifiant de vérification</span><span class="mono" style="font-size:11.5px;" id="dgi-dg-certid"></span></div>
+    </div>
+  </div>
+
+  <div class="card" id="dgi-fec-modal" style="display:none; position:fixed; left:16px; right:16px; bottom:16px; max-width:408px; margin:0 auto; padding:18px; z-index:90; box-shadow:0 -10px 40px rgba(0,0,0,.18);">
+    <div class="panel-title" style="margin-bottom:10px;">Export FEC — aperçu</div>
+    <div class="detail-row" style="padding:7px 0;"><span class="k">Organisation</span><span>Boutique Aissatou</span></div>
+    <div class="detail-row" style="padding:7px 0;"><span class="k">Période</span><span>1 juil. – 31 juil. 2026</span></div>
+    <div class="detail-row" style="padding:7px 0; border-bottom:none;"><span class="k">Écritures</span><span class="mono">412 lignes</span></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="btn-ghost" style="flex:1;" onclick="document.getElementById('dgi-fec-modal').style.display='none';">Annuler</button>
+      <button class="go" style="flex:1;" onclick="document.getElementById('dgi-fec-modal').style.display='none';">Télécharger le FEC</button>
+    </div>
   </div>
 
 </div>
@@ -1615,16 +1681,23 @@ button{font-family:inherit;}
       <div class="grant-banner" id="ops-grant-banner" hidden>
         <div class="left">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v5M12 16h.01M10.3 3.9L2.6 18a1.5 1.5 0 001.3 2.2h16.2a1.5 1.5 0 001.3-2.2L13.7 3.9a1.5 1.5 0 00-2.6 0z"/></svg>
-          <div class="txt"><b>Accès délégué actif — Boutique Aissatou</b><span>Motif : débogage signalé · cross_tenant_grant (ADR-085/029)</span></div>
+          <div class="txt"><b id="ops-grant-banner-title">Accès délégué actif — Boutique Aissatou</b><span>Motif : débogage signalé · cross_tenant_grant (ADR-085/029)</span></div>
         </div>
         <div class="timer" id="ops-grant-timer">15:00</div>
       </div>
 
+      <div class="grant-banner" id="ops-sysadmin-banner" hidden style="border-color:var(--good);">
+        <div class="left">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+          <div class="txt"><b id="ops-sysadmin-banner-title">Accès technique — Boutique Aissatou</b><span>Accès permanent lié au rôle sysadmin — aucun cross_tenant_grant, aucune limite de temps</span></div>
+        </div>
+      </div>
+
       <input class="search-field" type="text" placeholder="NIF, téléphone ou nom d'organisation…">
       <div class="card">
-        <div class="org-row"><div><div class="name">Boutique Aissatou</div><div class="sub">NIF 123456789 · Freemium · Conakry</div></div><button class="btn-primary" data-org="Boutique Aissatou" id="ops-btn-assist-1">Assister</button></div>
-        <div class="org-row"><div><div class="name">Restaurant Le Damier</div><div class="sub">NIF 987654321 · Starter · Conakry</div></div><button class="btn-primary" data-org="Restaurant Le Damier" id="ops-btn-assist-2">Assister</button></div>
-        <div class="org-row"><div><div class="name">Cabinet Comptable Barry &amp; Associés</div><div class="sub">professional_practice · Pro</div></div><button class="btn-primary" data-org="Cabinet Barry" id="ops-btn-assist-3">Assister</button></div>
+        <div class="org-row"><div><div class="name">Boutique Aissatou</div><div class="sub">NIF 123456789 · Freemium · Conakry</div></div><button class="btn-primary org-action" data-org="Boutique Aissatou" id="ops-btn-assist-1">Assister</button></div>
+        <div class="org-row"><div><div class="name">Restaurant Le Damier</div><div class="sub">NIF 987654321 · Starter · Conakry</div></div><button class="btn-primary org-action" data-org="Restaurant Le Damier" id="ops-btn-assist-2">Assister</button></div>
+        <div class="org-row"><div><div class="name">Cabinet Comptable Barry &amp; Associés</div><div class="sub">professional_practice · Pro</div></div><button class="btn-primary org-action" data-org="Cabinet Barry" id="ops-btn-assist-3">Assister</button></div>
       </div>
     </section>
 
@@ -1637,26 +1710,26 @@ button{font-family:inherit;}
         <button class="filter-chip">Élevée · 1</button>
         <button class="filter-chip">Moyenne · 1</button>
       </div>
-      <div class="card">
-        <div class="ticket-row">
-          <div class="sev critique"></div>
-          <div class="ticket-main"><div class="subj">Lien de paiement Djomy rejette systématiquement</div><div class="meta">Boutique Aissatou · ouvert il y a 40 min</div></div>
-          <div class="sla late">SLA dépassé<br>−12 min</div>
-          <button class="btn-ghost">Prendre en charge</button>
-        </div>
-        <div class="ticket-row">
-          <div class="sev elevee"></div>
-          <div class="ticket-main"><div class="subj">Export FEC renvoie une erreur 500</div><div class="meta">Cabinet Barry &amp; Associés · ouvert il y a 2h</div></div>
-          <div class="sla warn">SLA 4h<br>1h 20 restantes</div>
-          <button class="btn-ghost">Prendre en charge</button>
-        </div>
-        <div class="ticket-row">
-          <div class="sev moyenne"></div>
-          <div class="ticket-main"><div class="subj">Question sur l'export FEC</div><div class="meta">Restaurant Le Damier · en cours</div></div>
-          <div class="sla ok">SLA 24h<br>18h restantes</div>
-          <button class="btn-ghost">Voir</button>
-        </div>
+      <div class="card" id="ops-tickets-list"></div>
+    </section>
+
+    <!-- ================= DÉTAIL TICKET ================= -->
+    <section class="view" id="ops-v-ticket-detail">
+      <div class="page-head" style="display:flex; align-items:center; gap:10px;">
+        <button class="btn-ghost" onclick="ops_showTicketList()">← Tickets</button>
       </div>
+      <div class="card" style="padding:18px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
+          <h1 style="font-size:16px; max-width:70%;" id="ops-td-subj"></h1>
+          <div class="sla" id="ops-td-sla" style="text-align:right;"></div>
+        </div>
+        <div style="font-size:12px; color:var(--text-dim);" id="ops-td-meta"></div>
+      </div>
+      <div class="card" style="padding:16px; margin-bottom:16px;">
+        <div class="panel-title" style="margin-bottom:8px;">Description</div>
+        <p style="font-size:12.5px; color:var(--text-dim); line-height:1.6; margin:0;" id="ops-td-desc"></p>
+      </div>
+      <button class="btn-primary" id="ops-td-resolve" onclick="ops_resolveTicket()">Marquer comme résolu</button>
     </section>
 
     <!-- ================= FEATURE FLAGS (sysadmin) ================= -->
@@ -2328,14 +2401,162 @@ document.querySelectorAll('.proto-bar [data-go]').forEach(btn => {
 document.getElementById('cli-profil-sheet').addEventListener('click', (e) => {
   if (e.target.id === 'profil-sheet') e.target.classList.remove('open');
 });
-document.querySelectorAll('.filter-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    chip.parentElement.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
-    chip.classList.add('active');
+// ===== Mes factures — données (ADR-096) =====
+const CLIENT_INVOICES = [
+  { id:'c1', org:'Boutique Aissatou', num:'FG-2026-000420', amount:120000, status:'pending', date:'22 juillet 2026',
+    lines:'2 × Huile 5L, 1 × Savon', certid:'GN-88451203-2026-B71E4A' },
+  { id:'c2', org:'Boutique Aissatou', num:'FG-2026-000415', amount:65000, status:'paid', date:'12 juillet 2026',
+    lines:'1 × Sac de riz 50kg', certid:'GN-88451203-2026-2C81FE' },
+  { id:'c3', org:'Pharmacie Centrale', num:'FG-2026-000091', amount:38500, status:'paid', date:'3 juillet 2026',
+    lines:'Ordonnance — 3 articles', certid:'GN-40217755-2026-9AE102' },
+  { id:'c4', org:'Boutique Aissatou', num:'FG-2026-000398', amount:80000, status:'partial', date:'28 juin 2026',
+    lines:'1 × Huile 5L, 2 × Sucre 50kg', certid:'GN-88451203-2026-77A310', paid:30000 },
+];
+const STATUS_LABEL = { paid:'Payée', pending:'En attente', partial:'Partiel' };
+let currentOrgFilter = 'all';
+
+function renderOrgFilter(){
+  const orgs = [...new Set(CLIENT_INVOICES.map(i => i.org))];
+  const counts = { all: CLIENT_INVOICES.length };
+  orgs.forEach(o => counts[o] = CLIENT_INVOICES.filter(i => i.org === o).length);
+  const chips = [{ key:'all', label:'Toutes · ' + counts.all }].concat(orgs.map(o => ({ key:o, label:o + ' · ' + counts[o] })));
+  document.getElementById('cli-org-filter-row').innerHTML = chips.map(c =>
+    `<button class="filter-chip ${c.key === currentOrgFilter ? 'active' : ''}" data-org="${c.key}">${c.label}</button>`
+  ).join('');
+  document.querySelectorAll('#org-filter-row .filter-chip').forEach(chip => {
+    chip.addEventListener('click', () => { currentOrgFilter = chip.dataset.org; renderOrgFilter(); renderInvoices(); });
+  });
+}
+
+function renderInvoices(){
+  const due = CLIENT_INVOICES.filter(i => i.status !== 'paid').reduce((s,i) => s + (i.status === 'partial' ? (i.amount - i.paid) : i.amount), 0);
+  document.getElementById('cli-total-due').textContent = due.toLocaleString('fr-FR') + ' GNF';
+  const list = currentOrgFilter === 'all' ? CLIENT_INVOICES : CLIENT_INVOICES.filter(i => i.org === currentOrgFilter);
+  document.getElementById('cli-invoices-list').innerHTML = list.map(inv => `
+    <div class="inv-row" onclick="cli_showDetail('${inv.id}')">
+      <div class="inv-main"><span class="inv-org">${inv.org}</span><span class="inv-sub">${inv.num} · ${inv.date.split(' ').slice(0,2).join(' ')}</span></div>
+      <div class="inv-side"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.status}">${STATUS_LABEL[inv.status]}</span></div>
+    </div>`).join('');
+}
+
+function showDetail(id){
+  const inv = CLIENT_INVOICES.find(i => i.id === id);
+  document.getElementById('cli-dt-org').textContent = inv.org;
+  document.getElementById('cli-dt-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
+  const pill = document.getElementById('cli-dt-status');
+  pill.className = 'pill ' + inv.status;
+  pill.textContent = STATUS_LABEL[inv.status];
+  document.getElementById('cli-dt-num').textContent = inv.num;
+  document.getElementById('cli-dt-date').textContent = inv.date;
+  document.getElementById('cli-dt-lines').textContent = inv.lines;
+  document.getElementById('cli-dt-certid').textContent = inv.certid;
+
+  const remainingRow = document.getElementById('cli-dt-remaining-row');
+  const payBlock = document.getElementById('cli-dt-pay-block');
+  const payBtn = document.getElementById('cli-dt-pay-btn');
+  document.getElementById('cli-dt-pay-methods').hidden = true;
+
+  if (inv.status === 'paid') {
+    payBlock.hidden = true;
+    remainingRow.hidden = true;
+  } else {
+    payBlock.hidden = false;
+    const owed = inv.status === 'partial' ? (inv.amount - inv.paid) : inv.amount;
+    remainingRow.hidden = inv.status !== 'partial';
+    if (inv.status === 'partial') document.getElementById('cli-dt-remaining').textContent = owed.toLocaleString('fr-FR') + ' GNF';
+    payBtn.dataset.owed = owed;
+    payBtn.textContent = 'Payer ' + owed.toLocaleString('fr-FR') + ' GNF';
+  }
+
+  showScreen('cli-s-detail');
+}
+
+function openPayMethods(){
+  const owed = Number(document.getElementById('cli-dt-pay-btn').dataset.owed);
+  document.getElementById('cli-dt-pay-methods').hidden = false;
+  updateFee(owed, 1);
+}
+function updateFee(base, feePct){
+  const fee = Math.round(base * feePct / 100);
+  document.getElementById('cli-pm-base').textContent = base.toLocaleString('fr-FR') + ' GNF';
+  document.getElementById('cli-pm-fee').textContent = fee.toLocaleString('fr-FR') + ' GNF';
+  const total = base + fee;
+  document.getElementById('cli-pm-total').textContent = total.toLocaleString('fr-FR') + ' GNF';
+  document.getElementById('cli-pm-confirm').textContent = 'Payer ' + total.toLocaleString('fr-FR') + ' GNF';
+}
+document.querySelectorAll('.pay-method').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.pay-method').forEach(m => m.classList.remove('selected'));
+    el.classList.add('selected');
+    const owed = Number(document.getElementById('cli-dt-pay-btn').dataset.owed);
+    updateFee(owed, Number(el.dataset.fee));
   });
 });
 
+// ===== Multi-numéros (ADR-087) =====
+function toggleAddNumber(){
+  const form = document.getElementById('cli-add-number-form');
+  form.hidden = !form.hidden;
+}
+function confirmAddNumber(){
+  document.getElementById('cli-phone-list').insertAdjacentHTML('beforeend',
+    '<div class="phone-row"><div><div style="font-weight:600; font-size:13.5px;">Nouveau numéro</div><div style="font-size:11px; color:var(--text-dim);">Code envoyé — vérification en attente</div></div><span class="pill pending">En attente</span></div>');
+  document.getElementById('cli-add-number-form').hidden = true;
+}
+
+renderOrgFilter();
+renderInvoices();
+
+window.cli_confirmAddNumber = confirmAddNumber;
+window.cli_openPayMethods = openPayMethods;
+window.cli_showDetail = showDetail;
 window.cli_showScreen = showScreen;
+window.cli_toggleAddNumber = toggleAddNumber;
+})();
+
+(function(){
+const DGI_INVOICES = [
+  { id:'g1', org:'Mamadou Sylla', num:'FG-2026-000412', amount:180000, status:'paid', date:'14 août 2026 · il y a 2h', certid:'GN-31029918-2026-7F3A2C' },
+  { id:'g2', org:'Restaurant Le Damier', num:'FG-2026-000411', amount:95000, status:'pending', date:'13 août 2026 · hier', certid:'GN-77102256-2026-B71E4A' },
+  { id:'g3', org:'Fatoumata Camara', num:'FG-2026-000410', amount:220000, status:'partial', date:'24 juillet 2026', certid:'GN-55810234-2026-9D4F17' },
+  { id:'g4', org:'Client anonyme', num:'FG-2026-000409', amount:45000, status:'paid', date:'23 juillet 2026', certid:'GN-31029918-2026-2C81FE' },
+];
+const STATUS_LABEL = { paid:'Payée', pending:'Attente', partial:'Partiel' };
+
+function renderDgiList(){
+  document.getElementById('dgi-dgi-invoices-list').innerHTML = DGI_INVOICES.map(inv => `
+    <div class="inv-row" onclick="dgi_showDgiDetail('${inv.id}')">
+      <div class="inv-main"><span class="inv-name">${inv.org}</span><span class="inv-sub">${inv.num} · ${inv.date.split(' · ')[1] || inv.date}</span></div>
+      <div style="text-align:right;"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.status}" style="display:block; margin-top:4px;">${STATUS_LABEL[inv.status]}</span></div>
+    </div>`).join('');
+}
+
+function showDgiScreen(id){
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+}
+
+function showDgiDetail(id){
+  const inv = DGI_INVOICES.find(i => i.id === id);
+  document.getElementById('dgi-dg-org').textContent = inv.org;
+  document.getElementById('dgi-dg-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
+  const pill = document.getElementById('dgi-dg-status');
+  pill.className = 'pill ' + inv.status;
+  pill.textContent = STATUS_LABEL[inv.status];
+  document.getElementById('dgi-dg-num').textContent = inv.num;
+  document.getElementById('dgi-dg-date').textContent = inv.date;
+  document.getElementById('dgi-dg-certid').textContent = inv.certid;
+  showDgiScreen('s-detail');
+}
+
+function openFecPreview(){
+  document.getElementById('dgi-fec-modal').style.display = 'block';
+}
+
+renderDgiList();
+
+window.dgi_openFecPreview = openFecPreview;
+window.dgi_showDgiDetail = showDgiDetail;
+window.dgi_showDgiScreen = showDgiScreen;
 })();
 
 (function(){
@@ -2349,6 +2570,7 @@ document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
   });
 });
 
+let currentRole = 'support';
 const roleButtons = document.querySelectorAll('.proto-bar [data-role]');
 const groupSupport = document.getElementById('ops-group-support');
 const groupSysadmin = document.getElementById('ops-group-sysadmin');
@@ -2356,26 +2578,40 @@ roleButtons.forEach(btn => {
   btn.addEventListener('click', () => {
     roleButtons.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    const isSupport = btn.dataset.role === 'support';
+    currentRole = btn.dataset.role;
+    const isSupport = currentRole === 'support';
     groupSupport.hidden = !isSupport;
     groupSysadmin.hidden = isSupport;
+    document.querySelectorAll('.org-action').forEach(b => b.textContent = isSupport ? 'Assister' : 'Voir');
+    document.getElementById('ops-grant-banner').hidden = true;
+    document.getElementById('ops-sysadmin-banner').hidden = true;
+    clearInterval(grantInterval);
     document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelector('[data-view="ops-v-recherche"]').classList.add('active');
     document.getElementById('ops-v-recherche').classList.add('active');
   });
 });
+document.querySelectorAll('.org-action').forEach(b => b.textContent = 'Assister');
 
 let grantInterval = null;
 const modal = document.getElementById('ops-modal');
 document.querySelectorAll('[data-org]').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (currentRole === 'sysadmin') {
+      document.getElementById('ops-grant-banner').hidden = true;
+      document.getElementById('ops-sysadmin-banner-title').textContent = 'Accès technique — ' + btn.dataset.org;
+      document.getElementById('ops-sysadmin-banner').hidden = false;
+      return;
+    }
     document.getElementById('ops-modal-org').value = btn.dataset.org;
     modal.classList.add('open');
   });
 });
 document.getElementById('ops-confirm-grant').addEventListener('click', () => {
   modal.classList.remove('open');
+  document.getElementById('ops-sysadmin-banner').hidden = true;
+  document.getElementById('ops-grant-banner-title').textContent = 'Accès délégué actif — ' + document.getElementById('ops-modal-org').value;
   const banner = document.getElementById('ops-grant-banner');
   banner.hidden = false;
   let seconds = 15 * 60;
@@ -2389,6 +2625,81 @@ document.getElementById('ops-confirm-grant').addEventListener('click', () => {
     if (seconds <= 0) { clearInterval(grantInterval); banner.hidden = true; }
   }, 1000);
 });
+
+// ===== Tickets (support, ADR-085) =====
+const TICKETS = [
+  { id:'t1', sev:'critique', subj:'Lien de paiement Djomy rejette systématiquement', org:'Boutique Aissatou', opened:'ouvert il y a 40 min',
+    desc:"L'organisation signale que 4 clients consécutifs n'arrivent pas à finaliser un paiement Orange Money — le lien renvoie une erreur générique côté Djomy. À vérifier : bascule automatique vers Moneroo (circuit breaker 10s, ADR-072/073) semble ne pas s'être déclenchée.",
+    slaMinutes: -12, slaTotal:'SLA dépassé' },
+  { id:'t2', sev:'elevee', subj:'Export FEC renvoie une erreur 500', org:'Cabinet Barry & Associés', opened:'ouvert il y a 2h',
+    desc:"Le cabinet ne parvient plus à exporter le FEC consolidé pour ses 2 organisations mandatées depuis ce matin. Erreur 500 côté serveur, aucun message d'erreur exploitable côté client.",
+    slaMinutes: 80, slaTotal:'SLA 4h' },
+  { id:'t3', sev:'moyenne', subj:"Question sur l'export FEC", org:'Restaurant Le Damier', opened:'en cours',
+    desc:"L'organisation demande si le format d'export FEC est compatible avec son logiciel comptable actuel (Sage). Question informative, pas de dysfonctionnement signalé.",
+    slaMinutes: 1080, slaTotal:'SLA 24h' },
+];
+let ticketInterval = null;
+
+function slaClass(min){ return min < 0 ? 'late' : (min < 60 ? 'warn' : 'ok'); }
+function slaText(min){
+  if (min < 0) return '−' + Math.abs(min) + ' min';
+  const h = Math.floor(min/60), m = min%60;
+  return (h > 0 ? h + 'h ' : '') + m + ' min restantes';
+}
+
+function renderTickets(){
+  document.getElementById('ops-tickets-list').innerHTML = TICKETS.map(t => `
+    <div class="ticket-row" onclick="ops_showTicketDetail('${t.id}')" style="cursor:pointer;">
+      <div class="sev ${t.sev}"></div>
+      <div class="ticket-main"><div class="subj">${t.subj}</div><div class="meta">${t.org} · ${t.opened}</div></div>
+      <div class="sla ${slaClass(t.slaMinutes)}">${t.slaTotal}<br>${slaText(t.slaMinutes)}</div>
+      <button class="btn-ghost" onclick="event.stopPropagation(); showTicketDetail('${t.id}')">${t.slaMinutes < 0 ? 'Prendre en charge' : 'Voir'}</button>
+    </div>`).join('');
+}
+
+function showTicketDetail(id){
+  const t = TICKETS.find(x => x.id === id);
+  document.getElementById('ops-td-subj').textContent = t.subj;
+  document.getElementById('ops-td-meta').textContent = t.org + ' · ' + t.opened;
+  document.getElementById('ops-td-desc').textContent = t.desc;
+  document.getElementById('ops-td-resolve').hidden = false;
+  document.getElementById('ops-td-resolve').textContent = 'Marquer comme résolu';
+
+  let seconds = t.slaMinutes * 60;
+  const slaEl = document.getElementById('ops-td-sla');
+  function tick(){
+    slaEl.className = 'sla ' + slaClass(Math.floor(seconds/60));
+    slaEl.textContent = t.slaTotal;
+    const m = Math.floor(Math.abs(seconds)/60), s = Math.abs(seconds)%60;
+    slaEl.innerHTML = t.slaTotal + '<br>' + (seconds < 0 ? '−' : '') + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+  tick();
+  clearInterval(ticketInterval);
+  ticketInterval = setInterval(() => { seconds--; tick(); }, 1000);
+
+  document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('ops-v-ticket-detail').classList.add('active');
+}
+
+function showTicketList(){
+  clearInterval(ticketInterval);
+  document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === 'v-tickets'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('ops-v-tickets').classList.add('active');
+}
+
+function resolveTicket(){
+  clearInterval(ticketInterval);
+  document.getElementById('ops-td-resolve').textContent = 'Résolu ✓';
+  document.getElementById('ops-td-resolve').hidden = true;
+}
+
+renderTickets();
+
+window.ops_resolveTicket = resolveTicket;
+window.ops_showTicketDetail = showTicketDetail;
+window.ops_showTicketList = showTicketList;
 })();
 
 
