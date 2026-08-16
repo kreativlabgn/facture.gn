@@ -135,6 +135,7 @@ button{font-family:inherit;}
 .pill.pending{background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent);}
 .pill.partial{background:var(--surface-3); color:var(--text);}
 .pill.void{background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--bad);}
+.pill.refused{background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--bad);}
 .pill.neutral{background:var(--surface-2); color:var(--text-dim); font-family:'Inter'; font-weight:600; text-transform:none; letter-spacing:normal;}
 .offline-dot{width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none;}
 
@@ -834,8 +835,8 @@ button{font-family:inherit;}
         <div class="mono" style="font-size:11.5px; color:var(--text-dim); word-break:break-all;" id="fd-link"></div>
         <div style="font-size:11px; color:var(--text-dim); margin-top:6px;" id="fd-link-expiry"></div>
         <div style="display:flex; gap:8px; margin-top:14px;">
-          <button class="go" style="flex:1;">Relancer (WhatsApp)</button>
-          <button class="go ghost" style="flex:1;">Régénérer le lien</button>
+          <a class="go" style="flex:1; text-decoration:none; text-align:center;" id="fd-link-relance" href="#" target="_blank" rel="noopener">Relancer (WhatsApp)</a>
+          <button class="go ghost" style="flex:1;" onclick="s1_regenerateLink()">Régénérer le lien</button>
         </div>
       </div>
     </div>
@@ -879,6 +880,22 @@ button{font-family:inherit;}
         <button class="go ghost" style="flex:1;" onclick="s1_viewJustEmitted()">Voir la facture</button>
         <button class="go" style="flex:1;" onclick="s1_resetEmission()">Nouvelle facture</button>
       </div>
+    </div>
+  </section>
+
+  <!-- ================= ERREUR (patron générique réutilisable) ================= -->
+  <section class="screen" id="s-error">
+    <div class="back-row" id="err-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg><span id="err-back-label">Retour</span></div>
+    <div style="text-align:center; padding:24px 4px 8px;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--bad); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 8v5M12 16.5h.01" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h2 style="font-size:17px; margin-bottom:6px;" id="err-title"></h2>
+      <p style="font-size:12.5px; color:var(--text-dim); line-height:1.6; margin:0 0 24px;" id="err-message"></p>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <button class="go" style="width:100%;" id="err-primary"></button>
+      <button class="go ghost" style="width:100%;" id="err-secondary" hidden></button>
     </div>
   </section>
 
@@ -1978,7 +1995,7 @@ button{font-family:inherit;}
 
 <script>
 (function(){
-const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-support','s-ticket-detail'];
+const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-support','s-ticket-detail'];
 const LIGHT_ROLES = ['field_agent','delivery_driver'];
 const tabbar = document.getElementById('tabbar');
 const drawer = document.getElementById('drawer');
@@ -2039,8 +2056,13 @@ const INVOICES = [
     lines:[{d:'Commande groupée — divers',q:1,pu:'610 000',t:'610 000'}],
     events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'22 juil.'},{t:'invoice.disputed',a:'Boutique Sory (payeur)',w:'23 juil.'}],
     payment:null, dispute:'Le client conteste avoir reçu la commande complète — litige ouvert depuis 3 jours, en attente de résolution amiable avant recours à un avoir partiel.', actions:['avoir'] },
+  { id:'inv6', num:'FG-2026-000407', org:'Boubacar Camara — livraison foraine', amount:60000, status:'pending',
+    date:'12 juillet 2026', certid:'GN-31029918-2026-4B8A02', hash:'6d2e…f180 ← 7bb1…905e',
+    lines:[{d:'Livraison foraine — divers', q:1, pu:'60 000', t:'60 000'}],
+    events:[{t:'invoice.issued', a:'Aissatou Diallo', w:'12 juil.'}, {t:'payment_link.generated', a:'système', w:'12 juil.'}],
+    payment:{link:'https://facture.gn/p/6d2ef1809c3a', expiry:'Lien expiré depuis 2 jours (TTL 30j dépassé, ADR-066)', expired:true}, actions:['avoir'] },
 ];
-const STATUS_LABEL = { paid:'Payée', pending:'Attente', partial:'Partiel', void:'Contestée' };
+const STATUS_LABEL = { paid:'Payée', pending:'Attente', partial:'Partiel', void:'Contestée', refused:'Refusée' };
 const ACTION_LABEL = { marquer_paye:'Marquer payé (virement reçu)', avoir:'Émettre un avoir (credit_note)' };
 
 function renderInvoicesList(){
@@ -2051,7 +2073,9 @@ function renderInvoicesList(){
     </div>`).join('');
 }
 
+let currentInvoiceId = null;
 function showInvoiceDetail(id){
+  currentInvoiceId = id;
   const inv = INVOICES.find(i => i.id === id);
   document.getElementById('fd-org').textContent = inv.org;
   document.getElementById('fd-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
@@ -2071,7 +2095,11 @@ function showInvoiceDetail(id){
   payBlock.hidden = !inv.payment;
   if (inv.payment) {
     document.getElementById('fd-link').textContent = inv.payment.link;
-    document.getElementById('fd-link-expiry').textContent = inv.payment.expiry;
+    const expiryEl = document.getElementById('fd-link-expiry');
+    expiryEl.textContent = inv.payment.expiry;
+    expiryEl.style.color = inv.payment.expired ? 'var(--bad)' : 'var(--text-dim)';
+    expiryEl.style.fontWeight = inv.payment.expired ? '600' : 'normal';
+    document.getElementById('fd-link-relance').href = 'https://wa.me/?text=' + encodeURIComponent(`Bonjour, voici votre lien de paiement pour ${inv.num} : ${inv.payment.link}`);
   }
 
   document.getElementById('fd-actions').innerHTML = inv.actions.map((a,i) => `<button class="go ${i>0?'ghost':''}" style="width:100%;">${ACTION_LABEL[a]}</button>`).join('');
@@ -2240,6 +2268,77 @@ function resetEmission(){
   document.getElementById('em-success').hidden = true;
 }
 
+// ===== Écran d'erreur générique (patron réutilisable) =====
+function showError(cfg){
+  document.getElementById('err-title').textContent = cfg.title;
+  document.getElementById('err-message').textContent = cfg.message;
+  const back = document.getElementById('err-back');
+  back.onclick = () => showScreen(cfg.back || 's-accueil');
+  document.getElementById('err-back-label').textContent = cfg.backLabel || 'Retour';
+  const primary = document.getElementById('err-primary');
+  primary.textContent = cfg.primaryLabel;
+  primary.onclick = cfg.primaryAction;
+  const secondary = document.getElementById('err-secondary');
+  if (cfg.secondaryLabel) {
+    secondary.hidden = false;
+    secondary.textContent = cfg.secondaryLabel;
+    secondary.onclick = cfg.secondaryAction;
+  } else {
+    secondary.hidden = true;
+  }
+  showScreen('s-error');
+}
+
+function regenerateLink(){
+  const inv = INVOICES.find(i => i.id === currentInvoiceId);
+  if (!inv || !inv.payment) return;
+  if (inv.payment.expired) {
+    showError({
+      title: 'Lien de paiement expiré',
+      message: `Le lien de paiement de ${inv.num} a dépassé son délai de validité de 30 jours (ADR-066). Le client ne peut plus régler via ce lien — générez-en un nouveau pour reprendre l'encaissement.`,
+      back: 's-facture-detail', backLabel: 'Annuler',
+      primaryLabel: 'Générer un nouveau lien',
+      primaryAction: () => {
+        inv.payment.link = 'https://facture.gn/p/' + Math.random().toString(16).slice(2, 14);
+        inv.payment.expiry = 'Expire dans 30 jours (TTL 30j, ADR-066)';
+        inv.payment.expired = false;
+        showInvoiceDetail(inv.id);
+      },
+    });
+  } else {
+    inv.payment.link = 'https://facture.gn/p/' + Math.random().toString(16).slice(2, 14);
+    document.getElementById('fd-link').textContent = inv.payment.link;
+  }
+}
+
+document.getElementById('sync-action').addEventListener('click', () => {
+  const active = document.querySelector('.sync-toggle button.active');
+  const kind = active ? active.dataset.sync : 'ok';
+  if (kind === 'conflict') {
+    showError({
+      title: 'Conflit de synchronisation',
+      message: "La facture FG-2026-000409 a été modifiée hors ligne sur cet appareil et par un autre appareil pendant la coupure. Choisissez la version à conserver avant de reprendre la synchronisation.",
+      back: 's-accueil', backLabel: 'Plus tard',
+      primaryLabel: 'Conserver la version hors ligne',
+      primaryAction: () => resolveSyncConflict(),
+      secondaryLabel: 'Conserver la version serveur',
+      secondaryAction: () => resolveSyncConflict(),
+    });
+  } else if (kind === 'offline') {
+    showError({
+      title: 'Hors ligne',
+      message: '3 factures créées hors ligne sont en file d\'attente. Elles seront envoyées automatiquement dès la reconnexion — aucune action requise de votre part.',
+      back: 's-accueil', backLabel: 'Compris',
+      primaryLabel: 'Compris',
+      primaryAction: () => showScreen('s-accueil'),
+    });
+  }
+});
+function resolveSyncConflict(){
+  document.querySelector('.sync-toggle button[data-sync="ok"]').click();
+  showScreen('s-accueil');
+}
+
 // ===== Approbations (approver, ADR-083) =====
 const APPROVALS = [
   { id:'ap1', title:'Demande de crédit — Fatoumata Camara', meta:'250 000 → 400 000 GNF · demandé il y a 4h', status:'pending' },
@@ -2321,7 +2420,10 @@ function renderReconcile(){
     <div class="queue-item">
       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg></span>
       <div class="body"><div class="title">${r.name}</div><div class="meta">${r.amount.toLocaleString('fr-FR')} GNF · ${r.meta}</div></div>
-      <button class="go ghost" onclick="s1_markReceived('${r.id}')">Marquer reçu</button>
+      <div style="display:flex; gap:6px;">
+        <button class="go ghost" onclick="s1_markRefused('${r.id}')">Rejet</button>
+        <button class="go" onclick="s1_markReceived('${r.id}')">Marquer reçu</button>
+      </div>
     </div>`).join('') : '<div class="queue-empty">Rien à rapprocher.</div>';
 }
 function markReceived(id){
@@ -2333,6 +2435,25 @@ function markReceived(id){
   if (py) { py.status = 'paid'; py.sub = 'Virement · confirmé à l\'instant'; }
   renderReconcile();
   renderPayments(document.querySelector('#pay-filter-row .filter-chip.active')?.dataset.method || 'all');
+}
+function markRefused(id){
+  const idx = RECONCILE_ITEMS.findIndex(r => r.id === id);
+  if (idx === -1) return;
+  const r = RECONCILE_ITEMS[idx];
+  showError({
+    title: 'Paiement refusé',
+    message: `Le virement annoncé par ${r.name} pour ${r.amount.toLocaleString('fr-FR')} GNF n'est jamais arrivé sur le compte marchand. Signalez le rejet pour retirer cette entrée de la file de rapprochement et renvoyer un lien de paiement au client.`,
+    back: 's-paiements', backLabel: 'Annuler',
+    primaryLabel: 'Confirmer le rejet et renvoyer un lien',
+    primaryAction: () => {
+      RECONCILE_ITEMS.splice(idx, 1);
+      const py = PAYMENTS.find(p => p.name === r.name && p.amount === r.amount);
+      if (py) { py.status = 'refused'; py.sub = 'Virement · rejeté à l\'instant'; }
+      renderReconcile();
+      renderPayments(document.querySelector('#pay-filter-row .filter-chip.active')?.dataset.method || 'all');
+      showScreen('s-paiements');
+    },
+  });
 }
 function renderPayments(method){
   const list = method === 'all' ? PAYMENTS : PAYMENTS.filter(p => p.method === method);
@@ -2553,6 +2674,8 @@ window.s1_resetEmission = resetEmission;
 window.s1_decideApproval = decideApproval;
 window.s1_receiveStock = receiveStock;
 window.s1_markReceived = markReceived;
+window.s1_markRefused = markRefused;
+window.s1_regenerateLink = regenerateLink;
 window.s1_showPaymentDetail = showPaymentDetail;
 window.s1_inviteMember = inviteMember;
 window.s1_showMemberDetail = showMemberDetail;
