@@ -57,6 +57,11 @@ button{font-family:inherit;}
 .sync-strip.conflict{background:color-mix(in srgb, var(--bad) 12%, var(--surface));}
 .sync-strip.conflict .ico{color:var(--bad);}
 .sync-strip .action{flex:none; font-size:11.5px; font-weight:600; color:var(--text); text-decoration:underline; text-underline-offset:2px; cursor:pointer; background:none; border:none; padding:0; font-family:'Inter';}
+.branch-strip{display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:12px; margin-bottom:12px; border:1px solid var(--border); background:var(--surface-2);}
+.branch-strip .ico{flex:none; width:18px; height:18px; color:var(--text-dim);}
+.branch-strip .txt{flex:1; font-size:12px; line-height:1.4; color:var(--text-dim);}
+.branch-strip .txt b{font-weight:600; color:var(--text);}
+.branch-strip .action{flex:none; font-size:11.5px; font-weight:600; color:var(--text); text-decoration:underline; text-underline-offset:2px; cursor:pointer; background:none; border:none; padding:0; font-family:'Inter';}
 
 /* ===== Carte jauge de confiance ===== */
 .trust-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; margin-bottom:16px; display:flex; align-items:center; gap:18px;}
@@ -741,6 +746,12 @@ button{font-family:inherit;}
     <button class="action" id="sync-action" hidden>Détails</button>
   </div>
 
+  <div class="branch-strip" id="branch-strip">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M9 13h1M14 9h1M14 13h1"/></svg>
+    <div class="txt">Succursale active : <b id="branch-strip-name">Boutique principale</b></div>
+    <button class="action" onclick="s1_switchBranch()">Changer</button>
+  </div>
+
   <!-- ================= ACCUEIL ================= -->
   <section class="screen active" id="s-accueil">
 
@@ -1172,11 +1183,9 @@ button{font-family:inherit;}
   <!-- ================= SUCCURSALES (détail) ================= -->
   <section class="screen" id="s-succursales">
     <div class="back-row" onclick="s1_showScreen('s-parametres')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Paramètres</div>
-    <h1 style="font-size:20px; margin-bottom:16px;">Succursales</h1>
-    <div class="card">
-      <div class="client-row"><div class="row-main"><span class="name">Boutique principale</span><span class="sub">Madina, Conakry</span></div><span class="pill paid">Active</span></div>
-      <div class="client-row"><div class="row-main"><span class="name">Entrepôt Kaloum</span><span class="sub">Kaloum, Conakry</span></div><span class="pill paid">Active</span></div>
-    </div>
+    <h1 style="font-size:20px; margin-bottom:4px;">Succursales</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Touchez une succursale pour en faire votre succursale active.</p>
+    <div class="card" id="branches-list"></div>
   </section>
 
   <!-- ================= SUPPORT ================= -->
@@ -2381,8 +2390,37 @@ const BRANCH_KEY = { 'Boutique principale':'principale', 'Entrepôt Kaloum':'kal
 function renderStock(){
   document.getElementById('stock-list').innerHTML = Object.entries(STOCK).map(([name, s]) => {
     const total = s.principale + s.kaloum;
-    return `<div class="invoice-row"><div class="row-main"><span class="name">${name}</span><span class="sub">Boutique principale : ${s.principale} · Entrepôt Kaloum : ${s.kaloum}</span></div><span class="pill ${total < 10 ? 'void' : 'paid'}">${total} en stock</span></div>`;
+    const pFmt = currentBranch === 'principale' ? `<b style="color:var(--accent);">${s.principale}</b>` : s.principale;
+    const kFmt = currentBranch === 'kaloum' ? `<b style="color:var(--accent);">${s.kaloum}</b>` : s.kaloum;
+    return `<div class="invoice-row"><div class="row-main"><span class="name">${name}</span><span class="sub">Boutique principale : ${pFmt} · Entrepôt Kaloum : ${kFmt}</span></div><span class="pill ${total < 10 ? 'void' : 'paid'}">${total} en stock</span></div>`;
   }).join('');
+}
+
+// ===== Succursale active (multi-succursale, Paramètres) =====
+const BRANCHES = [
+  { key:'principale', name:'Boutique principale', loc:'Madina, Conakry' },
+  { key:'kaloum', name:'Entrepôt Kaloum', loc:'Kaloum, Conakry' },
+];
+let currentBranch = 'principale';
+function renderBranches(){
+  document.getElementById('branches-list').innerHTML = BRANCHES.map(b => `
+    <div class="client-row" style="cursor:pointer;" onclick="s1_selectBranch('${b.key}')"><div class="row-main"><span class="name">${b.name}</span><span class="sub">${b.loc}</span></div><span class="pill ${b.key === currentBranch ? 'paid' : 'neutral'}">${b.key === currentBranch ? 'Vous êtes ici' : 'Ouverte'}</span></div>`).join('');
+}
+function applyBranch(){
+  const b = BRANCHES.find(x => x.key === currentBranch);
+  document.getElementById('branch-strip-name').textContent = b.name;
+  document.getElementById('stock-branch').value = b.name;
+  renderBranches();
+  renderStock();
+}
+function selectBranch(key){
+  currentBranch = key;
+  applyBranch();
+}
+function switchBranch(){
+  const idx = BRANCHES.findIndex(b => b.key === currentBranch);
+  currentBranch = BRANCHES[(idx + 1) % BRANCHES.length].key;
+  applyBranch();
 }
 function receiveStock(){
   const product = document.getElementById('stock-product').value;
@@ -2662,6 +2700,7 @@ window.addEventListener('DOMContentLoaded', () => {
   renderAuditLog('all');
   renderApiKeys();
   renderTickets();
+  renderBranches();
   showScreen('s-accueil');
 });
 
@@ -2687,6 +2726,8 @@ window.s1_generateApiKey = generateApiKey;
 window.s1_upgradePlan = upgradePlan;
 window.s1_submitTicket = submitTicket;
 window.s1_showTicketDetail = showTicketDetail;
+window.s1_switchBranch = switchBranch;
+window.s1_selectBranch = selectBranch;
 })();
 
 (function(){
