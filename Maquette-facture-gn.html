@@ -1701,7 +1701,7 @@ button{font-family:inherit;}
   </div>
 
   <div class="screen" id="dgi-s-detail">
-    <div class="back-row" onclick="dgi_showDgiScreen('s-liste')">
+    <div class="back-row" onclick="dgi_showDgiScreen('dgi-s-liste')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
       Factures
     </div>
@@ -3210,7 +3210,7 @@ function showDgiDetail(id){
   document.getElementById('dgi-dg-num').textContent = inv.num;
   document.getElementById('dgi-dg-date').textContent = inv.date;
   document.getElementById('dgi-dg-certid').textContent = inv.certid;
-  showDgiScreen('s-detail');
+  showDgiScreen('dgi-s-detail');
 }
 
 function openFecPreview(){
@@ -3318,7 +3318,7 @@ function renderTickets(){
       <div class="sev ${t.sev}"></div>
       <div class="ticket-main"><div class="subj">${t.subj}</div><div class="meta">${t.org} · ${t.opened}</div></div>
       <div class="sla ${slaClass(t.slaMinutes)}">${t.slaTotal}<br>${slaText(t.slaMinutes)}</div>
-      <button class="btn-ghost" onclick="event.stopPropagation(); showTicketDetail('${t.id}')">${t.slaMinutes < 0 ? 'Prendre en charge' : 'Voir'}</button>
+      <button class="btn-ghost" onclick="event.stopPropagation(); ops_showTicketDetail('${t.id}')">${t.slaMinutes < 0 ? 'Prendre en charge' : 'Voir'}</button>
     </div>`).join('');
 }
 
