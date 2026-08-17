@@ -26,45 +26,45 @@ Nouvelle entité de premier niveau `PublicBuyerAccount` (parallèle à `Organiza
 ## Découpage en tâches bite-sized (2–5 min chacune)
 
 ### Groupe 0 — Fondations schema (bloquant tout le reste)
-- [ ] Tâche 1 : `packages/db/prisma/schema.prisma` — ajouter `enum PublicBuyerAccountMemberRole { public_buyer_validator }`, `model PublicBuyerAccount` (id, name, createdAt), `model PublicBuyerAccountMember` (id, publicBuyerAccountId, userId, role, joinedAt — même forme que `PracticeMember`)
-- [ ] Tâche 2 : `packages/db/prisma/schema.prisma` — ajouter `Customer.isPublicEntity Boolean @default(false)`, `Customer.publicBuyerAccountId String?` + relation vers `PublicBuyerAccount`
-- [ ] Tâche 3 : `packages/db/prisma/schema.prisma` — ajouter `liquidation_validated` à `enum InvoiceEventType`
-- [ ] Tâche 4 : `packages/db/prisma/migrations/20260817090000_add_public_buyer_portal/migration.sql` — écrire la migration manuelle (cohérent avec les migrations précédentes du repo, toutes écrites à la main)
-- [ ] Tâche 5 : `pnpm --filter @facture-gn/db db:generate` — régénérer le client Prisma
+- [x] Tâche 1 : `packages/db/prisma/schema.prisma` — ajouter `enum PublicBuyerAccountMemberRole { public_buyer_validator }`, `model PublicBuyerAccount` (id, name, createdAt), `model PublicBuyerAccountMember` (id, publicBuyerAccountId, userId, role, joinedAt — même forme que `PracticeMember`)
+- [x] Tâche 2 : `packages/db/prisma/schema.prisma` — ajouter `Customer.isPublicEntity Boolean @default(false)`, `Customer.publicBuyerAccountId String?` + relation vers `PublicBuyerAccount`
+- [x] Tâche 3 : `packages/db/prisma/schema.prisma` — ajouter `liquidation_validated` à `enum InvoiceEventType`
+- [x] Tâche 4 : `packages/db/prisma/migrations/20260817090000_add_public_buyer_portal/migration.sql` — écrire la migration manuelle (cohérent avec les migrations précédentes du repo, toutes écrites à la main)
+- [x] Tâche 5 : `pnpm --filter @facture-gn/db db:generate` — régénérer le client Prisma
 
 ### Groupe 1 — F16 minimal : lier un client à une administration [P après Groupe 0]
-- [ ] Tâche 6 : Test — `customers.service.spec.ts` : `flagPublicEntity()` pose `isPublicEntity=true` + `publicBuyerAccountId` sur un client existant de l'organisation appelante
-- [ ] Tâche 7 : Test — `customers.service.spec.ts` : `flagPublicEntity()` rejette un `publicBuyerAccountId` inexistant
-- [ ] Tâche 8 : `apps/trust-api/src/customers/dto/flag-public-entity.dto.ts` — schéma Zod `{ publicBuyerAccountId: uuid }`
-- [ ] Tâche 9 : `apps/trust-api/src/customers/customers.service.ts` — méthode `flagPublicEntity(customerId, publicBuyerAccountId)`
-- [ ] Tâche 10 : `apps/trust-api/src/customers/customers.controller.ts` — `POST :id/flag-public-entity`, `@Roles("owner", "admin")` (réservé, ADR-105/ADR-083 — même trio restreint que `merge()`), `@OrganizationIdSource("customer")`
+- [x] Tâche 6 : Test — `customers.service.spec.ts` : `flagPublicEntity()` pose `isPublicEntity=true` + `publicBuyerAccountId` sur un client existant de l'organisation appelante
+- [x] Tâche 7 : Test — `customers.service.spec.ts` : `flagPublicEntity()` rejette un `publicBuyerAccountId` inexistant
+- [x] Tâche 8 : `apps/trust-api/src/customers/dto/flag-public-entity.dto.ts` — schéma Zod `{ publicBuyerAccountId: uuid }`
+- [x] Tâche 9 : `apps/trust-api/src/customers/customers.service.ts` — méthode `flagPublicEntity(customerId, publicBuyerAccountId)`
+- [x] Tâche 10 : `apps/trust-api/src/customers/customers.controller.ts` — `POST :id/flag-public-entity`, `@Roles("owner", "admin")` (réservé, ADR-105/ADR-083 — même trio restreint que `merge()`), `@OrganizationIdSource("customer")`
 
 ### Groupe 2 — Onboarding self-service du PublicBuyerAccount [P après Groupe 0]
-- [ ] Tâche 11 : Test — `public-buyer-accounts.service.spec.ts` : `create()` crée le compte et ajoute le créateur comme `public_buyer_validator` (même garantie que `PracticesService.create()`)
-- [ ] Tâche 12 : `apps/trust-api/src/public-buyer/dto/create-public-buyer-account.dto.ts` — schéma Zod `{ name: string }`
-- [ ] Tâche 13 : `apps/trust-api/src/public-buyer/public-buyer-accounts.service.ts` — `create()`, `listActive()`
-- [ ] Tâche 14 : `apps/trust-api/src/public-buyer/public-buyer-accounts.controller.ts` — `POST /public-buyer-accounts` (aucun `@Roles()`, tout utilisateur authentifié — même justification que `PracticesController.create()`), `GET /public-buyer-accounts` (liste active, pour le sélecteur PME du Groupe 1 et transparence)
+- [x] Tâche 11 : Test — `public-buyer-accounts.service.spec.ts` : `create()` crée le compte et ajoute le créateur comme `public_buyer_validator` (même garantie que `PracticesService.create()`)
+- [x] Tâche 12 : `apps/trust-api/src/public-buyer/dto/create-public-buyer-account.dto.ts` — schéma Zod `{ name: string }`
+- [x] Tâche 13 : `apps/trust-api/src/public-buyer/public-buyer-accounts.service.ts` — `create()`, `listActive()`
+- [x] Tâche 14 : `apps/trust-api/src/public-buyer/public-buyer-accounts.controller.ts` — `POST /public-buyer-accounts` (aucun `@Roles()`, tout utilisateur authentifié — même justification que `PracticesController.create()`), `GET /public-buyer-accounts` (liste active, pour le sélecteur PME du Groupe 1 et transparence)
 
 ### Groupe 3 — J1 : valider la liquidation [dépend Groupes 0, 1, 2]
-- [ ] Tâche 15 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` refuse un appelant qui n'est pas `PublicBuyerAccountMember` du compte propriétaire du client de la facture (cas IDOR — le test qui protège contre la régression la plus grave de ce plan)
-- [ ] Tâche 16 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` refuse une facture dont le client n'a pas `publicBuyerAccountId` renseigné (pas une facture B2G)
-- [ ] Tâche 17 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` sur une facture `draft` échoue (jamais avant `issued` — la liquidation suppose une créance certifiée)
-- [ ] Tâche 18 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` pose `validatedByAdministration=true` + crée un `InvoiceEvent(type: liquidation_validated, actorId: <user DAF>)` sur une facture éligible
-- [ ] Tâche 19 : Test — `public-buyer-portal.service.spec.ts` : appel répété sur une facture déjà validée → 200 idempotent, aucun second `InvoiceEvent` créé
-- [ ] Tâche 20 : `apps/trust-api/src/public-buyer/public-buyer-portal.service.ts` — `validateLiquidation(invoiceId, requesterUserId)`
-- [ ] Tâche 21 : `apps/trust-api/src/public-buyer/public-buyer-portal.controller.ts` — `POST /public-buyer/invoices/:invoiceId/validate-liquidation` (`JwtAuthGuard` seul, **aucun** `@Roles()`/`@OrganizationIdSource` — autorisation entièrement dans le service, cf. Alternatives écartées)
+- [x] Tâche 15 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` refuse un appelant qui n'est pas `PublicBuyerAccountMember` du compte propriétaire du client de la facture (cas IDOR — le test qui protège contre la régression la plus grave de ce plan)
+- [x] Tâche 16 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` refuse une facture dont le client n'a pas `publicBuyerAccountId` renseigné (pas une facture B2G)
+- [x] Tâche 17 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` sur une facture `draft` échoue (jamais avant `issued` — la liquidation suppose une créance certifiée)
+- [x] Tâche 18 : Test — `public-buyer-portal.service.spec.ts` : `validateLiquidation()` pose `validatedByAdministration=true` + crée un `InvoiceEvent(type: liquidation_validated, actorId: <user DAF>)` sur une facture éligible
+- [x] Tâche 19 : Test — `public-buyer-portal.service.spec.ts` : appel répété sur une facture déjà validée → 200 idempotent, aucun second `InvoiceEvent` créé
+- [x] Tâche 20 : `apps/trust-api/src/public-buyer/public-buyer-portal.service.ts` — `validateLiquidation(invoiceId, requesterUserId)`
+- [x] Tâche 21 : `apps/trust-api/src/public-buyer/public-buyer-portal.controller.ts` — `POST /public-buyer/invoices/:invoiceId/validate-liquidation` (`JwtAuthGuard` seul, **aucun** `@Roles()`/`@OrganizationIdSource` — autorisation entièrement dans le service, cf. Alternatives écartées)
 
 ### Groupe 4 — J2 : dashboard encours fournisseurs [dépend Groupes 0, 1, 2 ; peut être fait en parallèle du Groupe 3]
-- [ ] Tâche 22 : Test — `public-buyer-portal.service.spec.ts` : `listReceivedInvoices()` ne renvoie que les factures `issued+` des clients rattachés au `PublicBuyerAccount` de l'appelant, jamais celles d'un autre compte
-- [ ] Tâche 23 : Test — `public-buyer-portal.service.spec.ts` : `listReceivedInvoices()` calcule l'encours total (`SUM(amountDue)`) sur le même périmètre
-- [ ] Tâche 24 : `apps/trust-api/src/public-buyer/public-buyer-portal.service.ts` — `listReceivedInvoices(requesterUserId, { take, skip })`
-- [ ] Tâche 25 : `apps/trust-api/src/public-buyer/public-buyer-portal.controller.ts` — `GET /public-buyer/invoices` (`JwtAuthGuard` seul, même raisonnement d'autorisation inline que Tâche 21)
+- [x] Tâche 22 : Test — `public-buyer-portal.service.spec.ts` : `listReceivedInvoices()` ne renvoie que les factures `issued+` des clients rattachés au `PublicBuyerAccount` de l'appelant, jamais celles d'un autre compte
+- [x] Tâche 23 : Test — `public-buyer-portal.service.spec.ts` : `listReceivedInvoices()` calcule l'encours total (`SUM(amountDue)`) sur le même périmètre
+- [x] Tâche 24 : `apps/trust-api/src/public-buyer/public-buyer-portal.service.ts` — `listReceivedInvoices(requesterUserId, { take, skip })`
+- [x] Tâche 25 : `apps/trust-api/src/public-buyer/public-buyer-portal.controller.ts` — `GET /public-buyer/invoices` (`JwtAuthGuard` seul, même raisonnement d'autorisation inline que Tâche 21)
 
 ### Groupe 5 — Câblage & clôture
-- [ ] Tâche 26 : `apps/trust-api/src/public-buyer/public-buyer.module.ts` — regrouper les 2 controllers + le service + `PublicBuyerAccountsService`
-- [ ] Tâche 27 : `apps/trust-api/src/app.module.ts` — enregistrer `PublicBuyerModule`
-- [ ] Tâche 28 : `V/openapi-facture-gn.yaml` — ajouter `POST /public-buyer-accounts`, `GET /public-buyer-accounts`, `POST /customers/{id}/flag-public-entity` (absents de la version actuelle, qui ne documentait que la lecture/validation en supposant le compte déjà créé)
-- [ ] Tâche 29 : `pnpm --filter trust-api typecheck && pnpm --filter trust-api test` — suite complète verte
+- [x] Tâche 26 : `apps/trust-api/src/public-buyer/public-buyer.module.ts` — regrouper les 2 controllers + le service + `PublicBuyerAccountsService`
+- [x] Tâche 27 : `apps/trust-api/src/app.module.ts` — enregistrer `PublicBuyerModule`
+- [x] Tâche 28 : `V/openapi-facture-gn.yaml` — ajouter `POST /public-buyer-accounts`, `GET /public-buyer-accounts`, `POST /customers/{id}/flag-public-entity` (absents de la version actuelle, qui ne documentait que la lecture/validation en supposant le compte déjà créé)
+- [x] Tâche 29 : `pnpm --filter trust-api typecheck && pnpm --filter trust-api test` — suite complète verte
 
 ## Tests à écrire AVANT le code
 Voir Tâches 6-7 (F16), 11 (onboarding), 15-19 (J1), 22-23 (J2) ci-dessus — tous listés avant leur tâche d'implémentation correspondante, pattern TDD identique à l'historique git existant (`test+feat`).
@@ -77,6 +77,9 @@ Voir Tâches 6-7 (F16), 11 (onboarding), 15-19 (J1), 22-23 (J2) ci-dessus — to
 - Aucun hardcoded secret
 - `dev-security-reviewer` OK (accès cross-organisation par construction)
 - `dev-domain-model-reviewer` OK (nouvelle entité `PublicBuyerAccount`, nouveau statut implicite `validatedByAdministration` sur `Invoice`)
+
+## Clôture
+Exécuté le 17/08/2026 — 29/29 tâches, 15 nouveaux tests (+ 2 sur `CustomersService`), suite complète `apps/trust-api` verte (549 tests) hors `invoice-numbering.service.integration.spec.ts` (échec préexistant, indépendant de ce plan — nécessite un Postgres réel non disponible ici, vérifié par comparaison avant/après ces changements). Reste à faire avant merge : `dev-code-reviewer`, `dev-security-reviewer`, `dev-domain-model-reviewer`, `dev-test-quality-analyzer`.
 
 ## Risques identifiés & mitigations
 - **IDOR cross-organisation** : un DAF pourrait valider/consulter des factures qui ne lui sont pas destinées si l'autorisation inline est mal écrite → mitigation : test dédié (Tâche 15) + revue sécurité obligatoire, jamais de `RolesGuard` réutilisé ici (voir Alternatives écartées).
