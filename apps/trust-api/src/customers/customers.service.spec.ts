@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { CustomersService } from "./customers.service";
 
-function createFakePrisma(overrides: { customer?: any; invoice?: any } = {}) {
+function createFakePrisma(
+  overrides: { customer?: any; invoice?: any; publicBuyerAccount?: any } = {},
+) {
   return {
     customer: {
       create: vi.fn().mockResolvedValue({
@@ -22,11 +24,21 @@ function createFakePrisma(overrides: { customer?: any; invoice?: any } = {}) {
         creditLimit: null,
         createdAt: new Date("2026-08-09T00:00:00.000Z"),
       }),
+      update: vi.fn().mockResolvedValue({
+        id: "cust-1",
+        organizationId: "org-1",
+        isPublicEntity: true,
+        publicBuyerAccountId: "pba-1",
+      }),
       ...overrides.customer,
     },
     invoice: {
       aggregate: vi.fn().mockResolvedValue({ _sum: { amountDue: null } }),
       ...overrides.invoice,
+    },
+    publicBuyerAccount: {
+      findUnique: vi.fn().mockResolvedValue({ id: "pba-1", name: "Ministère des Finances" }),
+      ...overrides.publicBuyerAccount,
     },
   };
 }
@@ -151,6 +163,31 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     const service = new CustomersService(prisma as any);
 
     await expect(service.merge("cust-1", "cust-inconnu")).rejects.toThrow(/introuvable pour cette organisation/);
+  });
+});
+
+describe("CustomersService — marquage entité publique (F16, ADR-105)", () => {
+  it("pose isPublicEntity=true et publicBuyerAccountId sur un client existant", async () => {
+    const prisma = createFakePrisma();
+    const service = new CustomersService(prisma as any);
+
+    const result = await service.flagPublicEntity("cust-1", "pba-1");
+
+    expect(prisma.publicBuyerAccount.findUnique).toHaveBeenCalledWith({ where: { id: "pba-1" } });
+    expect(prisma.customer.update).toHaveBeenCalledWith({
+      where: { id: "cust-1" },
+      data: { isPublicEntity: true, publicBuyerAccountId: "pba-1" },
+    });
+    expect(result.isPublicEntity).toBe(true);
+    expect(result.publicBuyerAccountId).toBe("pba-1");
+  });
+
+  it("rejette un publicBuyerAccountId qui ne correspond à aucun compte", async () => {
+    const prisma = createFakePrisma({ publicBuyerAccount: { findUnique: vi.fn().mockResolvedValue(null) } });
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.flagPublicEntity("cust-1", "pba-inconnu")).rejects.toThrow(/introuvable/);
+    expect(prisma.customer.update).not.toHaveBeenCalled();
   });
 });
 
