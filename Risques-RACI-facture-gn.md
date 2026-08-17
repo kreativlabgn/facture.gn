@@ -6,8 +6,8 @@
 
 | Champ | Valeur |
 |---|---|
-| Date | 8 août 2026 |
-| Statut | Consolidé — intègre T-04/ADR-072 (Djomy primary), R-13 (vendor lock-in Djomy), R-14 (adoption B2G), G-06 (SLA support, résolu), RACI partenaires, B-08 échelle de réponse formalisée (ADR-091), B-10 amorçage Capital (nouveau) |
+| Date | 17 août 2026 |
+| Statut | Consolidé — intègre T-04/ADR-072 (Djomy primary), R-13 (vendor lock-in Djomy), R-14 (adoption B2G), G-06 (SLA support, résolu), RACI partenaires, B-08 échelle de réponse formalisée (ADR-091), B-10 amorçage Capital, R-12 revérifié J+26 après lancement NimbaPay (constat inchangé) |
 | Audience | Sponsor exécutif, Direction Générale, Product Owner, Tech Lead/Architecte |
 | Documents liés | DAT · PRD · Backlog · Registre ADR · CdC |
 
@@ -60,7 +60,7 @@
 | R-09 | Non-conformité RGPD guinéen (L/2016/037/AN) | Faible | Élevé | RLS, chiffrement, audit, minimisation | Squad Platform | Mitigé |
 | R-10 | Non-conformité LBC/FT (L/2021/024/AN) | Faible | Élevé | Détection comportementale sans seuil (ADR-032) | Squad Platform | Mitigé |
 | R-11 | Concurrence SenTur (Sénégal) — détail | Faible | Faible | Veille, signal de validation de thèse | Sponsor | Surveillé |
-| R-12 | NimbaPay — évolution du paysage paiement national | Moyenne | Moyen | Surveillance active. Orange Money participant, MTN MoMo absent. Intégration prématurée. P2M potentiel à terme, fiabilité jour 1 non prouvée | Squad Money | Surveillé |
+| R-12 | NimbaPay — évolution du paysage paiement national | Moyenne | Moyen | Vérifié le 17/08/26 (J+26 après lancement) : constat inchangé, aucun élément nouveau. MTN MoMo toujours absent de la cohorte de lancement (7 institutions, dont Orange Finances Mobiles), aucun calendrier public. Aucun chemin d'intégration marchand/PSP : Mojaloop expose son API (FSPIOP) aux seuls DFSP agréés BCRG, pas à un SaaS tiers — le seul accès possible serait derrière un participant existant, ce que Djomy fait déjà. Tarification non publiée, non vérifiable. Zéro métrique de maturité publiée. Attention homonyme : `nimbapay.com` (startup diaspora, 8 % de commission) n'a aucun rapport avec le système BCRG/GuiM (`guim-gn.com`) — ne pas confondre dans une recherche future. Prochaine action : contact `contact@guim-gn.com` (statut TPP/PISP tiers non agréé, grille tarifaire, calendrier MTN) ; prochaine revérification ~fin octobre 2026 | Squad Money | Surveillé — vérifié 17/08/26 |
 | R-13 | Vendor lock-in Djomy (provider primary) | Moyenne | Élevé | Fallback Moneroo prouvé — circuit breaker timeout 10s, test de bascule automatique sans intervention (ADR-072/073, board d'exécution Chantier 2) | Squad Money | Actif, mitigation en cours de validation terrain |
 | R-14 | Adoption administration cliente insuffisante pour validation B2G Niveau 2 | Faible, latent — V2 | Moyen si Capital Layer activé sans base de DAF valideurs | Engagement institutionnel précoce (pilote 1-2 ministères), Niveau 1 (lien sans compte) comme fallback (ADR-080) | DG | Ouvert, non urgent, V2 |
 | R-15 | TELEMO élargit son périmètre vers la facturation/le paiement, ou ouvre une API sans qu'on l'ait anticipé | Faible | Moyen — réévaluation R-02-like nécessaire si ça se produit | Veille active, `reference_marche` conçu pour compatibilité API future sans dépendance actuelle (ADR-090) | Sponsor | NOUVEAU — Surveillé |
@@ -110,4 +110,4 @@ Zones de chevauchement : le PO priorise le backlog mais n'approuve pas seul un c
 
 ---
 
-*facture.gn — Risques & RACI — Document confidentiel — 8 août 2026*
+*facture.gn — Risques & RACI — Document confidentiel — 17 août 2026*
