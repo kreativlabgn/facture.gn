@@ -701,6 +701,7 @@ button{font-family:inherit;}
 
 <nav class="shell-nav">
   <span class="nav-eyebrow">6 shells + legacy · ADR-095</span>
+  <button data-shell="shell-0">00 · Inscription</button>
   <button data-shell="shell-1" class="active">01 · App PME</button>
       <button data-shell="shell2">02 · Cabinet/CGA</button>
       <button data-shell="shell3">03 · Portail DAF</button>
@@ -709,6 +710,44 @@ button{font-family:inherit;}
       <button data-shell="shell6">06 · Console Ops</button>
   <button data-shell="shell-7">07 · Hors périmètre (legacy)</button>
 </nav>
+
+<div id="shell-0" class="shell-pane" hidden>
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 16px; background:#F5F7F9;">
+<div style="width:100%; max-width:400px;">
+
+  <div style="text-align:center; margin-bottom:28px;">
+    <svg width="36" height="36" viewBox="0 0 26 26" aria-hidden="true" style="margin-bottom:10px;"><path d="M13 3L20 9.5L13 16L6 9.5Z" fill="none" stroke="#FBB500" stroke-width="1.6"/></svg>
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; color:#0B1D3A;">facture.gn</div>
+    <p style="font-size:12.5px; color:rgba(11,29,58,.66); margin:6px auto 0; max-width:280px; line-height:1.5;">Infrastructure de confiance transactionnelle pour les PME de Guinée</p>
+  </div>
+
+  <div style="background:#fff; border:1px solid rgba(11,29,58,.1); border-radius:18px; padding:26px 22px; box-shadow:0 8px 28px rgba(11,29,58,.07);">
+    <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:rgba(11,29,58,.5); margin-bottom:10px;">Langue</div>
+    <div id="shell0-lang" style="display:flex; gap:6px; margin-bottom:22px; flex-wrap:wrap;">
+      <button class="shell0-lang-btn active" data-lang="fr">Français</button>
+      <button class="shell0-lang-btn" data-lang="pular">Pular</button>
+      <button class="shell0-lang-btn" data-lang="malinke">Malinké</button>
+      <button class="shell0-lang-btn" data-lang="soussou">Soussou</button>
+    </div>
+
+    <button onclick="showShell('shell-1'); s1_showScreen('s-onb-1');" style="width:100%; padding:15px; border:none; border-radius:12px; background:#FBB500; color:#0B1D30; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; cursor:pointer;">Créer mon compte</button>
+    <p style="font-size:11px; color:rgba(11,29,58,.5); text-align:center; margin:10px 0 0; line-height:1.5;">Aucune information requise pour commencer à facturer — NIF et eTax restent optionnels (ADR-035). Première facture émise en moins de 5 minutes.</p>
+
+    <div style="border-top:1px solid rgba(11,29,58,.08); margin:20px 0 16px;"></div>
+
+    <button onclick="showShell('shell-1'); s1_showScreen('s-accueil');" style="width:100%; padding:13px; border:1px solid rgba(11,29,58,.15); border-radius:12px; background:none; color:#0B1D3A; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer; margin-bottom:8px;">J'ai déjà un compte</button>
+    <button onclick="showShell('shell-1'); var rs=document.getElementById('role-select'); rs.value='field_agent'; rs.dispatchEvent(new Event('change')); s1_startMerchantRegistration();" style="width:100%; padding:13px; border:1px solid rgba(11,29,58,.15); border-radius:12px; background:none; color:#0B1D3A; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer;">Je suis un agent terrain — inscrire un marchand</button>
+  </div>
+
+  <p style="text-align:center; font-size:10.5px; color:rgba(11,29,58,.4); margin-top:20px;">Chemin A ci-dessus (self-service) · Chemin B ci-contre (agent terrain assisté) — Parcours 0, ADR-045</p>
+
+</div>
+</div>
+</div>
+<style>
+.shell0-lang-btn{padding:7px 13px; border-radius:100px; border:1px solid rgba(11,29,58,.15); background:none; color:rgba(11,29,58,.66); font-family:'Inter',sans-serif; font-size:12px; font-weight:600; cursor:pointer;}
+.shell0-lang-btn.active{background:#0B1D3A; border-color:#0B1D3A; color:#fff;}
+</style>
 
 <div id="shell-1" class="shell-pane">
 <div class="proto-bar">
@@ -3655,6 +3694,12 @@ function showShell(id){
 }
 document.querySelectorAll('.shell-nav [data-shell]').forEach(btn => {
   btn.addEventListener('click', () => showShell(btn.dataset.shell));
+});
+document.querySelectorAll('.shell0-lang-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.shell0-lang-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
 });
 
 
