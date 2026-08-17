@@ -210,7 +210,7 @@ Structurellement distincte de `PARTNER` (institutionnel léger : apip/fodip/part
 | document_type | enum | invoice / proforma / quote |
 | status | enum | draft / issued / partially_paid / paid / voided / converted / expired |
 | dispute_status | enum | none / disputed / resolved |
-| validated_by_administration | boolean | V2, défaut false — déclenché par liquidation_validated (ADR-080/081) |
+| validated_by_administration | boolean | V1 (avancé par ADR-098), défaut false — déclenché par liquidation_validated (ADR-080/081) ; sans consommateur avant V2 (is_financeable(), ADR-088/089) |
 | total_ht | bigint | Centimes GNF |
 | total_tva | bigint | Centimes GNF |
 | total_ttc | bigint | Centimes GNF — montant certifié signé |
@@ -330,8 +330,8 @@ Structurellement distincte de `PARTNER` (institutionnel léger : apip/fodip/part
 |---|---|---|
 | id | uuid PK | |
 | invoice_id | uuid FK | → INVOICE |
-| type | enum | 22 types MVP/V1 + 2 types V2 B2G (24 au total — voir DAT §4.1) |
-| actor_id | uuid FK | Nullable — public_buyer_validator pour liquidation_validated (V2) |
+| type | enum | 23 types MVP/V1 + 2 types V2 B2G (25 au total — voir DAT §4.1) |
+| actor_id | uuid FK | Nullable — public_buyer_validator pour liquidation_validated (V1, avancé par ADR-098) |
 | amount | bigint | Nullable, centimes GNF |
 | metadata | jsonb | Nullable, données contextuelles |
 | created_at | timestamp | Append-only, jamais modifié |
@@ -366,10 +366,10 @@ Structurellement distincte de `PARTNER` (institutionnel léger : apip/fodip/part
 | name | string | |
 | phone | string | Nullable |
 | nif | string | Nullable |
-| is_public_entity | boolean | Défaut false (V2) |
+| is_public_entity | boolean | Défaut false ; V1 (avancé par ADR-098, prérequis du Niveau 2 B2G — DAT §8) |
 | credit_limit | bigint | Nullable, centimes GNF |
 | running_balance | bigint | Calculé sur amount_due, centimes GNF |
-| public_buyer_account_id | uuid FK | Nullable (V2) — identité DAF/administration |
+| public_buyer_account_id | uuid FK | Nullable ; V1 (avancé par ADR-098) — identité DAF/administration |
 | possible_duplicate_of | uuid FK | Nullable → CUSTOMER |
 
 ### 2.6 Support
@@ -409,10 +409,11 @@ Structurellement distincte de `PARTNER` (institutionnel léger : apip/fodip/part
 - PRODUCT.cost_price et INVOICE_LINE.cost_price_at_time ajoutés lors des travaux sur la Grille des Offres (ADR-084) — pas de nouvelle entité, deux champs sur des tables existantes. Le snapshot sur INVOICE_LINE évite qu'un changement de coût déforme rétroactivement les rapports de marge passés.
 - PARTNER/PARTNER_LINK (ADR-078) couvrent APIP/FODIP/3AE ; le CGA n'y figure pas — il est un 4e type de PROFESSIONAL_PRACTICE pour réutiliser mandate/revenue_share tels quels.
 - INVOICE_EVENT.type : 23 types confirmés au catalogue MVP/V1 (DAT §4.1), dont liquidation_validated avancé de V2 par ADR-098 pour rester cohérent avec le Niveau 2 B2G déjà positionné V1 (ADR-080). 2 types V2 restants (service_fait_confirmed, financing_disbursed — ADR-089) portent le total à 25.
+- CUSTOMER.is_public_entity et CUSTOMER.public_buyer_account_id passent V2 → V1 (conséquence d'ADR-098, non explicitée dans ses conséquences d'origine mais structurellement requise) : le Niveau 2 B2G ne peut identifier une facture comme B2G sans ces deux champs, or le portail qui le consomme est déjà V1 (DAT §8). INVOICE.validated_by_administration suit — V1 également, sans consommateur avant V2 (is_financeable(), ADR-088/089).
 - USER_PHONE (ADR-087) et FINANCIAL_PARTNER (ADR-089) portent le modèle de 24 à 26 entités détaillées. FINANCIAL_PARTNER reste distincte de PARTNER — une banque n'est jamais modélisée comme un partenaire institutionnel léger.
 - payment.method reste à 3 valeurs (cash/payment_link/bank_transfer) ; le rail spécifique vit dans provider_sub_method — jamais confondu avec payment_provider_attempts.provider (couche orchestrateur technique).
 - REFUND.method utilise déjà un enum provider-agnostique (payment_link_payout) — la bascule Djomy primary/Moneroo fallback (26/07) ne change aucun schéma, seulement la prose narrative des autres documents.
 
 ---
 
-*facture.gn — ERD — Document confidentiel — 26 juillet 2026*
+*facture.gn — ERD — Document confidentiel — 17 août 2026*
