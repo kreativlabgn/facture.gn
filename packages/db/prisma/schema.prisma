@@ -172,6 +172,10 @@ enum InvoiceEventType {
   regime_change
   delegated_key_tier_changed
   validation_revoked
+  // J1, ADR-080/081/098 — Niveau 2 de la chaîne de validation B2G, avancé en V1.
+  // Ne constate JAMAIS le paiement effectif ni l'ordonnancement Trésor — voir
+  // PublicBuyerPortalService.validateLiquidation().
+  liquidation_validated
 }
 
 model User {
@@ -203,6 +207,7 @@ model User {
   assistedSessions         AssistedSession[]
   practiceMemberships      PracticeMember[]
   mandatesGranted          Mandate[]
+  publicBuyerAccountMemberships PublicBuyerAccountMember[]
 
   @@map("user")
 }
@@ -427,14 +432,65 @@ model Customer {
   // est null (aucune tentative d'envoi).
   notificationChannel NotificationChannel @default(sms) @map("notification_channel")
 
+  // F16, ADR-105 — sans ce marquage, le portail Niveau 2 (J1/J2) n'a
+  // structurellement aucune facture à présenter à un DAF. Réservé admin/owner
+  // (CustomersService.flagPublicEntity()), même trio restreint que merge() (E4).
+  isPublicEntity      Boolean @default(false) @map("is_public_entity")
+  publicBuyerAccountId String? @map("public_buyer_account_id")
+
   createdAt DateTime @default(now()) @map("created_at")
 
-  organization  Organization @relation(fields: [organizationId], references: [id])
+  organization      Organization        @relation(fields: [organizationId], references: [id])
+  publicBuyerAccount PublicBuyerAccount? @relation(fields: [publicBuyerAccountId], references: [id])
   invoices      Invoice[]
   duplicateOf   Customer?    @relation("CustomerDuplicate", fields: [possibleDuplicateOf], references: [id])
   possibleDupes Customer[]   @relation("CustomerDuplicate")
 
   @@map("customer")
+}
+
+// ===== Portail acheteur public — B2G Niveau 2 (J1/J2, ADR-080/081/098) =====
+// Entité de premier niveau PARALLÈLE à Organization — même famille architecturale
+// que ProfessionalPractice (ADR-068) : un DAF n'est jamais membre d'une
+// organisation PME, jamais un OrganizationRole. Self-service (même précédent que
+// ProfessionalPractice.create()) : aucune vérification institutionnelle en V1.
+model PublicBuyerAccount {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  members   PublicBuyerAccountMember[]
+  customers Customer[]
+
+  @@map("public_buyer_account")
+}
+
+// Une seule valeur aujourd'hui — enum plutôt que String brute, même précédent
+// que DepositType (cohérence avec les autres champs discriminants du schema, et
+// une future distinction de rôle DAF ne pourra jamais introduire une valeur mal
+// orthographiée qui échapperait silencieusement à l'autorisation inline de
+// PublicBuyerPortalService).
+enum PublicBuyerAccountMemberRole {
+  public_buyer_validator
+}
+
+// userId @unique (pas seulement [publicBuyerAccountId, userId]) — encode au niveau
+// schéma l'invariant "un DAF n'appartient qu'à un seul public_buyer_account en V1"
+// dont dépend PublicBuyerPortalService.listReceivedInvoices() (résolution du
+// membership par userId seul). PublicBuyerAccountsService.create() vérifie déjà
+// cet invariant en amont (message d'erreur clair) — cette contrainte est le filet
+// qui le rend réellement infranchissable, y compris sous concurrence.
+model PublicBuyerAccountMember {
+  id                   String                        @id @default(uuid())
+  publicBuyerAccountId String                        @map("public_buyer_account_id")
+  userId               String                        @unique @map("user_id")
+  role                 PublicBuyerAccountMemberRole
+  joinedAt             DateTime                      @default(now()) @map("joined_at")
+
+  publicBuyerAccount PublicBuyerAccount @relation(fields: [publicBuyerAccountId], references: [id])
+  user               User               @relation(fields: [userId], references: [id])
+
+  @@map("public_buyer_account_member")
 }
 
 model Invoice {

@@ -9,6 +9,7 @@ import {
 } from "../common/dto/organization-scoped-list-query.dto";
 import { createCustomerSchema, type CreateCustomerDto } from "./dto/create-customer.dto";
 import { mergeCustomerSchema, type MergeCustomerDto } from "./dto/merge-customer.dto";
+import { flagPublicEntitySchema, type FlagPublicEntityDto } from "./dto/flag-public-entity.dto";
 import { CustomersService } from "./customers.service";
 
 @ApiTags("customers")
@@ -53,5 +54,17 @@ export class CustomersController {
   @OrganizationIdSource("customer")
   merge(@Param("id") id: string, @Body(new ZodValidationPipe(mergeCustomerSchema)) dto: MergeCustomerDto) {
     return this.customersService.merge(id, dto.duplicateCustomerId);
+  }
+
+  // F16, ADR-105 — même trio restreint que merge() (E4) : réservé admin/owner,
+  // même lot de permissions qu'ADR-083.
+  @Post(":id/flag-public-entity")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("customer")
+  flagPublicEntity(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(flagPublicEntitySchema)) dto: FlagPublicEntityDto,
+  ) {
+    return this.customersService.flagPublicEntity(id, dto.publicBuyerAccountId);
   }
 }

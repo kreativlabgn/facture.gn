@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
@@ -50,6 +50,24 @@ export class CustomersService {
     });
 
     return { ...customer, runningBalance: aggregate._sum.amountDue ?? 0n };
+  }
+
+  // F16, ADR-105 — "sans elle, le portail Niveau 2 déjà V1 n'aurait
+  // structurellement aucune facture à présenter à un DAF". publicBuyerAccountId
+  // vérifié explicitement (jamais une simple FK muette) : une PME ne doit pas
+  // pouvoir rattacher un client à un compte acheteur public inexistant.
+  async flagPublicEntity(customerId: string, publicBuyerAccountId: string) {
+    const publicBuyerAccount = await this.prisma.publicBuyerAccount.findUnique({
+      where: { id: publicBuyerAccountId },
+    });
+    if (!publicBuyerAccount) {
+      throw new NotFoundException(`Compte acheteur public ${publicBuyerAccountId} introuvable`);
+    }
+
+    return this.prisma.customer.update({
+      where: { id: customerId },
+      data: { isPublicEntity: true, publicBuyerAccountId },
+    });
   }
 
   // E4, ADR-038 — "jamais de fusion automatique, résolution manuelle" : cette
