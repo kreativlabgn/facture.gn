@@ -416,6 +416,7 @@ button{font-family:inherit;}
 .pill{display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:100px; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; margin-top:4px;}
 .pill.paid{background:color-mix(in srgb, var(--good) 18%, transparent); color:var(--good);}
 .pill.pending{background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent);}
+.pill.partial{background:var(--surface-3); color:var(--text);}
 
 /* ===== Écran Détail ===== */
 .back-row{display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer; color:var(--text-dim); font-size:13px; font-weight:600;}
@@ -1840,9 +1841,10 @@ button{font-family:inherit;}
     <div class="detail-row" style="padding:7px 0;"><span class="k">Organisation</span><span>Boutique Aissatou</span></div>
     <div class="detail-row" style="padding:7px 0;"><span class="k">Période</span><span>1 juil. – 31 juil. 2026</span></div>
     <div class="detail-row" style="padding:7px 0; border-bottom:none;"><span class="k">Écritures</span><span class="mono">412 lignes</span></div>
+    <div id="dgi-fec-confirm" hidden style="font-size:11px; color:var(--good); margin-top:10px;"></div>
     <div style="display:flex; gap:8px; margin-top:12px;">
       <button class="btn-ghost" style="flex:1;" onclick="document.getElementById('dgi-fec-modal').style.display='none';">Annuler</button>
-      <button class="go" style="flex:1;" onclick="document.getElementById('dgi-fec-modal').style.display='none';">Télécharger le FEC</button>
+      <button class="go" style="flex:1;" id="dgi-fec-download-btn" onclick="dgi_downloadFec()">Télécharger le FEC</button>
     </div>
   </div>
 
@@ -1912,10 +1914,10 @@ button{font-family:inherit;}
     <section class="view" id="ops-v-tickets">
       <div class="page-head"><p class="eyebrow">Support · SLA par sévérité (ADR-085)</p><h1 style="font-size:19px;">Tickets</h1></div>
       <div class="filter-row" id="ops-ticket-filter-row">
-        <button class="filter-chip active" data-sev="all">Tous · 3</button>
-        <button class="filter-chip" data-sev="critique">Critique · 1</button>
-        <button class="filter-chip" data-sev="elevee">Élevée · 1</button>
-        <button class="filter-chip" data-sev="moyenne">Moyenne · 1</button>
+        <button class="filter-chip active" data-sev="all">Tous · <span id="ops-count-all"></span></button>
+        <button class="filter-chip" data-sev="critique">Critique · <span id="ops-count-critique"></span></button>
+        <button class="filter-chip" data-sev="elevee">Élevée · <span id="ops-count-elevee"></span></button>
+        <button class="filter-chip" data-sev="moyenne">Moyenne · <span id="ops-count-moyenne"></span></button>
       </div>
       <div class="card" id="ops-tickets-list"></div>
     </section>
@@ -3372,7 +3374,7 @@ function renderOrgFilter(){
   document.getElementById('cli-org-filter-row').innerHTML = chips.map(c =>
     `<button class="filter-chip ${c.key === currentOrgFilter ? 'active' : ''}" data-org="${c.key}">${c.label}</button>`
   ).join('');
-  document.querySelectorAll('#org-filter-row .filter-chip').forEach(chip => {
+  document.querySelectorAll('#cli-org-filter-row .filter-chip').forEach(chip => {
     chip.addEventListener('click', () => { currentOrgFilter = chip.dataset.org; renderOrgFilter(); renderInvoices(); });
   });
 }
@@ -3520,10 +3522,22 @@ function showDgiDetail(id){
 
 function openFecPreview(){
   document.getElementById('dgi-fec-modal').style.display = 'block';
+  document.getElementById('dgi-fec-confirm').hidden = true;
+  document.getElementById('dgi-fec-download-btn').textContent = 'Télécharger le FEC';
+}
+
+function downloadFec(){
+  const confirm = document.getElementById('dgi-fec-confirm');
+  confirm.hidden = false;
+  confirm.textContent = 'Export généré — FEC_BoutiqueAissatou_juillet2026.txt (SYSCOHADA)';
+  const btn = document.getElementById('dgi-fec-download-btn');
+  btn.textContent = 'Téléchargé ✓';
+  setTimeout(() => { document.getElementById('dgi-fec-modal').style.display = 'none'; }, 1400);
 }
 
 renderDgiList();
 
+window.dgi_downloadFec = downloadFec;
 window.dgi_openFecPreview = openFecPreview;
 window.dgi_showDgiDetail = showDgiDetail;
 window.dgi_showDgiScreen = showDgiScreen;
@@ -3609,6 +3623,7 @@ const TICKETS = [
     slaMinutes: 1080, slaTotal:'SLA 24h' },
 ];
 let ticketInterval = null;
+let currentTicketId = null;
 
 function slaClass(min){ return min < 0 ? 'late' : (min < 60 ? 'warn' : 'ok'); }
 function slaText(min){
@@ -3619,7 +3634,12 @@ function slaText(min){
 
 let ticketSevFilter = 'all';
 function renderTickets(){
-  const list = ticketSevFilter === 'all' ? TICKETS : TICKETS.filter(t => t.sev === ticketSevFilter);
+  const open = TICKETS.filter(t => !t.resolved);
+  document.getElementById('ops-count-all').textContent = open.length;
+  document.getElementById('ops-count-critique').textContent = open.filter(t => t.sev === 'critique').length;
+  document.getElementById('ops-count-elevee').textContent = open.filter(t => t.sev === 'elevee').length;
+  document.getElementById('ops-count-moyenne').textContent = open.filter(t => t.sev === 'moyenne').length;
+  const list = ticketSevFilter === 'all' ? open : open.filter(t => t.sev === ticketSevFilter);
   document.getElementById('ops-tickets-list').innerHTML = list.length ? list.map(t => `
     <div class="ticket-row" onclick="ops_showTicketDetail('${t.id}')" style="cursor:pointer;">
       <div class="sev ${t.sev}"></div>
@@ -3641,6 +3661,7 @@ document.querySelectorAll('.switch').forEach(sw => {
 });
 
 function showTicketDetail(id){
+  currentTicketId = id;
   const t = TICKETS.find(x => x.id === id);
   document.getElementById('ops-td-subj').textContent = t.subj;
   document.getElementById('ops-td-meta').textContent = t.org + ' · ' + t.opened;
@@ -3667,15 +3688,18 @@ function showTicketDetail(id){
 
 function showTicketList(){
   clearInterval(ticketInterval);
-  document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === 'v-tickets'));
+  document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === 'ops-v-tickets'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById('ops-v-tickets').classList.add('active');
 }
 
 function resolveTicket(){
+  const t = TICKETS.find(x => x.id === currentTicketId);
+  if (t) t.resolved = true;
   clearInterval(ticketInterval);
   document.getElementById('ops-td-resolve').textContent = 'Résolu ✓';
   document.getElementById('ops-td-resolve').hidden = true;
+  renderTickets();
 }
 
 renderTickets();
