@@ -673,6 +673,43 @@ paths:
         '403':
           description: Permission customer:merge_duplicate manquante
 
+  /customers/{customerId}/flag-public-entity:
+    post:
+      tags: [Customers]
+      summary: Marquer un client comme entité publique et le rattacher à un acheteur public
+      description: >
+        F16, ADR-105 — réservé admin/owner, même trio restreint que
+        `/customers/{customerId}/merge`. Pose `is_public_entity = true` et
+        `public_buyer_account_id` sur le client. Sans cette action, le portail
+        Niveau 2 (J1/J2, `/public-buyer/*`) n'a structurellement aucune facture
+        à présenter au DAF de l'administration choisie.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [public_buyer_account_id]
+              properties:
+                public_buyer_account_id:
+                  type: string
+                  format: uuid
+                  description: Choisi librement parmi GET /public-buyer-accounts
+      responses:
+        '200':
+          description: Client marqué entité publique et rattaché
+        '404':
+          description: public_buyer_account_id inconnu
+        '403':
+          description: Réservé admin/owner de l'organisation
+
   # ============================================================
   # STOCK — inventory_manager (ADR-097)
   # ============================================================
@@ -904,6 +941,39 @@ paths:
   # ============================================================
   # PUBLIC BUYER PORTAL (B2G, V1-V2)
   # ============================================================
+  /public-buyer-accounts:
+    post:
+      tags: [PublicBuyer]
+      summary: Créer un compte acheteur public (self-service)
+      description: >
+        Onboarding self-service, même précédent que la création d'une
+        ProfessionalPractice cabinet/CGA (ADR-068) — aucune vérification
+        institutionnelle en V1. L'utilisateur créateur devient automatiquement
+        `public_buyer_validator` du compte créé.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Compte créé, créateur ajouté comme public_buyer_validator
+    get:
+      tags: [PublicBuyer]
+      summary: Lister les comptes acheteurs publics existants
+      description: >
+        Sélecteur pour l'action PME `/customers/{customerId}/flag-public-entity`
+        (F16) — choix libre parmi la liste, même pattern que `GET /practices`
+        pour les CGA.
+      responses:
+        '200':
+          description: Liste des comptes acheteurs publics
+
   /public-buyer/invoices:
     get:
       tags: [PublicBuyer]
@@ -914,13 +984,19 @@ paths:
         l'intégration au scoring `is_financeable()`.
       responses:
         '200':
-          description: Liste des factures reçues
+          description: Factures reçues + encours total (J2)
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Invoice'
+                type: object
+                properties:
+                  invoices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invoice'
+                  outstanding_total:
+                    type: integer
+                    description: Centimes GNF — SUM(amount_due) sur le même périmètre
 
   /public-buyer/invoices/{invoiceId}/validate-liquidation:
     post:
