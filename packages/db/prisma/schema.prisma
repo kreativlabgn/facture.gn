@@ -474,17 +474,22 @@ enum PublicBuyerAccountMemberRole {
   public_buyer_validator
 }
 
+// userId @unique (pas seulement [publicBuyerAccountId, userId]) — encode au niveau
+// schéma l'invariant "un DAF n'appartient qu'à un seul public_buyer_account en V1"
+// dont dépend PublicBuyerPortalService.listReceivedInvoices() (résolution du
+// membership par userId seul). PublicBuyerAccountsService.create() vérifie déjà
+// cet invariant en amont (message d'erreur clair) — cette contrainte est le filet
+// qui le rend réellement infranchissable, y compris sous concurrence.
 model PublicBuyerAccountMember {
   id                   String                        @id @default(uuid())
   publicBuyerAccountId String                        @map("public_buyer_account_id")
-  userId               String                        @map("user_id")
+  userId               String                        @unique @map("user_id")
   role                 PublicBuyerAccountMemberRole
   joinedAt             DateTime                      @default(now()) @map("joined_at")
 
   publicBuyerAccount PublicBuyerAccount @relation(fields: [publicBuyerAccountId], references: [id])
   user               User               @relation(fields: [userId], references: [id])
 
-  @@unique([publicBuyerAccountId, userId])
   @@map("public_buyer_account_member")
 }
 

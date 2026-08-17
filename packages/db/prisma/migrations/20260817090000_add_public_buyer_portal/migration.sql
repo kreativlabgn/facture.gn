@@ -29,7 +29,9 @@ CREATE TABLE "public_buyer_account_member" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "public_buyer_account_member_public_buyer_account_id_user_key" ON "public_buyer_account_member"("public_buyer_account_id", "user_id");
+-- Un seul public_buyer_account par utilisateur en V1 (invariant applicatif,
+-- rendu infranchissable ici y compris sous concurrence).
+CREATE UNIQUE INDEX "public_buyer_account_member_user_id_key" ON "public_buyer_account_member"("user_id");
 
 -- AddForeignKey
 ALTER TABLE "customer" ADD CONSTRAINT "customer_public_buyer_account_id_fkey" FOREIGN KEY ("public_buyer_account_id") REFERENCES "public_buyer_account"("id") ON DELETE SET NULL ON UPDATE CASCADE;
