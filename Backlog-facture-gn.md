@@ -7,7 +7,7 @@
 | Champ | Valeur |
 |---|---|
 | Date | 17 août 2026 |
-| Statut | Consolidé — 76 stories (57 du 25/07 + 4 partenaires/B2G du 26/07 + 4 grille des offres/analytics + 4 multi-numéros/Commande Publique/financement du 26/07 + 1 score de confiance du 08/08 + 2 du 14/08 [E9 grossiste, F13 client_portal, non comptées dans le total précédent] + 4 rôles V1 sans story du 17/08, ADR-097/104) |
+| Statut | Consolidé — 77 stories (57 du 25/07 + 4 partenaires/B2G du 26/07 + 4 grille des offres/analytics + 4 multi-numéros/Commande Publique/financement du 26/07 + 1 score de confiance du 08/08 + 2 du 14/08 [E9 grossiste, F13 client_portal, non comptées dans le total précédent] + 4 rôles V1 sans story du 17/08 [ADR-097/104] + 1 customer:flag_public_entity du 17/08 [ADR-105]) |
 | Audience | Squads de développement, QA, Product Owner |
 | Priorité | MoSCoW : MUST = bloquant MVP, SHOULD = V1, COULD = V2 |
 
@@ -24,7 +24,7 @@
 | C | Money Layer — encaissement, paiement, commission | C1–C20 |
 | D | Canal USSD *620# | D1–D4 |
 | E | Commerce ordinaire | E1–E10 |
-| F | RBAC, accès délégué et écosystème cabinet/CGA | F1–F15 |
+| F | RBAC, accès délégué et écosystème cabinet/CGA | F1–F16 |
 | G | Conformité et sécurité comportementale | G1–G4 |
 | H | Modèle économique — tiers, partenaires, facturation | H1–H4 |
 | I | Facturation récurrente, rappels, multi-devise, formes juridiques | I1–I4 |
@@ -370,6 +370,16 @@ En tant que developer_api, je veux générer, révoquer et faire tourner mes cl�
 - Le webhook sortant marchand (notifier un système tiers qu'une facture est payée) reste hors périmètre — gap distinct, non résolu par cette story (déjà noté ADR-097)
 
 Réf : ADR-097
+
+### Nouvelle story — customer:flag_public_entity activée en V1 (ADR-105) (17/08)
+
+**F16 — Marquer un client comme entité publique `[SHOULD]`**
+En tant qu'admin ou owner, je veux marquer un client comme entité publique (administration, ministère), afin que mes factures qui lui sont adressées entrent dans le circuit de validation DAF au lieu de rester des factures commerciales ordinaires.
+- Permission `customer:flag_public_entity` (ADR-083) — restée déclarée mais inerte jusqu'à ADR-098, faute de `public_buyer_account` (V2 à l'origine) ; pleinement active en V1 depuis ADR-105
+- `CUSTOMER.is_public_entity = true` — sans ce marquage, le portail Niveau 2 déjà V1 (J1/J2) n'a structurellement aucune facture à présenter à un DAF
+- Réservée admin/owner, comme `customer:merge_duplicate` et `customer:manage_credit_limit` (même lot, ADR-083)
+
+Réf : ADR-083, ADR-098, ADR-105
 
 ---
 

@@ -592,5 +592,17 @@ Conséquences : `dgi_readonly` → `tax_controller_readonly` propagé dans les d
 
 ---
 
+## Partie 20 — customer:flag_public_entity activée en V1 (ADR-105)
+
+Décision actée le 17 août 2026, conséquence directe d'ADR-098 restée non explicitée à l'époque : ADR-083 (Partie 7) avait scopé `customer:flag_public_entity` en V1 mais l'avait déclarée **inerte jusqu'en V2**, faute de `public_buyer_account` — cette dépendance bloquante n'existait qu'en V2 au moment de la décision. ADR-098 a depuis avancé `public_buyer_account`, le rôle `public_buyer_validator` et le portail Niveau 2 (lecture + validation DAF) en V1 (Partie 13). La dépendance qui rendait la permission inerte n'existe donc plus — sans que personne ne l'ait explicitement remarqué jusqu'à la relecture de l'ERD qui a suivi (correction du 17/08).
+
+**ADR-105 — customer:flag_public_entity pleinement active en V1, plus de statut inerte**
+
+Décision : La permission est activée sans restriction dès V1. Sans elle, le portail Niveau 2 déjà V1 (ADR-098, DAT §8) n'aurait structurellement aucune facture à présenter à un DAF : une organisation doit pouvoir marquer un de ses clients comme entité publique (`CUSTOMER.is_public_entity = true`) pour que ses factures entrent dans le circuit de validation. Un portail de réception/validation V1 sans porte d'entrée côté PME émettrice n'aurait aucun sens fonctionnel. Aucune permission nouvelle, aucun changement de palier — uniquement la levée d'une contrainte de dépendance devenue caduque. Réservée admin/owner, comme les deux autres permissions du même lot (`customer:merge_duplicate`, `customer:manage_credit_limit`, ADR-083).
+
+Conséquences : Aucun changement au catalogue de permissions (reste 68 en V1, DAT §3.4 — qui ne portait déjà pas la mention d'inertie, donc rien à corriger de ce côté). ADR-083 n'est pas réécrit — renvoi depuis cette décision, même principe qu'ADR-098/104. Le Backlog reçoit une nouvelle story (F16) : aucune n'existait pour l'action PME de marquer un client comme entité publique — seul le côté DAF (réception + validation de la liquidation, J1/J2) était couvert.
+
+---
+
 *facture.gn — Registre ADR — Document confidentiel — 17 août 2026*
 
