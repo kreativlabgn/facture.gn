@@ -6,8 +6,8 @@
 
 | Champ | Valeur |
 |---|---|
-| Date | 8 août 2026 |
-| Statut | Consolidé — 70 stories (57 du 25/07 + 4 partenaires/B2G du 26/07 + 4 grille des offres/analytics + 4 multi-numéros/Commande Publique/financement du 26/07 + 1 score de confiance du 08/08) |
+| Date | 17 août 2026 |
+| Statut | Consolidé — 76 stories (57 du 25/07 + 4 partenaires/B2G du 26/07 + 4 grille des offres/analytics + 4 multi-numéros/Commande Publique/financement du 26/07 + 1 score de confiance du 08/08 + 2 du 14/08 [E9 grossiste, F13 client_portal, non comptées dans le total précédent] + 4 rôles V1 sans story du 17/08, ADR-097/104) |
 | Audience | Squads de développement, QA, Product Owner |
 | Priorité | MoSCoW : MUST = bloquant MVP, SHOULD = V1, COULD = V2 |
 
@@ -23,9 +23,9 @@
 | B | Inscription, vérification DGI et onboarding | B1–B6 |
 | C | Money Layer — encaissement, paiement, commission | C1–C20 |
 | D | Canal USSD *620# | D1–D4 |
-| E | Commerce ordinaire | E1–E7 |
-| F | RBAC, accès délégué et écosystème cabinet/CGA | F1–F12 |
-| G | Conformité et sécurité comportementale | G1–G3 |
+| E | Commerce ordinaire | E1–E10 |
+| F | RBAC, accès délégué et écosystème cabinet/CGA | F1–F15 |
+| G | Conformité et sécurité comportementale | G1–G4 |
 | H | Modèle économique — tiers, partenaires, facturation | H1–H4 |
 | I | Facturation récurrente, rappels, multi-devise, formes juridiques | I1–I4 |
 | J | V1 — lancement national, dont partenaires institutionnels | Prose descriptive (pas de stories numérotées) |
@@ -277,6 +277,16 @@ En tant que grossiste imposant facture.gn à mon réseau de boutiques, je veux i
 
 Réf : ADR-100
 
+### Nouvelle story — inventory_manager sans story malgré sa permission (ADR-097) (17/08)
+
+**E10 — Gérer les niveaux de stock par succursale `[SHOULD]`**
+En tant qu'inventory_manager (ou owner/admin), je veux enregistrer les réceptions et ajustements de stock par succursale, afin de garder mes niveaux de stock à jour sans dépendre d'un tableur externe.
+- Permission `inventory:manage_stock` (ADR-097) — mouvement (réception, ajustement d'inventaire, perte/casse) rattaché à `PRODUCT_STOCK.stock_qty` (déjà en base, ERD), par succursale (branch, ADR-037)
+- inventory_manager ne voit jamais `cost_price` ni la marge (territoire business_manager, ADR-070/084), sauf cumul explicite de rôle
+- Un stock insuffisant n'a jamais bloqué l'émission d'une facture — même philosophie que `cost_price` (ERD) : jamais un gate, seulement une alerte
+
+Réf : ADR-037, ADR-070, ADR-084, ADR-097
+
 ---
 
 ## F. RBAC, accès délégué et écosystème cabinet/CGA
@@ -343,6 +353,24 @@ En tant que client d'une ou plusieurs organisations facture.gn, je veux vérifie
 
 Réf : ADR-096
 
+### Nouvelles stories — Rôles V1 sans story malgré leur permission (ADR-097/104) (17/08)
+
+**F14 — Inviter un contrôleur fiscal en lecture seule `[SHOULD]`**
+En tant qu'owner ou admin, je veux inviter un contrôleur fiscal local à consulter en lecture seule mes propres factures et exporter mon FEC, afin de faciliter un contrôle sans partager mon PIN ni lui donner plus d'accès que nécessaire.
+- Rôle `tax_controller_readonly` (renommé depuis dgi_readonly, ADR-104) — composé uniquement de permissions déjà existantes en lecture seule (`invoice:view`, `export:fec`), aucune capacité d'écriture
+- Distinct de la persona institutionnelle DGI nationale (lecture agrégée, jamais un compte, ADR-079/104) — ce mécanisme ne crée jamais d'accès à la DGI elle-même, seulement à un individu invité par l'organisation
+- Disponible à tous les paliers dès Freemium (Grille-Offres), cohérent avec `viewer`
+
+Réf : ADR-097, ADR-104
+
+**F15 — Gérer mes clés API en self-service `[SHOULD]`**
+En tant que developer_api, je veux générer, révoquer et faire tourner mes clés API, afin d'intégrer facture.gn à mes propres outils sans dépendre du support.
+- Permission `api:manage_keys` (ADR-097) — génération, révocation, rotation ; secret affiché une seule fois à la création, jamais ré-affichable ensuite
+- Consultation des logs d'appels (méthode, endpoint, statut, horodatage) en lecture seule
+- Le webhook sortant marchand (notifier un système tiers qu'une facture est payée) reste hors périmètre — gap distinct, non résolu par cette story (déjà noté ADR-097)
+
+Réf : ADR-097
+
 ---
 
 ## G. Conformité et sécurité comportementale
@@ -355,6 +383,16 @@ Réf : ADR-032
 
 **G2 — Geler temporairement les plafonds après un reset PIN `[MUST]`**
 **G3 — Détecter un pattern de contournement commission `[SHOULD]`** — Réf : ADR-061
+
+### Nouvelle story — auditor sans story malgré sa permission (ADR-097) (17/08)
+
+**G4 — Consulter le journal d'audit de mon organisation `[SHOULD]`**
+En tant qu'auditor (ou owner/admin), je veux consulter en lecture seule l'historique des événements de facturation et des changements de permissions, afin de vérifier la conformité sans pouvoir rien modifier.
+- Permission `audit:view_log` (ADR-097) — lecture de `invoice_event` (append-only, ADR-015) et de l'historique des changements de rôle/permission
+- Aucune action de modification pour ce rôle, aucune exception — lecture seule stricte
+- Filtrable par catégorie (facture, paiement, permission) a minima
+
+Réf : ADR-015, ADR-097
 
 ---
 
@@ -443,4 +481,4 @@ Scoring segmenté regime_fiscal × concentration_clientèle. is_financeable() op
 
 ---
 
-*facture.gn — Backlog — Document confidentiel — 8 août 2026*
+*facture.gn — Backlog — Document confidentiel — 17 août 2026*
