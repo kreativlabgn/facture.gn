@@ -99,7 +99,7 @@ Source unique de vérité. Tous les champs clés et invariants sont définis ici
 | organization_delegated_key | organization_id, channel, public_key, velocity_tier, plafonds par fenêtre | Jamais de clé partagée ; réémis à chaque changement de palier |
 | professional_practice | type (cabinet_comptable/gestionnaire/fiduciaire/cga — ADR-078), registration_number, tier | Entité de premier niveau, parallèle à organization (ADR-068) |
 | partner / partner_link | type (apip/fodip/partner_3ae), convention_ref, link_type | Couvre APIP/FODIP/3AE — le CGA utilise professional_practice, pas cette table (ADR-078) |
-| financial_partner | type (banque/mfi), api_key, status | Nouveau (ADR-089, V2) — distincte de partner : une banque a des besoins différents (API dédiée, KYC) |
+| financial_partner | type (banque/mfi/fournisseur_crediteur — ADR-100), api_key, status | Nouveau (ADR-089, V2) — distincte de partner : une banque a des besoins différents (API dédiée, KYC) |
 | mandate | practice_id, organization_id, status, granted_role, expires_at | Consentement explicite obligatoire (ADR-069) |
 | revenue_share | practice_id, organization_id, share_amount_gnf, share_rate_bps | Calcul quotidien, crédit mensuel (ADR-071) |
 | invoice | certification_id, document_type, status (7 valeurs), validated_by_administration (V2), reference_marche (nullable), financed_by_partner_id (V2) | Deux identifiants distincts ; immutable après émission |
@@ -113,7 +113,7 @@ Source unique de vérité. Tous les champs clés et invariants sont définis ici
 
 ### 4.1 Événements invoice_event — catalogue complet
 
-22 types confirmés au périmètre MVP/V1 (la mention « 25 types » d'une version antérieure du tableau d'entités était une coquille, corrigée). Les 3 types marqués V2 ci-dessous s'ajoutent pour le B2G (ADR-081, ADR-089), portant le total à 25.
+23 types confirmés au périmètre MVP/V1 (la mention « 25 types » d'une version antérieure du tableau d'entités était une coquille, corrigée), dont `liquidation_validated` — avancé de V2 à V1 par ADR-098, tranchant le conflit ADR-080/081. Les 2 types marqués V2 restants ci-dessous s'ajoutent pour le B2G (ADR-081, ADR-089), portant le total à 25.
 
 | Type | Déclencheur |
 |---|---|
@@ -139,7 +139,7 @@ Source unique de vérité. Tous les champs clés et invariants sont définis ici
 | regime_change | Changement de régime fiscal |
 | delegated_key_tier_changed | Changement de palier de vélocité |
 | validation_revoked | Révocation sous-clé cryptographique terrain (V2, Trust Layer — sans lien avec le B2G) |
-| liquidation_validated | V2 — DAF valide la liquidation d'une facture B2G (ADR-080/081) |
+| liquidation_validated | DAF valide la liquidation d'une facture B2G — avancé en V1 par ADR-098 (ADR-080/081) |
 | service_fait_confirmed | V2, optionnel — confirmation Niveau 1 du service fait (ADR-080) |
 | financing_disbursed | V2 — avance débloquée par un FINANCIAL_PARTNER, Rail A (ADR-088/089) |
 
@@ -248,7 +248,7 @@ APIP (Agence de Promotion des Investissements Privés) : webhook d'acquisition �
 
 ## 8. B2G — validation administrative, accès, et financement
 
-Chaîne à trois niveaux (ADR-080). Niveau 1 (optionnel) : service technique bénéficiaire, lien à usage unique sans compte, confirme le service fait — non requis pour is_financeable(). Niveau 2 (obligatoire, fait générateur, entre en V1) : DAF / chef de service dépense, authentifié via public_buyer_account, rôle public_buyer_validator (V2 pour le rôle RBAC lui-même, mais le portail de lecture+validation entre en V1). Sa validation de liquidation déclenche invoice.validated_by_administration = true, tracée par l'événement liquidation_validated. Niveau 3 (V2+, post-agrément PDP) : intégration SIGFIP, non construite.
+Chaîne à trois niveaux (ADR-080). Niveau 1 (optionnel) : service technique bénéficiaire, lien à usage unique sans compte, confirme le service fait — non requis pour is_financeable(). Niveau 2 (obligatoire, fait générateur, entre en V1) : DAF / chef de service dépense, authentifié via public_buyer_account, rôle public_buyer_validator (avancé en V1 avec le portail de lecture+validation, ADR-098). Sa validation de liquidation déclenche invoice.validated_by_administration = true, tracée par l'événement liquidation_validated. Niveau 3 (V2+, post-agrément PDP) : intégration SIGFIP, non construite.
 
 ### 8.1 Accès PME — Option 6 USSD et parcours PWA (ADR-086)
 
