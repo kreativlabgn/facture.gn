@@ -327,6 +327,7 @@ button{font-family:inherit;}
 .pill{display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:100px; font-family:'JetBrains Mono'; font-size:10px; font-weight:600; margin-top:4px;}
 .pill.pending{background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent);}
 .pill.paid{background:color-mix(in srgb, var(--good) 18%, transparent); color:var(--good);}
+.pill.void{background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--bad);}
 
 /* ===== Détail ===== */
 .back-row{display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer; color:var(--text-dim); font-size:13px; font-weight:600;}
@@ -1484,6 +1485,7 @@ button{font-family:inherit;}
   <button data-go="daf-s-liste" class="active">1 · Factures reçues</button>
   <button onclick="daf_showDafDetail('d1')">2 · Détail — non validée</button>
   <button onclick="daf_showDafDetail('d3')">3 · Détail — validée</button>
+  <button onclick="daf_showDafDetail('d4')">4 · Détail — objection</button>
 </div>
 
 <div class="page">
@@ -1501,14 +1503,14 @@ button{font-family:inherit;}
     </div>
 
     <div class="stats-strip" style="margin:14px 0 16px;">
-      <div class="stat-mini"><div class="lbl">Validées ce mois</div><div class="val mono">4</div></div>
+      <div class="stat-mini"><div class="lbl">Validées ce mois</div><div class="val mono" id="daf-stat-validated"></div></div>
       <div class="stat-mini"><div class="lbl">Délai moyen</div><div class="val mono">3,2 j</div></div>
     </div>
 
     <div class="filter-row" id="daf-filter-row">
-      <button class="filter-chip active" data-filter="all">Toutes · 3</button>
-      <button class="filter-chip" data-filter="pending">Non validées · 2</button>
-      <button class="filter-chip" data-filter="validated">Validées · 1</button>
+      <button class="filter-chip active" data-filter="all">Toutes · <span id="daf-count-all"></span></button>
+      <button class="filter-chip" data-filter="pending">Non validées · <span id="daf-count-pending"></span></button>
+      <button class="filter-chip" data-filter="validated">Validées · <span id="daf-count-validated"></span></button>
     </div>
 
     <div class="card" id="daf-daf-invoices-list"></div>
@@ -3145,26 +3147,35 @@ const DAF_INVOICES = [
     serviceFait:{by:'Direction régionale Faranah', date:'1 juillet 2026'},
     validated:true, validatedDate:'5 juillet 2026',
     rail:{type:'A', partner:'Ecobank', date:'6 juillet 2026'} },
+  { id:'d4', org:'Fournitures Baldé SARL', num:'FG-2026-000375', amount:5400000, date:'28 juin 2026',
+    marche:'MPA-2026-00381', objet:'Réfection de clôture — annexe régionale',
+    serviceFait:null, validated:false, disputed:true },
 ];
+let currentDafId = null;
 
 function renderDafList(){
   document.getElementById('daf-encours-total').textContent = (DAF_INVOICES.filter(i => !i.validated).reduce((s,i)=>s+i.amount,0)/1000000).toFixed(1).replace('.',',') + 'M';
   document.getElementById('daf-encours-sub').textContent = 'GNF · ' + DAF_INVOICES.filter(i => !i.validated).length + ' factures en attente de validation';
+  document.getElementById('daf-stat-validated').textContent = DAF_INVOICES.filter(i => i.validated).length;
+  document.getElementById('daf-count-all').textContent = DAF_INVOICES.length;
+  document.getElementById('daf-count-pending').textContent = DAF_INVOICES.filter(i => !i.validated).length;
+  document.getElementById('daf-count-validated').textContent = DAF_INVOICES.filter(i => i.validated).length;
   const list = dafFilter === 'all' ? DAF_INVOICES : DAF_INVOICES.filter(i => dafFilter === 'validated' ? i.validated : !i.validated);
   document.getElementById('daf-daf-invoices-list').innerHTML = list.length ? list.map(inv => `
     <div class="inv-row" onclick="daf_showDafDetail('${inv.id}')">
       <div class="inv-main"><span class="inv-name">${inv.org}</span><span class="inv-sub">${inv.num} · marché ${inv.marche}</span></div>
-      <div style="text-align:right;"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.validated ? 'paid' : 'pending'}" style="display:block; margin-top:4px;">${inv.validated ? 'Validée' : 'Non validée'}</span></div>
+      <div style="text-align:right;"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.validated ? 'paid' : (inv.disputed ? 'void' : 'pending')}" style="display:block; margin-top:4px;">${inv.validated ? 'Validée' : (inv.disputed ? 'Objection' : 'Non validée')}</span></div>
     </div>`).join('') : '<div style="padding:16px; font-size:12.5px; color:var(--text-dim); text-align:center;">Aucune facture dans cette catégorie.</div>';
 }
 
 function showDafDetail(id){
+  currentDafId = id;
   const inv = DAF_INVOICES.find(i => i.id === id);
   document.getElementById('daf-dd-org').textContent = inv.org;
   document.getElementById('daf-dd-amount').textContent = inv.amount.toLocaleString('fr-FR') + ' GNF';
   const pill = document.getElementById('daf-dd-status');
-  pill.className = 'pill ' + (inv.validated ? 'paid' : 'pending');
-  pill.textContent = inv.validated ? 'Validée' : 'Non validée';
+  pill.className = 'pill ' + (inv.validated ? 'paid' : (inv.disputed ? 'void' : 'pending'));
+  pill.textContent = inv.validated ? 'Validée' : (inv.disputed ? 'Objection' : 'Non validée');
   document.getElementById('daf-dd-num').textContent = inv.num;
   document.getElementById('daf-dd-date').textContent = inv.date;
   document.getElementById('daf-dd-marche').textContent = inv.marche;
@@ -3174,8 +3185,8 @@ function showDafDetail(id){
     ? `<span style="color:var(--good); font-weight:600;">Confirmé</span> par ${inv.serviceFait.by}, le ${inv.serviceFait.date}.`
     : `<span style="color:var(--text-dim);">Non confirmé — facultatif, non requis pour la validation de la liquidation (ADR-080).</span>`;
 
-  document.getElementById('daf-dd-pending-block').hidden = inv.validated;
-  document.getElementById('daf-dd-dispute-block').hidden = true;
+  document.getElementById('daf-dd-pending-block').hidden = inv.validated || inv.disputed;
+  document.getElementById('daf-dd-dispute-block').hidden = !inv.disputed;
   document.getElementById('daf-dd-validated-block').hidden = !inv.validated;
   if (inv.validated) {
     document.getElementById('daf-dd-validated-date').textContent = 'Liquidation validée le ' + inv.validatedDate;
@@ -3188,17 +3199,31 @@ function showDafDetail(id){
 }
 
 function validateLiquidation(){
+  const inv = DAF_INVOICES.find(i => i.id === currentDafId);
+  if (!inv) return;
+  inv.validated = true;
+  inv.disputed = false;
+  inv.validatedDate = "à l'instant";
+  inv.rail = null;
   document.getElementById('daf-dd-status').className = 'pill paid';
   document.getElementById('daf-dd-status').textContent = 'Validée';
   document.getElementById('daf-dd-pending-block').hidden = true;
+  document.getElementById('daf-dd-dispute-block').hidden = true;
   document.getElementById('daf-dd-validated-block').hidden = false;
   document.getElementById('daf-dd-validated-date').textContent = "Liquidation validée à l'instant";
   document.getElementById('daf-dd-rail').innerHTML = `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts.</span>`;
+  renderDafList();
 }
 
 function openDispute(){
+  const inv = DAF_INVOICES.find(i => i.id === currentDafId);
+  if (!inv) return;
+  inv.disputed = true;
+  document.getElementById('daf-dd-status').className = 'pill void';
+  document.getElementById('daf-dd-status').textContent = 'Objection';
   document.getElementById('daf-dd-pending-block').hidden = true;
   document.getElementById('daf-dd-dispute-block').hidden = false;
+  renderDafList();
 }
 
 renderDafList();
