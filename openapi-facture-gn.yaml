@@ -7,10 +7,10 @@ info:
     et signature Ed25519 (X-Facture-Signature) prouvant l'origine organisationnelle (ADR-011).
     Les webhooks partenaires (APIP, providers de paiement) suivent un schéma d'authentification
     distinct — voir la section Security Schemes.
-  version: "2.1"
+  version: "2.2"
   contact:
     name: facture.gn — Équipe technique
-  x-adr-references: ["ADR-001", "ADR-011", "ADR-020", "ADR-073", "ADR-082", "ADR-087", "ADR-088", "ADR-089", "ADR-090"]
+  x-adr-references: ["ADR-001", "ADR-011", "ADR-020", "ADR-073", "ADR-082", "ADR-087", "ADR-088", "ADR-089", "ADR-090", "ADR-096", "ADR-097", "ADR-098", "ADR-100", "ADR-104"]
 servers:
   - url: https://api.facture.gn/v1
     description: Production
@@ -40,6 +40,21 @@ tags:
     description: Financement B2G à deux rails, FINANCIAL_PARTNER, V2 (ADR-088, ADR-089)
   - name: UserAccess
     description: Multi-numéros par utilisateur, USER_PHONE, MVP (ADR-087)
+  - name: ClientPortal
+    description: >
+      Portail client — factures reçues tous émetteurs confondus, identité
+      auto-résolue par téléphone vérifié, jamais un accès délégué (ADR-096)
+  - name: Inventory
+    description: Niveaux de stock par succursale, rôle inventory_manager (ADR-097)
+  - name: Audit
+    description: Journal d'audit en lecture seule de l'organisation, rôle auditor (ADR-097)
+  - name: DeveloperKeys
+    description: Gestion self-service des clés API, rôle developer_api (ADR-097)
+  - name: TaxController
+    description: >
+      Invitation d'un contrôleur fiscal local en lecture seule,
+      tax_controller_readonly — distinct de la persona institutionnelle
+      DGI nationale (ADR-104)
   - name: Webhooks
     description: Réception des notifications providers de paiement (ADR-075)
 
@@ -119,6 +134,38 @@ paths:
       responses:
         '202':
           description: Vérification en cours
+
+  /organizations/{organizationId}/tax-controller-invites:
+    post:
+      tags: [TaxController]
+      summary: Inviter un contrôleur fiscal en lecture seule
+      description: >
+        Rôle `tax_controller_readonly` (renommé depuis dgi_readonly,
+        ADR-104) — composé uniquement de permissions déjà existantes en
+        lecture seule (`invoice:view`, `export:fec`), aucune capacité
+        d'écriture. Distinct de la persona institutionnelle DGI nationale
+        (lecture agrégée, jamais un compte, ADR-079/104) : ce mécanisme
+        ne crée jamais d'accès à la DGI elle-même, ni de partage de PIN —
+        un individu invité par l'organisation reçoit un accès scopé à ses
+        propres factures. Disponible à tous les paliers dès Freemium.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  example: "+224620000000"
+      responses:
+        '201':
+          description: Invitation envoyée
+        '403':
+          description: Réservé à owner/admin
 
   # ============================================================
   # INVOICES
@@ -247,8 +294,8 @@ paths:
       tags: [Invoices]
       summary: Historique des événements append-only de la facture
       description: >
-        Retourne le journal complet `invoice_event` (24 types au catalogue,
-        22 MVP/V1 + 2 V2 B2G — ADR-015, ADR-081). Jamais modifiable.
+        Retourne le journal complet `invoice_event` (25 types au catalogue,
+        23 MVP/V1 + 2 V2 B2G — ADR-015, ADR-098). Jamais modifiable.
       parameters:
         - $ref: '#/components/parameters/InvoiceId'
       responses:
@@ -260,6 +307,62 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/InvoiceEvent'
+
+  # ============================================================
+  # PORTAIL CLIENT — client_portal (ADR-096)
+  # ============================================================
+  /me/invoices:
+    get:
+      tags: [ClientPortal]
+      summary: Lister mes factures reçues, tous émetteurs confondus
+      description: >
+        Identité résolue via le numéro de téléphone vérifié de l'appelant
+        (USER_PHONE, ADR-087) — aucune invitation préalable requise côté
+        organisation émettrice, contrairement à l'accès délégué classique
+        (ADR-096). Distinct de `GET /invoices`, qui liste les factures
+        émises par l'organisation courante de l'appelant, pas celles
+        qu'il a reçues comme client.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organization_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filtre optionnel sur une organisation émettrice précise
+      responses:
+        '200':
+          description: >
+            Factures groupées par organisation émettrice — statut, montant,
+            lien de paiement si impayée, certification_id, running_balance
+            et credit_limit propres à l'appelant pour cette organisation.
+            Jamais les données d'un autre client.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClientPortalInvoice'
+
+  /me/invoices/{invoiceId}/pay:
+    post:
+      tags: [ClientPortal]
+      summary: Payer une facture reçue depuis le portail client
+      description: >
+        Génère ou réutilise le lien de paiement existant, orchestré comme
+        tout paiement standard (ADR-060, ADR-072) — aucun traitement
+        spécifique au portail client au-delà de l'identité résolue par
+        téléphone.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '200':
+          description: Lien de paiement retourné (nouveau ou existant)
+        '403':
+          description: La facture n'appartient pas à l'appelant (customer.phone ne correspond pas)
 
   /invoices/{invoiceId}/payment-link:
     post:
@@ -459,6 +562,47 @@ paths:
               schema:
                 $ref: '#/components/schemas/Customer'
 
+  /customers/import:
+    post:
+      tags: [Customers]
+      summary: Importer des clients en masse (CSV)
+      description: >
+        Permet à un grossiste imposant facture.gn à son réseau de
+        boutiques clientes d'onboarder plusieurs centaines de fiches
+        client d'un coup (ADR-100). Dédoublonnage par téléphone à
+        l'import, réutilisant la logique `possible_duplicate_of`.
+        Aucune permission nouvelle — même garde-fou que la création
+        unitaire de client. Ne crée jamais de compte facture.gn pour la
+        boutique importée, seulement une fiche CUSTOMER.
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Résumé de l'import
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: integer
+                  flagged_duplicates:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        row:
+                          type: integer
+                        message:
+                          type: string
+
   /customers/{customerId}/credit-limit:
     patch:
       tags: [Customers]
@@ -528,6 +672,56 @@ paths:
           description: Fusion effectuée
         '403':
           description: Permission customer:merge_duplicate manquante
+
+  # ============================================================
+  # STOCK — inventory_manager (ADR-097)
+  # ============================================================
+  /products/{productId}/stock:
+    get:
+      tags: [Inventory]
+      summary: Consulter les niveaux de stock d'un produit par succursale
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Niveaux par succursale
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductStock'
+    post:
+      tags: [Inventory]
+      summary: Enregistrer un mouvement de stock
+      description: >
+        Requiert la permission `inventory:manage_stock` (admin/owner/
+        inventory_manager, ADR-097). Un stock insuffisant n'a jamais
+        bloqué l'émission d'une facture — même philosophie que
+        `cost_price` (ERD) : jamais un gate, seulement une alerte.
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockMovementCreate'
+      responses:
+        '201':
+          description: Mouvement enregistré, stock_qty mis à jour
+        '403':
+          description: Permission inventory:manage_stock manquante
 
   # ============================================================
   # PROFESSIONAL PRACTICES (cabinets, gestionnaires, CGA)
@@ -624,6 +818,37 @@ paths:
       responses:
         '200':
           description: Mandat révoqué
+
+  # ============================================================
+  # JOURNAL D'AUDIT — auditor (ADR-097)
+  # ============================================================
+  /audit-log:
+    get:
+      tags: [Audit]
+      summary: Consulter le journal d'audit de l'organisation
+      description: >
+        Requiert la permission `audit:view_log` (admin/owner/auditor,
+        ADR-097). Lecture seule stricte, aucune exception — expose
+        `invoice_event` (append-only, ADR-015) et l'historique des
+        changements de rôle/permission.
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [invoice, payment, permission]
+          description: Filtre optionnel par catégorie
+      responses:
+        '200':
+          description: Entrées du journal, plus récentes d'abord
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogEntry'
+        '403':
+          description: Permission audit:view_log manquante
 
   # ============================================================
   # PARTNERS (APIP, FODIP, 3AE)
@@ -853,6 +1078,68 @@ paths:
       responses:
         '200':
           description: Numéro principal mis à jour — un seul is_primary=true par utilisateur
+
+  # ============================================================
+  # CLÉS API SELF-SERVICE — developer_api (ADR-097)
+  # ============================================================
+  /api-keys:
+    get:
+      tags: [DeveloperKeys]
+      summary: Lister mes clés API
+      description: >
+        Requiert la permission `api:manage_keys` (developer_api/admin/
+        owner, ADR-097). Le secret n'est jamais retourné après sa
+        création — seul un préfixe tronqué identifie la clé.
+      responses:
+        '200':
+          description: Liste des clés (secret jamais inclus)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiKey'
+    post:
+      tags: [DeveloperKeys]
+      summary: Générer une nouvelle clé API
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                environment:
+                  type: string
+                  enum: [production, sandbox]
+      responses:
+        '201':
+          description: >
+            Clé créée — le secret complet n'est retourné qu'une seule
+            fois dans cette réponse, jamais ré-affichable ensuite.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+        '403':
+          description: Permission api:manage_keys manquante
+
+  /api-keys/{apiKeyId}:
+    delete:
+      tags: [DeveloperKeys]
+      summary: Révoquer une clé API
+      parameters:
+        - name: apiKeyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Clé révoquée, effet immédiat
+        '403':
+          description: Permission api:manage_keys manquante
 
   # ============================================================
   # WEBHOOKS ENTRANTS — providers de paiement
@@ -1151,7 +1438,7 @@ components:
           format: uuid
         type:
           type: string
-          description: 24 types au catalogue — voir DAT §4.1
+          description: 25 types au catalogue, dont 2 V2 B2G (ADR-098) — voir DAT §4.1
           example: payment_link_generated
         actor_id:
           type: string
@@ -1379,7 +1666,12 @@ components:
           example: Ecobank
         type:
           type: string
-          enum: [banque, mfi]
+          enum: [banque, mfi, fournisseur_crediteur]
+          description: >
+            fournisseur_crediteur (ADR-100) — acteur commercial non agréé
+            octroyant des avances à ses boutiques clientes sur la base de
+            leur score de confiance transactionnelle ; nécessite un mandat
+            explicite de la boutique avant toute visibilité du score.
         status:
           type: string
           enum: [active, suspended]
@@ -1454,8 +1746,133 @@ components:
           type: string
           enum: [accountant_external, business_manager]
 
+    ClientPortalInvoice:
+      type: object
+      description: Vue facture adaptée au portail client (ADR-096) — jamais les données d'un autre client
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        organization_name:
+          type: string
+        number:
+          type: string
+          example: "FG-2026-000042"
+        certification_id:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        total_ttc:
+          type: integer
+          description: Centimes GNF
+        amount_due:
+          type: integer
+        payment_link_url:
+          type: string
+          format: uri
+          nullable: true
+        running_balance:
+          type: integer
+          description: Propre à l'appelant pour cette organisation émettrice
+        credit_limit:
+          type: integer
+          nullable: true
+
+    ProductStock:
+      type: object
+      description: Niveau de stock d'un produit pour une succursale donnée (ADR-037, ADR-097)
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        stock_qty:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+
+    StockMovementCreate:
+      type: object
+      required: [branch_id, movement_type, quantity]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        movement_type:
+          type: string
+          enum: [reception, adjustment, loss]
+          description: Réception fournisseur, ajustement d'inventaire, ou perte/casse
+        quantity:
+          type: integer
+          description: Toujours positif — le signe est déterminé par movement_type, jamais saisi négatif
+
+    AuditLogEntry:
+      type: object
+      description: Entrée du journal d'audit, lecture seule (ADR-097)
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [invoice, payment, permission]
+        type:
+          type: string
+          example: invoice.paid
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ApiKey:
+      type: object
+      description: Clé API — le secret n'est jamais retourné après la création (ADR-097)
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          example: "fg_live_••••9f2a"
+        environment:
+          type: string
+          enum: [production, sandbox]
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ApiKeyCreated:
+      type: object
+      description: Réponse de création — seule occasion où le secret complet est exposé
+      properties:
+        id:
+          type: string
+          format: uuid
+        secret:
+          type: string
+          example: "fg_live_a1b2c3d4e5f6..."
+        environment:
+          type: string
+          enum: [production, sandbox]
+
 x-security-notes: |
   Toute réponse d'erreur suit le format standard { errors: [{ field, message }] }.
   Les codes 401/403 distinguent systématiquement absence d'authentification (401)
   et authentification valide mais permission insuffisante (403) — jamais confondus,
-  conformément au modèle RBAC à 61 permissions MVP (65 en V1, DAT §3.4).
+  conformément au modèle RBAC à 61 permissions MVP (68 en V1, DAT §3.4).

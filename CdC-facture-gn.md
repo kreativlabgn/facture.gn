@@ -51,7 +51,7 @@ Aissatou (boutique), Mamadou (comptable agréé), Djénabou (hôtel, arrhes), Ib
 
 ### 3.2 Partenaires professionnels et institutionnels
 
-Cabinets comptables et CGA (entité professional_practice à 4 types, dashboard multi-org, mandats, revenue share — ADR-078). Gestionnaires d'activité (V1). Ordre des Comptables OCAECG. APIP (canal d'acquisition webhook, V1). FODIP et 3AE (conventions externes, hors plateforme). Administrations publiques (validation commandes publiques, V1-V2). Banques et MFI (vérification, financement, V2).
+Cabinets comptables et CGA (entité professional_practice à 4 types, dashboard multi-org, mandats, revenue share — ADR-078). Gestionnaires d'activité (V1). Ordre des Comptables OCAECG. APIP (canal d'acquisition webhook, V1). FODIP et 3AE (conventions externes, hors plateforme). Administrations publiques (validation commandes publiques, V1-V2). Banques et MFI (vérification, financement, V2). Grossistes fournisseurs (relation commerciale déjà couverte par l'existant — boutique cliente via CUSTOMER ; nouvelle relation de crédit privé via FINANCIAL_PARTNER.type=fournisseur_crediteur, V2, sous réserve d'avis juridique préalable — R-16, ADR-100).
 
 ### 3.3 Gouvernance
 
