@@ -604,5 +604,22 @@ Conséquences : Aucun changement au catalogue de permissions (reste 68 en V1, DA
 
 ---
 
+## Partie 21 — Révision tarifaire : Starter Plus, Djomy à 1,4 %, Partner Free réduit (ADR-106)
+
+Décision actée le 17 août 2026, sur constat du Sponsor que la grille tarifaire laissait du chiffre d'affaires sur la table à trois endroits : un saut Starter→Pro sans palier intermédiaire pour les succursales, un Partner Free trop généreux pour inciter à l'upgrade, et une hausse de coût Djomy jamais répercutée dans la grille.
+
+**ADR-106 — Palier Starter Plus, frais Djomy relevés à 1,4 % absorbés en interne, Partner Free ramené à 5 organisations avec graduation**
+
+Décision, en quatre volets :
+
+1. **Nouveau palier Starter Plus** (250 000 GNF/mois, entre Starter à 100 000 et Pro à 500 000) — 5 succursales, 7 collaborateurs, mais **aucune fonctionnalité de sophistication** (pas de RBAC avancé, analytics toujours Basique, pas d'API). Sépare pour la première fois l'axe échelle de l'axe sophistication, jusqu'ici confondus dans une seule progression linéaire (Grille-Offres §2.1).
+2. **Prix relevés sur les paliers existants** : Starter 75k→100k, Pro 250k→500k, Enterprise (« sur devis »)→750k, Custom (« négocié »)→1,5M — Enterprise et Custom passent d'un prix uniquement sur devis à un prix catalogue publié, même si la négociation individuelle reste possible via la commission cible.
+3. **Frais gateway Djomy relevés de 1 % à 1,4 %** (traité en taux flat par simplification — la vraie grille Djomy est dégressive mais non modélisée ici). La hausse est **intégralement absorbée par la commission facture.gn**, jamais répercutée sur le total payeur : chaque palier existant garde exactement le total payeur de la grille du 26/07 (ADR-074) — 3,5/3,0/2,5/2,2/2,0 %. Le levier de mitigation du volume Freemium illimité (§1.1, non remis en cause) est le taux d'encaissement déjà existant comme North Star metric (§1.3), activé pour la première fois comme nudge Freemium spécifique : seuil >60 % de paiements cash sur 30 jours glissants, action = relance vers le lien de paiement, jamais un plafond.
+4. **Partner Free ramené de 10 à 5 organisations mandatées**, avec trois signaux de graduation vers Partner Starter plutôt qu'un seul mur dur : nudge à la 4ᵉ organisation, mur dur à la 6ᵉ, et un signal de valeur indépendant du compte (revenue share cumulé > 20 000 GNF/mois) qui attrape les cabinets à peu de clients mais fort volume.
+
+Conséquences : `Grille-Offres-facture-gn.md` réécrit sur les sections 1 (nouvelle §1.4), 2 (colonne Starter Plus), 4 (grille à 6 paliers, paramètres versionnés `gateway_fee_djomy_bps` et `commission_*_bps` mis à jour) et 5 (cap Partner Free, nouvelle §5.4). Aucun changement de palier ni de catalogue de permissions (RBAC inchangé, ADR-097/104/105). La projection financière M18 (§8.1) n'est pas recalculée dans ce cycle — les nouveaux prix et taux la rendent caduque, mais un nouveau chiffrage exige des hypothèses de répartition des organisations par palier qui n'existent pas encore ; signalé comme travail restant plutôt que ré-estimé au jugé. Refonte structurelle au sens de la gouvernance §9 (nombre de paliers, structure du taux) — validée par le Sponsor, comme la refonte du 26/07.
+
+---
+
 *facture.gn — Registre ADR — Document confidentiel — 17 août 2026*
 
