@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreatePublicBuyerAccountDto } from "./dto/create-public-buyer-account.dto";
@@ -12,6 +12,17 @@ export class PublicBuyerAccountsService {
   // compte sans au moins un membre pouvant l'utiliser. Aucune vérification
   // institutionnelle en V1 (même posture que les cabinets/CGA à leurs débuts).
   async create(dto: CreatePublicBuyerAccountDto, creatorUserId: string) {
+    // Un DAF n'appartient qu'à un seul public_buyer_account en V1 (invariant dont dépend
+    // PublicBuyerPortalService.listReceivedInvoices(), qui résout le membership par userId
+    // seul) — sans cette garde, le self-service permettrait silencieusement une double
+    // appartenance et rendrait ce membership ambigu.
+    const existingMembership = await this.prisma.publicBuyerAccountMember.findFirst({
+      where: { userId: creatorUserId },
+    });
+    if (existingMembership) {
+      throw new ConflictException("Cet utilisateur est déjà membre d'un compte acheteur public");
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const account = await tx.publicBuyerAccount.create({ data: { name: dto.name } });
 

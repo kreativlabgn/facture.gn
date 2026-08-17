@@ -15,6 +15,10 @@ function createFakePrisma(overrides: { publicBuyerAccount?: any; publicBuyerAcco
       findMany: vi.fn().mockResolvedValue([{ id: "pba-1", name: "Ministère des Finances" }]),
       ...overrides.publicBuyerAccount,
     },
+    publicBuyerAccountMember: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      ...overrides.publicBuyerAccountMember,
+    },
     $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
     __tx: tx,
   };
@@ -34,6 +38,16 @@ describe("PublicBuyerAccountsService — création self-service (ADR-098, même 
       data: { publicBuyerAccountId: "pba-1", userId: "user-1", role: "public_buyer_validator" },
     });
     expect(result.id).toBe("pba-1");
+  });
+
+  it("refuse la création si l'utilisateur est déjà membre d'un autre public_buyer_account (un DAF n'appartient qu'à un seul compte en V1)", async () => {
+    const prisma = createFakePrisma({
+      publicBuyerAccountMember: { findFirst: vi.fn().mockResolvedValue({ id: "pbam-existing", publicBuyerAccountId: "pba-0", userId: "user-1" }) },
+    });
+    const service = new PublicBuyerAccountsService(prisma as any);
+
+    await expect(service.create({ name: "Ministère de la Santé" }, "user-1")).rejects.toThrow(/déjà membre/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
 

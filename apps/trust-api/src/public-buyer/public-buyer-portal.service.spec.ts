@@ -8,6 +8,7 @@ function createFakePrisma(
   overrides: {
     publicBuyerAccountMember?: any;
     invoice?: any;
+    customer?: any;
   } = {},
 ) {
   const tx = {
@@ -32,11 +33,15 @@ function createFakePrisma(
         status: "issued",
         validatedByAdministration: false,
         amountDue: 5_000_000n,
-        customer: { id: "cust-1", publicBuyerAccountId: "pba-1" },
+        customerId: "cust-1",
       }),
       findMany: vi.fn().mockResolvedValue([]),
       aggregate: vi.fn().mockResolvedValue({ _sum: { amountDue: null } }),
       ...overrides.invoice,
+    },
+    customer: {
+      findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1" }),
+      ...overrides.customer,
     },
     $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
     __tx: tx,
@@ -58,14 +63,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
 
   it("refuse une facture dont le client n'a pas de publicBuyerAccountId (pas une facture B2G)", async () => {
     const prisma = createFakePrisma({
-      invoice: {
-        findUniqueOrThrow: vi.fn().mockResolvedValue({
-          id: "inv-1",
-          status: "issued",
-          validatedByAdministration: false,
-          customer: { id: "cust-1", publicBuyerAccountId: null },
-        }),
-      },
+      customer: { findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: null }) },
     });
     const service = new PublicBuyerPortalService(prisma as any);
 
@@ -80,7 +78,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
           id: "inv-1",
           status: "draft",
           validatedByAdministration: false,
-          customer: { id: "cust-1", publicBuyerAccountId: "pba-1" },
+          customerId: "cust-1",
         }),
       },
     });
@@ -116,7 +114,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
           id: "inv-1",
           status: "issued",
           validatedByAdministration: true,
-          customer: { id: "cust-1", publicBuyerAccountId: "pba-1" },
+          customerId: "cust-1",
         }),
       },
     });
@@ -126,6 +124,41 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(result.validatedByAdministration).toBe(true);
+  });
+
+  it("refuse une facture voided — aucune dette réelle à liquider (PRD §4.2)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "voided",
+          validatedByAdministration: false,
+          customerId: "cust-1",
+        }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(service.validateLiquidation("inv-1", REQUESTER_USER_ID)).rejects.toThrow(/voided|annulée/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("la réponse idempotente n'a jamais de relation customer imbriquée (forme identique à la validation fraîche)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "issued",
+          validatedByAdministration: true,
+          customerId: "cust-1",
+        }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    const result = await service.validateLiquidation("inv-1", REQUESTER_USER_ID);
+
+    expect(result).not.toHaveProperty("customer");
   });
 });
 
@@ -140,11 +173,21 @@ describe("PublicBuyerPortalService — encours fournisseurs (J2, ADR-080/098)", 
       where: { userId: REQUESTER_USER_ID },
     });
     expect(prisma.invoice.findMany).toHaveBeenCalledWith({
-      where: { customer: { publicBuyerAccountId: "pba-1" } },
+      where: { customer: { publicBuyerAccountId: "pba-1" }, status: { notIn: ["draft", "voided"] } },
       orderBy: { issuedAt: "desc" },
       take: 50,
       skip: 0,
     });
+  });
+
+  it("exclut les factures draft et voided — jamais reçues ou plus une dette réelle", async () => {
+    const prisma = createFakePrisma();
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await service.listReceivedInvoices(REQUESTER_USER_ID, {});
+
+    const calledWhere = prisma.invoice.findMany.mock.calls[0][0].where;
+    expect(calledWhere.status).toEqual({ notIn: ["draft", "voided"] });
   });
 
   it("refuse un appelant qui n'est membre d'aucun public_buyer_account", async () => {
@@ -168,7 +211,7 @@ describe("PublicBuyerPortalService — encours fournisseurs (J2, ADR-080/098)", 
     const result = await service.listReceivedInvoices(REQUESTER_USER_ID, {});
 
     expect(prisma.invoice.aggregate).toHaveBeenCalledWith({
-      where: { customer: { publicBuyerAccountId: "pba-1" } },
+      where: { customer: { publicBuyerAccountId: "pba-1" }, status: { notIn: ["draft", "voided"] } },
       _sum: { amountDue: true },
     });
     expect(result.outstandingTotal).toBe(12_500_000n);
