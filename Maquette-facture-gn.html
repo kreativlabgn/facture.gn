@@ -793,8 +793,48 @@ button{font-family:inherit;}
       <h2>Prêt à facturer</h2>
       <p>Votre rôle donne accès à une session assistée limitée dans le temps — pas de tiroir, pas de liste complète, pas de compte permanent (ADR-095).</p>
       <button class="big-cta" onclick="s1_startAssistedSession()">Démarrer une session assistée</button>
+      <button class="btn-ghost" style="width:100%; padding:13px; text-align:center; margin-top:10px;" onclick="s1_startMerchantRegistration()">+ Inscrire un nouveau marchand</button>
     </div>
 
+  </section>
+
+  <!-- ================= INSCRIPTION ASSISTÉE — Chemin B (Parcours 0, ADR-045) ================= -->
+  <section class="screen" id="s-register">
+    <h1 style="font-size:19px; margin-bottom:4px;">Inscrire un nouveau marchand</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Pour un marchand qui n'a jamais utilisé facture.gn — un feature phone suffit, aucun smartphone requis ensuite (ADR-045, Parcours 0 Chemin B).</p>
+    <div class="card" style="padding:18px;">
+      <div class="field" style="margin-bottom:10px;"><label>Nom du marchand</label><input type="text" id="reg-name" placeholder="Ex. Mariama Bah — étal marché Madina"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Téléphone</label><input type="text" id="reg-phone" placeholder="+224 6…"></div>
+      <div class="field" style="margin-bottom:0;">
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="reg-consent" style="margin-top:3px;">
+          <span style="font-size:12px; color:var(--text-dim); line-height:1.5; font-weight:400;">Le marchand consent à cette inscription en son nom — enregistré (<code>consent_recorded</code>).</span>
+        </label>
+      </div>
+    </div>
+    <p id="reg-error" hidden style="font-size:11.5px; color:var(--bad); font-weight:600; margin:10px 0 0;">Nom, téléphone et consentement sont requis.</p>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="s1_submitMerchantRegistration()">Inscrire le marchand</button>
+  </section>
+
+  <!-- ================= CODE COMPTE — carte à remettre ================= -->
+  <section class="screen" id="s-register-done">
+    <div style="text-align:center; padding:24px 4px 8px;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h2 style="font-size:17px; margin-bottom:6px;">Marchand inscrit</h2>
+      <p style="font-size:12.5px; color:var(--text-dim); margin:0 0 20px;" id="reg-done-name"></p>
+    </div>
+    <div class="card" style="padding:20px; margin-bottom:8px; background:var(--text); color:#fff; text-align:center;">
+      <div style="font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.6); margin-bottom:8px;">Code compte — carte à remettre</div>
+      <div class="mono" style="font-size:24px; font-weight:700; letter-spacing:.1em;" id="reg-done-code"></div>
+      <div style="font-size:11px; color:rgba(255,255,255,.6); margin-top:8px;">Nécessaire pour toute connexion depuis un téléphone non reconnu (ADR-046)</div>
+    </div>
+    <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0 0 20px; text-align:center;">Le marchand est immédiatement opérationnel, y compris pour émettre depuis *620# sans jamais avoir touché un smartphone. Aucune membership permanente n'est créée pour vous, l'agent (ADR-045).</p>
+    <div style="display:flex; gap:8px;">
+      <button class="go ghost" style="flex:1;" onclick="s1_showScreen('s-accueil')">Terminer</button>
+      <button class="go" style="flex:1;" onclick="s1_showScreen('s-emission')">Émettre sa 1ère facture</button>
+    </div>
   </section>
 
   <!-- ================= SESSION ASSISTÉE (field_agent / delivery_driver) ================= -->
@@ -2111,7 +2151,7 @@ button{font-family:inherit;}
 
 <script>
 (function(){
-const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-assisted','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-onb-1','s-onb-2','s-onb-3','s-support','s-ticket-detail'];
+const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-assisted','s-register','s-register-done','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-onb-1','s-onb-2','s-onb-3','s-support','s-ticket-detail'];
 const LIGHT_ROLES = ['field_agent','delivery_driver'];
 const tabbar = document.getElementById('tabbar');
 const drawer = document.getElementById('drawer');
@@ -2423,6 +2463,30 @@ function endAssistedSession(){
   if (assistedSession.timer) clearInterval(assistedSession.timer);
   assistedSession.active = false;
   showScreen('s-accueil');
+}
+
+// ===== Inscription assistée — Chemin B (Parcours 0, ADR-045) =====
+function startMerchantRegistration(){
+  document.getElementById('reg-name').value = '';
+  document.getElementById('reg-phone').value = '';
+  document.getElementById('reg-consent').checked = false;
+  document.getElementById('reg-error').hidden = true;
+  showScreen('s-register');
+}
+function submitMerchantRegistration(){
+  const name = document.getElementById('reg-name').value.trim();
+  const phone = document.getElementById('reg-phone').value.trim();
+  const consent = document.getElementById('reg-consent').checked;
+  if (!name || !phone || !consent) {
+    document.getElementById('reg-error').hidden = false;
+    return;
+  }
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  document.getElementById('reg-done-name').textContent = name + ' · ' + phone;
+  document.getElementById('reg-done-code').textContent = code.slice(0, 4) + ' ' + code.slice(4);
+  showScreen('s-register-done');
 }
 
 // ===== Inscription d'une nouvelle organisation =====
@@ -2924,6 +2988,8 @@ window.s1_switchBranch = switchBranch;
 window.s1_selectBranch = selectBranch;
 window.s1_startAssistedSession = startAssistedSession;
 window.s1_endAssistedSession = endAssistedSession;
+window.s1_startMerchantRegistration = startMerchantRegistration;
+window.s1_submitMerchantRegistration = submitMerchantRegistration;
 window.s1_startOnboarding = startOnboarding;
 window.s1_onboardingStep2 = onboardingStep2;
 window.s1_onboardingStep3 = onboardingStep3;
