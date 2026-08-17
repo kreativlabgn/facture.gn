@@ -6,10 +6,10 @@
 
 | Champ | Valeur |
 |---|---|
-| Date | 26 juillet 2026 |
-| Statut | Consolidé — Parcours 0, orchestrateur Djomy/Moneroo, écosystème cabinet/CGA, gestion client avancée/analytics/support (ADR-083/084/085), multi-numéros, Commande Publique/TELEMO, financement B2G (ADR-086 à 090) |
+| Date | 17 août 2026 |
+| Statut | Consolidé — Parcours 0, orchestrateur Djomy/Moneroo, écosystème cabinet/CGA, gestion client avancée/analytics/support (ADR-083/084/085), multi-numéros, Commande Publique/TELEMO, financement B2G (ADR-086 à 090), rôles V1 sans parcours dédié — contrôleur fiscal, stock, audit, clés API (ADR-097/104/105) |
 | Audience | Product Owner, UX, QA, Tech Leads |
-| Documents liés | PRD · CdC (§8 critères de réception) · Backlog · Grille-Offres · Fiches-de-poste · Charte Graphique |
+| Documents liés | PRD · CdC (§8 critères de réception) · Backlog · Grille-Offres · Fiches-de-poste · Charte Graphique · Registre ADR |
 
 > Ce document a deux fonctions : décrire, persona par persona, le chemin réel que suit chaque utilisateur dans le produit ; et définir comment chacun de ces chemins est validé avant mise en production. Les parcours ne sont pas des scénarios illustratifs — chaque étape correspond à un endpoint, un événement `invoice_event`, ou un écran identifié dans le Backlog.
 
@@ -155,14 +155,15 @@ Aucun chemin d'inscription ne bloque l'accès aux fonctionnalités de base en at
 
 **Personas : entrepreneur fournisseur + DAF de l'administration cliente.**
 
-1. L'entrepreneur gagne un marché public sur TELEMO, reçoit une référence d'attribution.
-2. Il émet une facture pour la commande publique — via PWA (parcours complet) ou *620# Option 6 (version condensée, ADR-086) — et recopie manuellement la référence marché dans le champ optionnel « Référence marché TELEMO » (ADR-090, aucune vérification automatique).
-3. Le DAF de l'administration, authentifié via `public_buyer_account` (rôle `public_buyer_validator`), consulte la facture reçue sur son portail dédié — y compris la référence marché recopiée, qu'il rapproche humainement de son propre dossier si nécessaire.
-4. Il valide la liquidation — jamais le paiement effectif — déclenchant `invoice.validated_by_administration = true` et l'événement `liquidation_validated`.
-5. L'entrepreneur, depuis la PWA, choisit son rail : **Rail A** — une banque/MFI partenaire (Ecobank, UBA, COFINA, ou Akiba Finance) avance le montant immédiatement, disbursée via Djomy Payout ou virement au choix de l'entrepreneur ; **Rail B** — attente du virement Trésor direct, sans financement, 0% commission.
-6. Sur le Rail A, le Trésor rembourse ensuite la banque — jamais l'entrepreneur, déjà payé — par cession de créance, un mécanisme que facture.gn ne voit jamais. Sur le Rail B, le paiement Trésor est détecté passivement par rapprochement bancaire.
+1. Préalable, une seule fois par administration cliente : l'entrepreneur (admin/owner) marque l'administration comme entité publique sur sa fiche client — `CUSTOMER.is_public_entity = true`, permission `customer:flag_public_entity` (ADR-083/098/105). Sans ce marquage, aucune facture adressée à cette administration n'entre dans le circuit de validation ci-dessous.
+2. L'entrepreneur gagne un marché public sur TELEMO, reçoit une référence d'attribution.
+3. Il émet une facture pour la commande publique — via PWA (parcours complet) ou *620# Option 6 (version condensée, ADR-086) — et recopie manuellement la référence marché dans le champ optionnel « Référence marché TELEMO » (ADR-090, aucune vérification automatique).
+4. Le DAF de l'administration, authentifié via `public_buyer_account` (rôle `public_buyer_validator`), consulte la facture reçue sur son portail dédié — y compris la référence marché recopiée, qu'il rapproche humainement de son propre dossier si nécessaire.
+5. Il valide la liquidation — jamais le paiement effectif — déclenchant `invoice.validated_by_administration = true` et l'événement `liquidation_validated`.
+6. L'entrepreneur, depuis la PWA, choisit son rail : **Rail A** — une banque/MFI partenaire (Ecobank, UBA, COFINA, ou Akiba Finance) avance le montant immédiatement, disbursée via Djomy Payout ou virement au choix de l'entrepreneur ; **Rail B** — attente du virement Trésor direct, sans financement, 0% commission.
+7. Sur le Rail A, le Trésor rembourse ensuite la banque — jamais l'entrepreneur, déjà payé — par cession de créance, un mécanisme que facture.gn ne voit jamais. Sur le Rail B, le paiement Trésor est détecté passivement par rapprochement bancaire.
 
-**Points de test critiques** : le portail DAF ne doit jamais exposer d'action de « validation de paiement » — seulement de « validation de liquidation », pour respecter strictement le positionnement ADR-030/ADR-080 ; le choix du rail de financement n'apparaît qu'après validation DAF confirmée, jamais avant ; le champ référence marché reste optionnel sur toute la chaîne — une facture B2G sans référence TELEMO (achat de gré à gré) doit suivre exactement le même parcours sans dégradation.
+**Points de test critiques** : une facture adressée à un client jamais marqué `is_public_entity` ne doit jamais apparaître sur le portail DAF, même si son montant ou son libellé ressemble à une commande publique ; le portail DAF ne doit jamais exposer d'action de « validation de paiement » — seulement de « validation de liquidation », pour respecter strictement le positionnement ADR-030/ADR-080 ; le choix du rail de financement n'apparaît qu'après validation DAF confirmée, jamais avant ; le champ référence marché reste optionnel sur toute la chaîne — une facture B2G sans référence TELEMO (achat de gré à gré) doit suivre exactement le même parcours sans dégradation.
 
 ---
 
@@ -205,15 +206,67 @@ Aucun chemin d'inscription ne bloque l'accès aux fonctionnalités de base en at
 
 ---
 
-## 14. Plan de test — méthodologie
+## 14. Parcours tax_controller_readonly — invitation d'un contrôleur fiscal (ADR-104/105, F14)
 
-### 14.1 Principes directeurs
+**Objectif : donner à un contrôleur fiscal local un accès en lecture seule à ses propres factures et à l'export FEC, sans jamais partager le PIN du propriétaire.**
+
+1. Depuis Équipe & Rôles, un owner ou admin invite un contrôleur fiscal par numéro de téléphone, rôle `tax_controller_readonly` (renommé depuis dgi_readonly, ADR-104).
+2. L'accès est composé uniquement de permissions déjà existantes en lecture seule (`invoice:view`, `export:fec`) — aucune capacité d'écriture, aucune fonctionnalité au-delà.
+3. Le contrôleur consulte les factures de l'organisation et exporte le FEC ; toute tentative d'action d'écriture est refusée par le RBAC, pas seulement masquée à l'écran.
+4. L'owner révoque l'accès à tout moment depuis la même fiche.
+
+**Points de test critiques** : vérifier qu'aucun endpoint en écriture n'est accessible même par appel API direct avec un token `tax_controller_readonly` ; vérifier que ce mécanisme ne se présente jamais comme un accès de la DGI institutionnelle elle-même — c'est un individu invité par l'organisation, distinct de la persona DGI nationale (ADR-104).
+
+---
+
+## 15. Parcours inventory_manager — gestion de stock par succursale (ADR-097, E10)
+
+**Objectif : enregistrer un mouvement de stock sans jamais bloquer l'émission de facture sur un stock insuffisant.**
+
+1. Un inventory_manager (ou owner/admin) ouvre Produits & Stock, sélectionne un produit et une succursale.
+2. Il enregistre un mouvement — réception fournisseur, ajustement d'inventaire, ou perte/casse — quantité toujours positive, le type de mouvement détermine le sens.
+3. `PRODUCT_STOCK.stock_qty` est mis à jour immédiatement pour la succursale concernée.
+4. Un cashier émettant une facture sur ce même produit, même en stock bas ou nul, n'est jamais bloqué — le stock est informatif, jamais un gate d'émission (même philosophie que `cost_price`, ERD).
+
+**Points de test critiques** : vérifier qu'un inventory_manager n'a jamais accès à `cost_price` ni à la marge (territoire business_manager, sauf cumul explicite de rôle) ; vérifier qu'aucun message ni blocage n'apparaît à l'émission d'une facture sur un produit en stock négatif ou nul.
+
+---
+
+## 16. Parcours auditor — journal d'audit en lecture seule (ADR-097, G4)
+
+**Objectif : consulter l'historique complet des événements de facturation et des changements de permission, sans aucune capacité de modification.**
+
+1. Un auditor (ou owner/admin) ouvre le Journal d'audit.
+2. Il filtre par catégorie — facture, paiement, ou permission.
+3. Il consulte `invoice_event` (append-only, ADR-015) et l'historique des changements de rôle/permission de l'organisation.
+4. Aucune action de modification n'est jamais exposée à ce rôle sur cet écran, ni ailleurs dans le produit.
+
+**Points de test critiques** : vérifier qu'aucun bouton, endpoint, ou raccourci n'expose une action d'écriture à un compte auditor pur ; vérifier que le filtre par catégorie regroupe les entrées sans jamais en masquer aucune.
+
+---
+
+## 17. Parcours developer_api — clés API self-service (ADR-097, F15)
+
+**Objectif : générer et révoquer des clés API sans dépendre du support, avec un secret jamais ré-affichable après création.**
+
+1. Un developer_api (ou admin/owner, palier Pro+) ouvre Développeur/API.
+2. Il génère une nouvelle clé — le secret complet s'affiche une seule fois, à cet instant précis.
+3. Il consulte les logs d'appels récents (méthode, endpoint, statut, horodatage) en lecture seule.
+4. Il révoque une clé compromise ou obsolète — effet immédiat, aucune fenêtre de grâce.
+
+**Points de test critiques** : vérifier que le secret complet n'est jamais récupérable après la réponse de création, ni par l'API ni par l'interface ; vérifier qu'une clé révoquée est rejetée immédiatement sur le prochain appel, pas seulement marquée inactive en base.
+
+---
+
+## 18. Plan de test — méthodologie
+
+### 18.1 Principes directeurs
 
 - **Chaque critère de réception MVP est testé avec un persona réel**, pas seulement un jeu de données synthétique — la colonne « Méthode de validation » ci-dessous le rend explicite.
 - **Definition of Done** (CdC §6) : revue par 2 pairs, couverture de test ≥ 85 %, revue de sécurité obligatoire sur tout changement touchant authentification, RBAC, cryptographie, paiements, ou données personnelles.
 - **Aucun test de paiement en production ne se substitue au test en sandbox** — la séquence est toujours sandbox d'abord (Chef d'Orchestre, tâche d3), production ensuite (tâche d4).
 
-### 14.2 Critères de réception MVP — table de traçabilité
+### 18.2 Critères de réception MVP — table de traçabilité
 
 | Critère | Mesure | Méthode de validation | Parcours associé |
 |---|---|---|---|
@@ -227,7 +280,7 @@ Aucun chemin d'inscription ne bloque l'accès aux fonctionnalités de base en at
 | Commission captée sans fuite | 100 % des paiements non-cash via lien orchestré | Audit réconciliation webhook/payment | Parcours Aissatou (§2) |
 | Bascule Djomy→Moneroo prouvée | Timeout 10s → transaction complétée sans intervention | Test de bascule automatique | Chef d'Orchestre, tâche m2 |
 
-### 14.3 Critères V1/V2 — gestion client, analytics, support, multi-numéros, B2G étendu
+### 18.3 Critères V1/V2 — gestion client, analytics, support, multi-numéros, B2G étendu
 
 | Critère | Mesure | Méthode de validation | Parcours associé |
 |---|---|---|---|
@@ -240,8 +293,14 @@ Aucun chemin d'inscription ne bloque l'accès aux fonctionnalités de base en at
 | Facture B2G sans référence marché suit le même parcours | 0 dégradation fonctionnelle sur une facture sans reference_marche | Émettre une facture B2G sans référence, comparer au parcours avec | Parcours B2G (§10) |
 | Rail de financement proposé seulement après validation DAF | 0 option de rail visible avant liquidation_validated | Tenter le choix de rail sur une facture non validée | Parcours B2G (§10) |
 | Double financement bloqué | 0 seconde avance sur une facture déjà financée | Tenter un second financement sur une facture avec financed_by_partner_id renseigné | Parcours B2G (§10) |
+| Facture jamais visible au DAF sans marquage préalable | 0 facture d'un client non is_public_entity sur le portail DAF | Émettre une facture à un client jamais marqué entité publique, vérifier absence côté DAF | Parcours B2G (§10) |
+| tax_controller_readonly strictement lecture seule | 0 action d'écriture acceptée, même par appel API direct | Tenter POST/PATCH/DELETE avec un token tax_controller_readonly | Contrôleur fiscal (§14) |
+| Stock jamais un gate d'émission | 0 blocage à l'émission sur un produit en stock nul ou négatif | Émettre une facture sur un produit à stock_qty = 0 | Stock (§15) |
+| Journal d'audit strictement lecture seule | 0 action de modification exposée à un compte auditor pur | Revue exhaustive des écrans et endpoints accessibles à auditor | Journal d'audit (§16) |
+| Secret de clé API non récupérable après création | 0 moyen de relire le secret complet passé la réponse de création | Tenter une relecture du secret via API et interface après coup | Clés API (§17) |
+| Clé API révoquée rejetée immédiatement | 0 appel accepté avec une clé révoquée | Révoquer une clé puis l'utiliser immédiatement | Clés API (§17) |
 
-### 14.4 Couverture par persona — matrice de complétude
+### 18.4 Couverture par persona — matrice de complétude
 
 | Persona | Parcours couvert | Statut de rédaction |
 |---|---|---|
@@ -260,11 +319,15 @@ Aucun chemin d'inscription ne bloque l'accès aux fonctionnalités de base en at
 | business_manager | Analytics et marge | Détaillé (§12) |
 | Chargé de support client | Support par SLA | Détaillé (§13) |
 | TELEMO — pas un persona produit | Relais déclaratif, référence marché | Couvert dans le parcours B2G (§10), pas de parcours dédié |
+| Contrôleur fiscal (tax_controller_readonly) | Invitation, accès lecture seule, révocation | Détaillé (§14) |
+| inventory_manager | Mouvement de stock par succursale | Détaillé (§15) |
+| auditor | Journal d'audit en lecture seule | Détaillé (§16) |
+| developer_api | Clés API self-service | Détaillé (§17) |
 
-### 14.5 Ce qui reste hors du plan de test MVP
+### 18.5 Ce qui reste hors du plan de test MVP
 
-Le parcours B2G (§10), le parcours CGA (partie du §3), et les trois parcours V1 introduits ce tour (§11, §12, §13 — gestion client avancée, analytics/marge, support) ne sont testables en conditions réelles qu'à partir de V1. Leur présence dans ce document est une anticipation de conception, pas un engagement de test au MVP.
+Le parcours B2G (§10), le parcours CGA (partie du §3), et les sept parcours V1 introduits depuis (§11 à §17 — gestion client avancée, analytics/marge, support, contrôleur fiscal, stock, journal d'audit, clés API) ne sont testables en conditions réelles qu'à partir de V1. Leur présence dans ce document est une anticipation de conception, pas un engagement de test au MVP.
 
 ---
 
-*facture.gn — Parcours UX & Plan de test — Document confidentiel — 26 juillet 2026*
+*facture.gn — Parcours UX & Plan de test — Document confidentiel — 17 août 2026*

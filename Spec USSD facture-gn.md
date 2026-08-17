@@ -6,10 +6,10 @@
 
 | Champ | Valeur |
 |---|---|
-| Date | 26 juillet 2026 |
+| Date | 17 août 2026 |
 | Code court | *620# (pas *800# — erreur corrigée) |
 | Provider paiement | Orange Money Guinée via l'orchestrateur (Djomy primary, Moneroo fallback) |
-| Statut | Consolidé — mandats cabinet/CGA, paiement partiel, orchestrateur multi-provider, multi-numéros (ADR-087), Option 6 Commande Publique (ADR-086) |
+| Statut | Consolidé — mandats cabinet/CGA, paiement partiel, orchestrateur multi-provider, multi-numéros (ADR-087), Option 6 Commande Publique (ADR-086), rôles V1 fantômes hors périmètre USSD par nature (ADR-097/104/105) |
 
 > Tout ce qui est listé ici est le comportement attendu — le code doit le respecter exactement.
 
@@ -120,7 +120,7 @@ Non autorisés : tout raccourci exposant un client identifié en clair ou des do
 
 ## 6. Ce que ce canal ne couvre pas
 
-Proforma/devis. Remise/avoirs par ligne. Configuration régime fiscal et multi-succursale. Configuration récurrence. Forme juridique associative. Remboursement (PWA uniquement). L'acte de validation administrative B2G lui-même (réservé au portail acheteur public DAF, un persona qui n'utilise jamais *620# — la consultation du statut par la PME est en revanche couverte, Option 6.2). Choix du rail de financement B2G (Rail A/B, ADR-088) — décision comparative mieux servie par un écran riche, PWA uniquement. Vérification automatique d'une référence marché TELEMO — n'existe nulle part, ni USSD ni PWA (ADR-090). Gestion client avancée — fusion de doublons, limite de crédit (ADR-083) — et analytics avancé avec marge (ADR-084) : réservés à la PWA, jamais exposés sur un canal texte contraint.
+Proforma/devis. Remise/avoirs par ligne. Configuration régime fiscal et multi-succursale. Configuration récurrence. Forme juridique associative. Remboursement (PWA uniquement). L'acte de validation administrative B2G lui-même (réservé au portail acheteur public DAF, un persona qui n'utilise jamais *620# — la consultation du statut par la PME est en revanche couverte, Option 6.2). Choix du rail de financement B2G (Rail A/B, ADR-088) — décision comparative mieux servie par un écran riche, PWA uniquement. Vérification automatique d'une référence marché TELEMO — n'existe nulle part, ni USSD ni PWA (ADR-090). Gestion client avancée — fusion de doublons, limite de crédit (ADR-083) — et analytics avancé avec marge (ADR-084) : réservés à la PWA, jamais exposés sur un canal texte contraint. Même exclusion, même raison, pour les fonctionnalités des rôles V1 fantômes (ADR-097/104/105) : gestion de stock (inventory_manager), journal d'audit (auditor), clés API (developer_api), invitation d'un contrôleur fiscal (tax_controller_readonly) et marquage d'un client entité publique (customer:flag_public_entity) — aucune n'a de sens sur un menu texte à profondeur limitée.
 
 Limite honnête : traduire le menu aide un locuteur lettré. Avec 68% d'analphabétisme, seul le canal vocal (V1) porte la promesse d'inclusion complète.
 
@@ -132,4 +132,4 @@ MSISDN, IMEI si disponible, horodatage, montant. Détection comportementale sans
 
 ---
 
-*facture.gn — Spec USSD *620# — Document confidentiel — 26 juillet 2026*
+*facture.gn — Spec USSD *620# — Document confidentiel — 17 août 2026*

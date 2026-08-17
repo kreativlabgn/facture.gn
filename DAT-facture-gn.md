@@ -102,13 +102,13 @@ Source unique de vérité. Tous les champs clés et invariants sont définis ici
 | financial_partner | type (banque/mfi/fournisseur_crediteur — ADR-100), api_key, status | Nouveau (ADR-089, V2) — distincte de partner : une banque a des besoins différents (API dédiée, KYC) |
 | mandate | practice_id, organization_id, status, granted_role, expires_at | Consentement explicite obligatoire (ADR-069) |
 | revenue_share | practice_id, organization_id, share_amount_gnf, share_rate_bps | Calcul quotidien, crédit mensuel (ADR-071) |
-| invoice | certification_id, document_type, status (7 valeurs), validated_by_administration (V2), reference_marche (nullable), financed_by_partner_id (V2) | Deux identifiants distincts ; immutable après émission |
+| invoice | certification_id, document_type, status (7 valeurs), validated_by_administration (V1, avancé par ADR-098), reference_marche (nullable), financed_by_partner_id (V2) | Deux identifiants distincts ; immutable après émission |
 | payment | amount, amount_collected, platform_fee_amount, gateway_fee_amount, method, provider_sub_method | Immuable après collecte ; méthodes manuelles restreintes cash/virement (ADR-061) |
 | payment_provider_attempts | invoice_id, provider (djomy/moneroo/orange_direct/mtn_direct), status, fee_gateway | Nouveau 26/07 (ADR-076) — traçabilité par tentative, y compris bascules |
 | payment_webhooks | provider, provider_ref, normalized_status, processed_at | Nouveau 26/07 (ADR-075) — processed_at = clé d'idempotence |
 | invoice_event | invoice_id, type (25 types au total, dont 2 V2 B2G — ADR-098), actor_id | Append-only, source de vérité audit (ADR-015) |
 | refund | credit_note_id, amount, method (payment_link_payout) | Exige toujours un credit_note préalable (ADR-063) |
-| customer | is_public_entity (V2), running_balance, public_buyer_account_id (V2) | — |
+| customer | is_public_entity (V1, avancé par ADR-098), running_balance, public_buyer_account_id (V1, avancé par ADR-098) | — |
 | recurring_invoice_template | organization_id, fréquence, lignes types | Ne stocke jamais de taux/régime figé (ADR-056) |
 
 ### 4.1 Événements invoice_event — catalogue complet

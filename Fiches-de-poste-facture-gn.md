@@ -6,10 +6,10 @@
 
 | Champ | Valeur |
 |---|---|
-| Date | 26 juillet 2026 |
+| Date | 17 août 2026 |
 | Statut | Référence recrutement — répond au risque G-03 (assistante et mentor non pourvus), résout G-06 (support client, ADR-085), et au dimensionnement du CdC §6 |
 | Audience | Sponsor exécutif, Directrice Générale, recrutement, candidats |
-| Documents liés | CdC · DAT · Risques-RACI (G-02, G-03, G-06) · Grille-Offres |
+| Documents liés | CdC · DAT · Risques-RACI (G-02, G-03, G-06) · Grille-Offres · Registre ADR |
 | Dimensionnement cible | 4 squads, 12 à 16 développeurs, 18 mois (MVP → V2), + 2 postes support client |
 
 > Ce document décrit chaque rôle nécessaire à la construction de facture.gn — gouvernance, puis les quatre squads techniques (Trust, Money, Capital, Platform). Chaque squad suit le même gabarit organisationnel : 1 Tech Lead, 2 à 3 développeurs, 1 QA. Aucun chiffrage salarial n'est inclus ici — le budget reste un poste ouvert (risque G-02), à traiter séparément.
@@ -44,7 +44,7 @@
 
 | Dimension | Détail |
 |---|---|
-| Mission | Priorisation du backlog produit (69 stories réparties MVP/V1/V2), arbitrage des compromis fonctionnels |
+| Mission | Priorisation du backlog produit (77 stories réparties MVP/V1/V2), arbitrage des compromis fonctionnels |
 | Responsabilités clés | Maintenir la cohérence entre Backlog, PRD et Registre ADR ; animer la Definition of Done avec les 4 Tech Leads ; représenter la voix utilisateur (10 personas PME + DAF) dans les décisions de priorisation |
 | Compétences requises | Expérience produit sur un contexte à forte contrainte d'inclusion numérique (offline-first, USSD, faible littératie) ; capacité à dialoguer avec des profils très techniques (Tech Leads) et très opérationnels (DG, agents terrain) |
 | Rattachement | Directrice Générale |
@@ -54,7 +54,7 @@
 
 | Dimension | Détail |
 |---|---|
-| Mission | Garant de la cohérence architecturale globale à travers les 4 squads — c'est la fonction qui a produit et maintient les 90 décisions du Registre ADR |
+| Mission | Garant de la cohérence architecturale globale à travers les 4 squads — c'est la fonction qui a produit et maintient les 106 décisions du Registre ADR |
 | Responsabilités clés | Arbitrer les décisions d'architecture transverses (ex. refonte Payment Orchestration du 26/07) ; valider chaque nouvel ADR avant qu'il soit verrouillé ; s'assurer qu'aucune divergence documentaire ne s'installe entre les squads (risque G-04/G-05) |
 | Compétences requises | Expérience gérée sur des systèmes distribués multi-services (bounded contexts Trust/Money/Capital/Platform) ; maîtrise des enjeux cryptographiques (Ed25519, SHA-256) suffisante pour arbitrer sans dépendre uniquement du Tech Lead Trust |
 | Rattachement | Sponsor exécutif, avec coordination fonctionnelle du Product Owner |
@@ -230,4 +230,4 @@ Auquel s'ajoutent la gouvernance (Sponsor, DG, PO, Tech Lead/Architecte transver
 
 ---
 
-*facture.gn — Fiches de poste — Document interne recrutement — 26 juillet 2026*
+*facture.gn — Fiches de poste — Document interne recrutement — 17 août 2026*

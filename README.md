@@ -20,7 +20,7 @@ Positionnement non négociable : tiers de confiance privé certifié — jamais 
 | `DAT-facture-gn.md` | Architecture technique — bounded contexts, RBAC, modèle de données |
 | `ERD-facture-gn.md` | Schéma de données détaillé |
 | `openapi-facture-gn.yaml` | Spécification API |
-| `Registre-ADR-facture-gn.md` | Journal des décisions d'architecture (jusqu'à ADR-104) |
+| `Registre-ADR-facture-gn.md` | Journal des décisions d'architecture (jusqu'à ADR-106) |
 | `Backlog-facture-gn.md` | Backlog produit par section fonctionnelle |
 | `Risques-RACI-facture-gn.md` | Registre des risques et matrice RACI |
 | `Grille-Offres-facture-gn.md` | Grille tarifaire par palier |
