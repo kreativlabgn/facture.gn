@@ -450,7 +450,7 @@ Décision : Le produit se découpe en **six shells de navigation indépendants**
 
 4. **Portail client_portal** — Mes factures (toutes organisations émettrices confondues, filtrable), Détail facture (statut, lien de paiement si impayée, certification_id vérifiable), Mon profil. Lecture et paiement uniquement, aucune action d'émission.
 
-5. **Portail dgi_readonly** — proposé à titre d'hypothèse de travail, non definitif : lecture seule d'une organisation donnée (Factures + Export FEC), distinct de la vue nationale agrégée qui reste un produit de la persona institutionnelle « DGI » (PRD §4.3) hors RBAC utilisateur. La confusion entre les deux relevée dans l'audit n'est pas résolue par cette décision — seule une structure minimale est posée pour débloquer une éventuelle maquette, à valider avec le propriétaire produit avant construction.
+5. **Portail tax_controller_readonly** (renommé depuis dgi_readonly, ADR-104) — proposé à titre d'hypothèse de travail, non definitif : lecture seule d'une organisation donnée (Factures + Export FEC), distinct de la vue nationale agrégée qui reste un produit de la persona institutionnelle « DGI » (PRD, lecture agrégée) hors RBAC utilisateur. La distinction, non résolue au moment de cette décision, est confirmée par ADR-104 — seule une structure minimale est posée ici pour débloquer une éventuelle maquette, à valider avec le propriétaire produit avant construction.
 
 6. **Console interne facture.gn (Ops)** — jamais exposée à une PME cliente (cohérent Grille-Offres:67). Deux profils dans le même shell desktop : **support** (Recherche organisation → activation `cross_tenant_grant` temporaire avec bandeau d'accès délégué visible et compte à rebours, ADR-085/029 → File de tickets par sévérité, Parcours-UX §SLA) et **sysadmin** (Recherche/gestion organisations, Feature flags, Rôles système, Logs d'audit globaux — supervision infra type Grafana/Prometheus restant externe, jamais réimplémentée ici). Périmètre sysadmin posé sur une seule mention existante (Grille-Offres:67) — structure proposée à valider par Squad Platform avant construction, pas une certitude actée au même niveau que les shells 1 à 4.
 
@@ -580,5 +580,17 @@ Conséquences : `Design-System-facture-gn.md` passe en v1.2. Les tokens `--surfa
 
 ---
 
-*facture.gn — Registre ADR — Document confidentiel — 15 août 2026*
+## Partie 19 — dgi_readonly renommé, distinction confirmée (ADR-104)
+
+Décision actée le 17 août 2026, en réponse au point non tranché laissé ouvert par ADR-097 (Partie 12) : la distinction entre le rôle RBAC `dgi_readonly` (invitation par une organisation d'un contrôleur fiscal local, lecture seule de ses propres factures + export FEC) et la persona institutionnelle « DGI » nationale (PRD, lecture agrégée, bénéficiaire structurel, jamais opérateur du produit, ADR-079) est confirmée par le propriétaire produit — ce sont deux mécanismes distincts qui ne se recouvrent pas et coexistent sans conflit.
+
+**ADR-104 — dgi_readonly renommé tax_controller_readonly, distinction avec la persona institutionnelle DGI confirmée**
+
+Décision : La distinction posée par ADR-097 est correcte et conservée telle quelle — un contrôleur fiscal local invité par une PME pour consulter ses propres factures n'a aucun rapport fonctionnel avec la persona institutionnelle DGI (lecture agrégée nationale, jamais un compte, jamais un rôle RBAC, ADR-079). Mais le nom littéral `dgi_readonly` dans le catalogue RBAC entretient une ambiguïté contraire au positionnement non négociable de facture.gn — tiers de confiance privé certifié, **jamais une autorité d'État** (rappelé dans chaque document vivant du projet). Un rôle nommé d'après une administration publique, même cantonné à la lecture seule, peut laisser croire à tort que la DGI opère ou est représentée dans le produit. Le rôle est renommé **`tax_controller_readonly`** — mêmes permissions (`invoice:view`, `export:fec`, aucune écriture), même mécanisme d'invitation par l'organisation, même disponibilité universelle dès Freemium (Grille-Offres). Seul le nom change.
+
+Conséquences : `dgi_readonly` → `tax_controller_readonly` propagé dans les documents vivants — catalogue RBAC V1 (DAT §3.2, PRD §6, Grille-Offres) et description du shell 5 (ADR-095, Partie 10, ci-dessus). ADR-097 n'est pas réécrit — le renvoi se fait depuis cette décision, pas depuis l'ADR déjà acté (même principe qu'ADR-098 vis-à-vis d'ADR-080/081). Aucun changement de permission, de palier ou de catalogue (reste 68 permissions V1, ADR-097) — uniquement un renommage et une confirmation de périmètre. Le shell 5 de la maquette (`Maquette-facture-gn.html`) garde ses ids internes `dgi-*` en l'état pour l'instant — le renommage du rôle métier ne force pas une refonte immédiate de la maquette, qui reste de toute façon qualifiée d'hypothèse de travail (ADR-095, Partie 10).
+
+---
+
+*facture.gn — Registre ADR — Document confidentiel — 17 août 2026*
 

@@ -155,7 +155,7 @@ Compose *620# → Menu : 4. Émettre une facture → Montant, client → PIN →
 
 ## 6. RBAC — trois paliers révisés
 
-MVP — 9 rôles : owner, admin, accountant_internal, cashier, field_agent, delivery_driver, client_portal, accountant_external, practice_admin. V1 — 19 rôles (ajout business_manager, inventory_manager, approver, auditor, viewer, dgi_readonly, support, sysadmin, developer_api, public_buyer_validator — avancé de V2, ADR-098). V2 — 20 rôles (platform_compliance_officer).
+MVP — 9 rôles : owner, admin, accountant_internal, cashier, field_agent, delivery_driver, client_portal, accountant_external, practice_admin. V1 — 19 rôles (ajout business_manager, inventory_manager, approver, auditor, viewer, tax_controller_readonly, support, sysadmin, developer_api, public_buyer_validator — avancé de V2, ADR-098). V2 — 20 rôles (platform_compliance_officer).
 
 ---
 

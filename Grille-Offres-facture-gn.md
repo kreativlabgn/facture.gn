@@ -48,7 +48,7 @@ La matrice ci-dessous est la référence complète, construite pour donner un co
 | Succursales | 1 | 2 | Illimité | Illimité | Illimité |
 | Collaborateurs inclus | 1 | 4 | 10 | Illimité | Négocié |
 | Rôles de base (9, MVP) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| viewer, dgi_readonly | ✓ | ✓ | ✓ | ✓ | ✓ |
+| viewer, tax_controller_readonly | ✓ | ✓ | ✓ | ✓ | ✓ |
 | inventory_manager | — | ✓ | ✓ | ✓ | ✓ |
 | business_manager, approver, auditor | — | — | ✓ | ✓ | ✓ |
 | developer_api / accès API | — | — | ✓ | ✓ | ✓ |
@@ -64,7 +64,7 @@ La matrice ci-dessous est la référence complète, construite pour donner un co
 
 - **Export FEC universel dès Freemium** : c'est une obligation de conformité comptable, jamais un luxe à monétiser — le gater aurait puni les PME les plus fragiles face à la DGI, à rebours du positionnement « bénéficiaire structurel » (ADR-079).
 - **Succursales et collaborateurs** : progression 1 → 2 → illimité (succursales) et 1 → 4 → 10 → illimité (collaborateurs) — au-delà de Pro, plus aucune raison de brider un compte qui a déjà démontré son volume.
-- **RBAC étendu réservé à partir de Pro** ne s'applique qu'aux rôles qui font réellement fonctionner une entreprise à un niveau de sophistication croissant (pilotage, workflow de validation, audit) — jamais aux rôles de conformité ou d'accès simple (viewer, dgi_readonly), ouverts partout dès Freemium par cohérence avec le positionnement DGI. Deux rôles du catalogue V1 (support, sysadmin) n'apparaissent volontairement pas dans cette grille : ce sont des rôles internes facture.gn, jamais attribuables par une PME cliente à son propre personnel, quel que soit son palier.
+- **RBAC étendu réservé à partir de Pro** ne s'applique qu'aux rôles qui font réellement fonctionner une entreprise à un niveau de sophistication croissant (pilotage, workflow de validation, audit) — jamais aux rôles de conformité ou d'accès simple (viewer, tax_controller_readonly), ouverts partout dès Freemium par cohérence avec le positionnement DGI. Deux rôles du catalogue V1 (support, sysadmin) n'apparaissent volontairement pas dans cette grille : ce sont des rôles internes facture.gn, jamais attribuables par une PME cliente à son propre personnel, quel que soit son palier.
 - **Gestion client avancée** n'existe qu'à partir de Pro parce qu'elle dépend structurellement du rôle `approver` (ADR-083) — sans lui, la permission `customer:manage_credit_limit` n'aurait personne pour l'exercer en Starter ou Freemium.
 
 ---

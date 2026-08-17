@@ -20,7 +20,7 @@ Positionnement non négociable : tiers de confiance privé certifié — jamais 
 | `DAT-facture-gn.md` | Architecture technique — bounded contexts, RBAC, modèle de données |
 | `ERD-facture-gn.md` | Schéma de données détaillé |
 | `openapi-facture-gn.yaml` | Spécification API |
-| `Registre-ADR-facture-gn.md` | Journal des décisions d'architecture (jusqu'à ADR-103) |
+| `Registre-ADR-facture-gn.md` | Journal des décisions d'architecture (jusqu'à ADR-104) |
 | `Backlog-facture-gn.md` | Backlog produit par section fonctionnelle |
 | `Risques-RACI-facture-gn.md` | Registre des risques et matrice RACI |
 | `Grille-Offres-facture-gn.md` | Grille tarifaire par palier |
@@ -38,7 +38,7 @@ Positionnement non négociable : tiers de confiance privé certifié — jamais 
 2. **Cabinet/CGA** — portefeuille de mandats, demande de mandat, gestion cabinet
 3. **Administration publique (DAF)** — factures reçues, validation de liquidation
 4. **Client** (`client_portal`) — factures reçues tous émetteurs confondus, paiement
-5. **Lecture DGI** — hypothèse de travail non validée par le propriétaire produit (ADR-097)
+5. **Lecture DGI** (`tax_controller_readonly`) — structure minimale posée, distinction avec la persona DGI institutionnelle confirmée (ADR-097/104), écrans toujours qualifiés d'hypothèse de travail
 6. **Console interne** — recherche organisation, tickets support, feature flags, rôles système, logs d'audit globaux
 7. **Écrans hors périmètre** — Checkout, vérification publique, USSD, Commande Publique (style d'exécution d'origine, non retouché)
 

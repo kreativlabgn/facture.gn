@@ -70,7 +70,7 @@ owner · admin · accountant_internal · cashier · field_agent · delivery_driv
 
 ### 3.2 V1 — 19 rôles
 
-Ajout : business_manager · inventory_manager · approver · auditor · viewer · dgi_readonly · support · sysadmin · developer_api · public_buyer_validator (accès cross-org acheteur public — DAF authentifié via public_buyer_account, ADR-080, avancé de V2 par ADR-098).
+Ajout : business_manager · inventory_manager · approver · auditor · viewer · tax_controller_readonly · support · sysadmin · developer_api · public_buyer_validator (accès cross-org acheteur public — DAF authentifié via public_buyer_account, ADR-080, avancé de V2 par ADR-098).
 
 ### 3.3 V2 — 20 rôles
 
