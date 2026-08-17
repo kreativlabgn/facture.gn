@@ -82,7 +82,7 @@ platform_compliance_officer (transverse, 2FA obligatoire).
 
 ### 3.5 Accès délégué
 
-Cabinet comptable ou CGA : mandat (professional_practice → organization), révocable, collaborateurs héritent. Agent terrain : assisted_session, jamais de membership persistant. Proche/assistant : viewer, invitable depuis *620#. Principe : aucun accès délégué ne partage jamais le PIN du propriétaire.
+Cabinet comptable ou CGA : mandat (professional_practice → organization), révocable, collaborateurs héritent. Agent terrain (rôle RBAC field_agent, personnel de la PME) : assisted_session sur une organisation déjà existante, jamais de membership persistant. Proche/assistant : viewer, invitable depuis *620#. Agent commercial terrain (facture.gn, pas un rôle RBAC — ADR-107) : délégation par facture.gn lui-même, pas par une PME — création d'une nouvelle organisation (`registration_source = agent_terrain`), jamais un accès à une organisation existante. Principe : aucun accès délégué ne partage jamais le PIN du propriétaire.
 
 **Cas distinct — client_portal (ADR-096)** : n'est pas un accès délégué. Identité auto-résolue par téléphone vérifié (USER_PHONE, ADR-087), transverse à toutes les organisations, que l'organisation émettrice ne peut jamais révoquer — seul le client contrôle son propre numéro.
 

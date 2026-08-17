@@ -93,10 +93,12 @@ En tant que nouvelle PME connectée (Aissatou, Aminata), je veux m'inscrire en m
 Réf : ADR-045, Parcours 0 Chemin A
 
 **B5 — Onboarding assisté avec session traçable `[MUST]`**
-En tant qu'agent terrain (Fanta, Mariama), je veux inscrire un marchand via une session assistée, afin de rendre le marchand opérationnel immédiatement, sans qu'il ait à naviguer seul.
-- assisted_session créée, jamais de membership persistant
+En tant qu'Agent commercial terrain (Sékou), je veux inscrire un marchand (Fanta, Mariama) qui n'a jamais utilisé facture.gn, afin de le rendre opérationnel immédiatement, sans qu'il ait à naviguer seul.
+- Agent commercial terrain — recruté et déployé par facture.gn, distinct du rôle RBAC field_agent (personnel de la PME, ADR-107). Aucun lien avec une organisation existante au moment de l'inscription.
+- Accès délégué par facture.gn lui-même (pas par une PME) — 4e type de délégation aux côtés du mandat cabinet, de l'assisted_session field_agent et de l'invitation viewer (DAT §3.5, ADR-107)
+- `ORGANIZATION.registration_source = agent_terrain`, jamais de membership persistante pour l'agent
 
-Réf : ADR-045, Parcours 0 Chemin B
+Réf : ADR-045, ADR-107, Parcours 0 Chemin B
 
 **B6 — Être reconnu sur plusieurs numéros de téléphone `[MUST]`**
 En tant qu'utilisateur avec un numéro personnel et un numéro professionnel, je veux être reconnu sur *620# quel que soit le numéro utilisé, afin de ne pas ressaisir mon code compte à chaque changement de téléphone.

@@ -7,7 +7,7 @@
 | Champ | Valeur |
 |---|---|
 | Date | 17 août 2026 |
-| Statut | Consolidé — Parcours 0, orchestrateur Djomy/Moneroo, écosystème cabinet/CGA, gestion client avancée/analytics/support (ADR-083/084/085), multi-numéros, Commande Publique/TELEMO, financement B2G (ADR-086 à 090), rôles V1 sans parcours dédié — contrôleur fiscal, stock, audit, clés API (ADR-097/104/105) |
+| Statut | Consolidé — Parcours 0, orchestrateur Djomy/Moneroo, écosystème cabinet/CGA, gestion client avancée/analytics/support (ADR-083/084/085), multi-numéros, Commande Publique/TELEMO, financement B2G (ADR-086 à 090), rôles V1 sans parcours dédié — contrôleur fiscal, stock, audit, clés API (ADR-097/104/105), Chemin B corrigé — Agent commercial terrain distinct de field_agent (ADR-107) |
 | Audience | Product Owner, UX, QA, Tech Leads |
 | Documents liés | PRD · CdC (§8 critères de réception) · Backlog · Grille-Offres · Fiches-de-poste · Charte Graphique · Registre ADR |
 
@@ -32,10 +32,12 @@ Avant de pouvoir suivre un parcours métier (émettre, encaisser, mandater), tou
 
 ### 1.2 Chemin B — Assisté terrain
 
-**Personas typiques : Mariama (marché, feature phone), Fanta (revendeuse en ligne, souvent non enregistrée)**
+**Personas : Sékou (Agent commercial terrain, facture.gn) inscrit Mariama (marché, feature phone) ou Fanta (revendeuse en ligne, souvent non enregistrée)**
 
-1. Un agent terrain (rôle `field_agent`) ouvre une `assisted_session` — jamais de membership persistante créée pour l'agent.
-2. L'agent saisit les informations de l'organisation pour le compte du marchand, avec consentement enregistré (`consent_recorded`).
+Sékou n'est **pas** le rôle RBAC `field_agent` — celui-ci désigne le personnel *de la PME elle-même* (assiste ses ventes une fois l'organisation déjà créée, ADR-045). Sékou est recruté et déployé par facture.gn pour ses activités de vulgarisation et d'acquisition terrain (ADR-107) ; il n'a aucun lien avec une organisation existante au moment où il agit, puisqu'elle n'existe pas encore.
+
+1. Sékou (Agent commercial terrain) initie une inscription — accès délégué par facture.gn lui-même, pas par une PME (4ᵉ type d'accès délégué, DAT §3.5, ADR-107). Jamais de membership persistante créée pour lui.
+2. Il saisit les informations de l'organisation pour le compte du marchand, avec consentement enregistré (`consent_recorded`). `ORGANIZATION.registration_source = agent_terrain`.
 3. Remise d'une carte physique portant le code compte (8 caractères Base32) — nécessaire pour toute connexion ultérieure depuis un téléphone qui n'est pas reconnu comme celui du propriétaire (ADR-046).
 4. Le marchand est immédiatement opérationnel, y compris pour émettre depuis *620# sans jamais avoir touché un smartphone.
 
@@ -308,7 +310,7 @@ Aucun chemin d'inscription ne bloque l'accès aux fonctionnalités de base en at
 | Mamadou | Écosystème cabinet, mandat, FEC | Détaillé (§3) |
 | Djénabou | Arrhes, no-show | Détaillé (§5) |
 | Ibrahima | Offline, livraison terrain | Détaillé (§6) |
-| Sékou | Agent terrain, pular, offline prolongé | Couvert par §1.2 et §6 — pas de parcours dédié supplémentaire nécessaire |
+| Sékou | Agent commercial terrain (facture.gn, pas un rôle RBAC), inscription Chemin B, pular | Détaillé (§1.2, ADR-107) |
 | Aminata | Devis, conversion | Détaillé (§7) |
 | Mariama | Onboarding Chemin B, USSD *620# | Détaillé (§1.2, §4) |
 | Fanta | Non-enregistré, e-commerce, livraison cash | Détaillé (§8) |

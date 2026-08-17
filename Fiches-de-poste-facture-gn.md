@@ -7,10 +7,10 @@
 | Champ | Valeur |
 |---|---|
 | Date | 17 août 2026 |
-| Statut | Référence recrutement — répond au risque G-03 (assistante et mentor non pourvus), résout G-06 (support client, ADR-085), et au dimensionnement du CdC §6 |
+| Statut | Référence recrutement — répond au risque G-03 (assistante et mentor non pourvus), résout G-06 (support client, ADR-085), et au dimensionnement du CdC §6 ; ajoute l'Agent commercial terrain, poste distinct du rôle RBAC field_agent (ADR-107) |
 | Audience | Sponsor exécutif, Directrice Générale, recrutement, candidats |
 | Documents liés | CdC · DAT · Risques-RACI (G-02, G-03, G-06) · Grille-Offres · Registre ADR |
-| Dimensionnement cible | 4 squads, 12 à 16 développeurs, 18 mois (MVP → V2), + 2 postes support client |
+| Dimensionnement cible | 4 squads, 12 à 16 développeurs, 18 mois (MVP → V2), + 2 postes support client, + Agent(s) commercial(aux) terrain (non chiffré) |
 
 > Ce document décrit chaque rôle nécessaire à la construction de facture.gn — gouvernance, puis les quatre squads techniques (Trust, Money, Capital, Platform). Chaque squad suit le même gabarit organisationnel : 1 Tech Lead, 2 à 3 développeurs, 1 QA. Aucun chiffrage salarial n'est inclus ici — le budget reste un poste ouvert (risque G-02), à traiter séparément.
 
@@ -203,7 +203,22 @@ Poste ouvert lors des travaux sur la Grille des Offres (ADR-085), pour honorer l
 
 ---
 
-## 7. Postes non-techniques en tension — risque G-03
+## 7. Agent commercial terrain — service commercial et vente (ADR-107)
+
+Poste distinct des rôles RBAC produit (aucun rapport avec `field_agent`, personnel *de la PME elle-même*, ADR-107) — recruté et déployé par facture.gn pour ses activités de vulgarisation et d'acquisition terrain. **Opérationnel dès aujourd'hui**, sans attendre la structuration complète du service auquel il est destiné à être rattaché.
+
+| Dimension | Détail |
+|---|---|
+| Mission | Inscrire sur le terrain des marchands n'ayant jamais utilisé facture.gn (Parcours 0, Chemin B) — le rendre opérationnel en une session, sans smartphone requis côté marchand |
+| Responsabilités | Recueillir le consentement du marchand (`consent_recorded`) ; saisir les informations de l'organisation ; remettre la carte physique portant le code compte (8 caractères Base32, ADR-046) |
+| Accès délégué | Délégation par facture.gn lui-même — pas par une PME. 4ᵉ type d'accès délégué du produit (DAT §3.5), création d'organisation (`registration_source = agent_terrain`), jamais un accès à une organisation existante. Jamais de membership persistante pour l'agent |
+| Compétences requises | Aisance terrain, langues locales (Sékou : pular, Labé) ; pédagogie pour expliquer un produit numérique à un public à littératie numérique variable |
+| Rattachement | Futur service commercial et vente — rattachement organisationnel prévu, pas une condition d'activation ; le poste existe et agit dès maintenant |
+| Effectif | Non chiffré à ce stade — dimensionnement du service commercial et vente hors périmètre de ce document |
+
+---
+
+## 8. Postes non-techniques en tension — risque G-03
 
 Le Registre des Risques identifie explicitement deux postes non pourvus comme risque actif (G-03) — statut distinct du support client ci-dessus, qui lui est déjà résolu par l'ouverture des postes :
 
@@ -216,7 +231,7 @@ Le Registre des Risques identifie explicitement deux postes non pourvus comme ri
 
 ---
 
-## 8. Synthèse — dimensionnement global
+## 9. Synthèse — dimensionnement global
 
 | Squad | Tech Lead | Développeurs | QA | Total |
 |---|---|---|---|---|

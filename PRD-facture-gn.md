@@ -45,7 +45,7 @@ Taux d'encaissement > 95 % — factures émises payées dans les 30 jours.
 | Mamadou Barry | Comptable agréé, cabinet Kaloum | Multi-organisation, export FEC |
 | Djénabou | Caissière Hôtel Riviera, arrhes/no-show | Smartphone, PWA |
 | Ibrahima | Livreur, zone Coyah, offline terrain | Smartphone, offline-first |
-| Sékou | Agent terrain EDG, Labé, pular | Offline prolongé |
+| Sékou | Agent commercial terrain facture.gn — pas une PME (ADR-107), Labé, pular | Inscription de marchands, Chemin B |
 | Aminata | Freelance design, devis → facture | Smartphone, lien de paiement |
 | Mariama | Commerçante marché Madina, feature phone | USSD *620# |
 | Fanta | Revendeuse en ligne, souvent non enregistrée | Smartphone, WhatsApp |

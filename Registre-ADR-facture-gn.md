@@ -621,5 +621,21 @@ Conséquences : `Grille-Offres-facture-gn.md` réécrit sur les sections 1 (nouv
 
 ---
 
+## Partie 22 — Agent commercial terrain distinct du rôle RBAC field_agent (ADR-107)
+
+Décision actée le 17 août 2026, en réponse à une confusion relevée par le Sponsor dans la maquette — mais dont l'origine remontait en amont, déjà présente dans Parcours-UX-Plan-de-test (§1.2) et Backlog (B5) : ces deux documents attribuaient l'inscription d'un nouveau marchand (Parcours 0, Chemin B) au rôle RBAC `field_agent`. Or `field_agent` est un rôle MVP scopé à une organisation **déjà existante** — personnel de la PME elle-même, assistant ses ventes via `assisted_session` (ADR-045/095) — sans aucun rapport avec le recrutement de nouvelles PME. B5 portait l'erreur plus loin encore, citant Fanta et Mariama — les personas **marchandes inscrites**, pas des agents — comme si elles exécutaient elles-mêmes l'inscription.
+
+**ADR-107 — Agent commercial terrain : persona opérationnelle facture.gn, distincte du rôle RBAC field_agent**
+
+Décision : Le Chemin B (agent qui inscrit un nouveau marchand n'ayant jamais utilisé facture.gn) est exécuté par un **Agent commercial terrain** — recruté et déployé par facture.gn pour ses activités de vulgarisation et d'acquisition terrain. **Déjà opérationnel dès aujourd'hui**, sans attendre la structuration d'un service commercial et vente dédié — ce service est son rattachement organisationnel futur, pas une condition pour que le poste existe et agisse sur le terrain. C'est bien un **accès délégué** (DAT §3.5), mais d'une nature différente des trois déjà cataloguées (mandat cabinet, `assisted_session` field_agent, invitation viewer) : ici la délégation vient de **facture.gn lui-même**, pas d'une PME — l'agent reçoit de facture.gn l'autorisation de créer une organisation en son nom et pour le compte du marchand consentant, jamais l'inverse. `ORGANIZATION.registration_source` reçoit une nouvelle valeur, `agent_terrain`, aux côtés de organic/apip/cga_referral/fodip/partner_3ae — le mécanisme de création reste technique­ment proche d'APIP (ADR-077), mais la délégation d'autorité, elle, est comptée et documentée comme un 4ᵉ type d'accès délégué (DAT §3.5).
+
+Le rôle RBAC `field_agent` (MVP, 9 rôles) reste inchangé dans son périmètre d'origine : personnel *de la PME elle-même*, assiste aux ventes d'une organisation déjà existante via `assisted_session`, jamais de membership persistante (DAT §3.5, ADR-045) — aucun rapport avec l'inscription de nouveaux marchands.
+
+Sékou (persona, CdC/PRD) est confirmé comme représentant l'Agent commercial terrain, pas le rôle RBAC `field_agent` — aucune persona MVP dédiée n'existe pour `field_agent` lui-même à ce stade (Ibrahima couvre `delivery_driver` ; `field_agent` reste décrit génériquement, sans incarnation nommée).
+
+Conséquences : Backlog B5 corrigé (Agent commercial terrain / Sékou, plus « agent terrain (Fanta, Mariama) »). Parcours-UX §1.2 corrigé pour attribuer le Chemin B à l'Agent commercial terrain plutôt qu'à `field_agent`. DAT §3.5 reçoit un 4ᵉ type d'accès délégué (facture.gn → Agent commercial terrain, création d'organisation) aux côtés des trois déjà cataloguées. ERD et openapi.yaml : `registration_source` gagne la valeur `agent_terrain`. CdC/PRD : la description de Sékou précisée comme persona facture.gn, pas persona PME. Fiches-de-poste reçoit une nouvelle entrée pour ce poste, opérationnel dès maintenant, avec son rattachement prévu au futur service commercial et vente noté pour mémoire — pas comme condition d'activation. Maquette (shell 1) : le bouton d'inscription assistée retiré de l'accueil field_agent — il n'aurait jamais dû s'y trouver — l'inscription d'un nouveau marchand reste accessible uniquement depuis le point d'entrée « 00 · Inscription », sans manipulation du sélecteur de rôle PME.
+
+---
+
 *facture.gn — Registre ADR — Document confidentiel — 17 août 2026*
 

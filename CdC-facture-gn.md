@@ -47,7 +47,7 @@ Tout pays hors Guinée. Paie/RH. Financement direct avant partenariat bancaire. 
 
 ### 3.1 Dix personas PME + DAF
 
-Aissatou (boutique), Mamadou (comptable agréé), Djénabou (hôtel, arrhes), Ibrahima (livreur, offline), Sékou (agent terrain, pular), Aminata (freelance, devis), Mariama (marché, *620#), Fanta (e-commerce, non enregistrée), Ousmane (client payeur), DGI (bénéficiaire structurel de l'assiette fiscale, ADR-079), DAF / Administration cliente (valide la liquidation des factures B2G, ADR-080).
+Aissatou (boutique), Mamadou (comptable agréé), Djénabou (hôtel, arrhes), Ibrahima (livreur, offline), Sékou (Agent commercial terrain facture.gn — pas une PME, inscrit de nouveaux marchands, ADR-107), Aminata (freelance, devis), Mariama (marché, *620#), Fanta (e-commerce, non enregistrée), Ousmane (client payeur), DGI (bénéficiaire structurel de l'assiette fiscale, ADR-079), DAF / Administration cliente (valide la liquidation des factures B2G, ADR-080).
 
 ### 3.2 Partenaires professionnels et institutionnels
 

@@ -1228,8 +1228,13 @@ components:
   schemas:
     RegistrationSource:
       type: string
-      enum: [organic, apip, cga_referral, fodip, partner_3ae]
-      description: Canal d'acquisition de l'organisation (ADR-077)
+      enum: [organic, apip, cga_referral, fodip, partner_3ae, agent_terrain]
+      description: >
+        Canal d'acquisition de l'organisation (ADR-077). agent_terrain
+        (ADR-107) — créée par un Agent commercial terrain recruté par
+        facture.gn (Parcours 0 Chemin B), jamais par le rôle RBAC
+        field_agent (personnel de la PME, sans rapport avec l'inscription
+        de nouveaux marchands).
 
     RegimeFiscal:
       type: string

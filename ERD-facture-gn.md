@@ -62,7 +62,7 @@ Remplace l'ancien champ `phone` unique sur USER — un même utilisateur est dé
 | nif | string | Unique, NOT NULL |
 | etax_number | string | Nullable (inscription incomplète B4, ou canal partenaire ADR-077) |
 | rccm | string | Nullable |
-| registration_source | enum | organic / apip / cga_referral / fodip / partner_3ae (ADR-077) |
+| registration_source | enum | organic / apip / cga_referral / fodip / partner_3ae / agent_terrain (ADR-077, ADR-107) |
 | dgi_verification_status | enum | unverified / pending / verified |
 | bank_account_details | jsonb | Nullable |
 | preferred_language | enum | fr / pular / malinke / soussou |
