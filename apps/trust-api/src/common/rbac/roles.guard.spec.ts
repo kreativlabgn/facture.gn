@@ -8,7 +8,7 @@ import { ROLES_KEY } from "./roles.decorator";
 // (E8), la seule résolution qui existait avant ce décorateur.
 function createReflector(
   roles: string[] | undefined,
-  idSource?: "invoice" | "organization" | "credit-note" | "customer" | "branch",
+  idSource?: "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request",
 ) {
   return {
     getAllAndOverride: vi.fn((key: string) => (key === ROLES_KEY ? roles : idSource)),
@@ -304,6 +304,35 @@ describe("RolesGuard", () => {
     };
     const guard = new RolesGuard(createReflector(["owner"], "branch"), prisma);
     const context = buildContext({ user: { id: "user-1" }, params: { id: "branch-inconnue" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout params.id comme une DEMANDE DE HAUSSE DE LIMITE DE CRÉDIT avec @OrganizationIdSource(\"credit-limit-request\") (E5, ADR-083)", async () => {
+    const prisma: any = {
+      creditLimitChangeRequest: {
+        findUnique: vi.fn().mockResolvedValue({ id: "clcr-1", organizationId: "org-1" }),
+      },
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "approver", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["approver"], "credit-limit-request"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "clcr-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.creditLimitChangeRequest.findUnique).toHaveBeenCalledWith({ where: { id: "clcr-1" } });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("refuse (404) proprement quand la demande de hausse de limite de crédit pointée par :id n'existe pas (E5) — jamais un 500 brut", async () => {
+    const prisma: any = {
+      creditLimitChangeRequest: { findUnique: vi.fn().mockResolvedValue(null) },
+      organizationMember: { findUnique: vi.fn() },
+    };
+    const guard = new RolesGuard(createReflector(["approver"], "credit-limit-request"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "clcr-inconnue" } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();

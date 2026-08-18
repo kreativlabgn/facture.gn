@@ -33,7 +33,7 @@ export class RolesGuard implements CanActivate {
     // déclarent pas @OrganizationIdSource() (issue/void/...).
     const idSource =
       this.reflector.getAllAndOverride<
-        "invoice" | "organization" | "credit-note" | "customer" | "branch" | undefined
+        "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request" | undefined
       >(ORGANIZATION_ID_SOURCE_KEY, [context.getHandler(), context.getClass()]) ?? "invoice";
 
     const request = context.switchToHttp().getRequest();
@@ -71,7 +71,7 @@ export class RolesGuard implements CanActivate {
   // fourni par l'appelant, jamais quand une ressource pré-existante est ciblée.
   private async resolveOrganizationId(
     request: any,
-    idSource: "invoice" | "organization" | "credit-note" | "customer" | "branch",
+    idSource: "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request",
   ): Promise<string> {
     if (request.params?.id) {
       // findUnique + 404 explicite plutôt que findUniqueOrThrow : une NotFoundError
@@ -106,6 +106,15 @@ export class RolesGuard implements CanActivate {
           throw new NotFoundException(`Succursale ${request.params.id} introuvable`);
         }
         return branch.organizationId;
+      }
+      if (idSource === "credit-limit-request") {
+        const creditLimitRequest = await this.prisma.creditLimitChangeRequest.findUnique({
+          where: { id: request.params.id },
+        });
+        if (!creditLimitRequest) {
+          throw new NotFoundException(`Demande de hausse de limite de crédit ${request.params.id} introuvable`);
+        }
+        return creditLimitRequest.organizationId;
       }
       const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
       if (!invoice) {

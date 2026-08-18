@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
+import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import {
   organizationScopedListQuerySchema,
   type OrganizationScopedListQueryDto,
@@ -10,6 +11,11 @@ import {
 import { createCustomerSchema, type CreateCustomerDto } from "./dto/create-customer.dto";
 import { mergeCustomerSchema, type MergeCustomerDto } from "./dto/merge-customer.dto";
 import { flagPublicEntitySchema, type FlagPublicEntityDto } from "./dto/flag-public-entity.dto";
+import { proposeCreditLimitSchema, type ProposeCreditLimitDto } from "./dto/propose-credit-limit.dto";
+import {
+  resolveCreditLimitRequestSchema,
+  type ResolveCreditLimitRequestDto,
+} from "./dto/resolve-credit-limit-request.dto";
 import { CustomersService } from "./customers.service";
 
 @ApiTags("customers")
@@ -66,5 +72,31 @@ export class CustomersController {
     @Body(new ZodValidationPipe(flagPublicEntitySchema)) dto: FlagPublicEntityDto,
   ) {
     return this.customersService.flagPublicEntity(id, dto.publicBuyerAccountId);
+  }
+
+  // E5, ADR-083 — même trio restreint que merge() (E4) et flagPublicEntity() (F16).
+  @Post(":id/credit-limit")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("customer")
+  proposeCreditLimit(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(proposeCreditLimitSchema)) dto: ProposeCreditLimitDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.customersService.proposeCreditLimit(id, dto.newLimit, user.id);
+  }
+
+  // E5, ADR-083 — idSource "credit-limit-request" (jamais "customer" : :id est
+  // l'id de LA DEMANDE, pas du client). Réservé au rôle approver uniquement,
+  // jamais owner/admin en substitut (RolesGuard applique déjà cette restriction).
+  @Post("credit-limit-requests/:id/resolve")
+  @Roles("approver")
+  @OrganizationIdSource("credit-limit-request")
+  resolveCreditLimitRequest(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(resolveCreditLimitRequestSchema)) dto: ResolveCreditLimitRequestDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.customersService.resolveCreditLimitRequest(id, user.id, dto.decision);
   }
 }

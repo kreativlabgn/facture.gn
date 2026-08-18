@@ -191,6 +191,177 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
   });
 });
 
+describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
+  function createFakePrismaForCreditLimit(opts: {
+    customer?: any;
+    organization?: any;
+  } = {}) {
+    return {
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          opts.customer ?? { id: "cust-1", organizationId: "org-1", creditLimit: 1_000_000n },
+        ),
+        update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          opts.organization ?? { id: "org-1", creditLimitApprovalThreshold: 2_000_000n },
+        ),
+      },
+      creditLimitChangeRequest: {
+        create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "clcr-1", status: "pending", ...data })),
+      },
+    };
+  }
+
+  it("applique la hausse immédiatement quand elle reste sous le seuil configuré de l'organisation", async () => {
+    const prisma = createFakePrismaForCreditLimit();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.proposeCreditLimit("cust-1", 2_500_000n, "user-1");
+
+    expect(prisma.customer.update).toHaveBeenCalledWith({
+      where: { id: "cust-1" },
+      data: { creditLimit: 2_500_000n },
+    });
+    expect(prisma.creditLimitChangeRequest.create).not.toHaveBeenCalled();
+    expect(result.creditLimit).toBe(2_500_000n);
+  });
+
+  it("met la hausse en attente d'approbation quand elle dépasse le seuil, sans toucher au client", async () => {
+    const prisma = createFakePrismaForCreditLimit();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.proposeCreditLimit("cust-1", 5_000_000n, "user-1");
+
+    expect(prisma.customer.update).not.toHaveBeenCalled();
+    expect(prisma.creditLimitChangeRequest.create).toHaveBeenCalledWith({
+      data: {
+        customerId: "cust-1",
+        organizationId: "org-1",
+        requestedByUserId: "user-1",
+        currentLimit: 1_000_000n,
+        requestedLimit: 5_000_000n,
+      },
+    });
+    expect(result.status).toBe("pending");
+  });
+
+  it("applique toujours immédiatement une BAISSE de limite, même importante", async () => {
+    const prisma = createFakePrismaForCreditLimit();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.proposeCreditLimit("cust-1", 100_000n, "user-1");
+
+    expect(prisma.customer.update).toHaveBeenCalledWith({
+      where: { id: "cust-1" },
+      data: { creditLimit: 100_000n },
+    });
+    expect(prisma.creditLimitChangeRequest.create).not.toHaveBeenCalled();
+    expect(result.creditLimit).toBe(100_000n);
+  });
+
+  it("retombe sur le seuil par défaut quand l'organisation n'a pas configuré de seuil", async () => {
+    const prisma = createFakePrismaForCreditLimit({
+      organization: { id: "org-1", creditLimitApprovalThreshold: null },
+    });
+    const service = new CustomersService(prisma as any);
+
+    // Hausse de 1_000_000n → 12_000_000n = +11_000_000n, au-delà du défaut (10_000_000n).
+    const result: any = await service.proposeCreditLimit("cust-1", 12_000_000n, "user-1");
+
+    expect(prisma.customer.update).not.toHaveBeenCalled();
+    expect(prisma.creditLimitChangeRequest.create).toHaveBeenCalled();
+    expect(result.status).toBe("pending");
+  });
+});
+
+describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
+  function createFakePrismaForResolve(opts: {
+    request?: any;
+    updateManyCount?: number;
+  } = {}) {
+    const tx = {
+      creditLimitChangeRequest: {
+        updateMany: vi.fn().mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
+      },
+      customer: {
+        update: vi.fn().mockResolvedValue({ id: "cust-1", creditLimit: 5_000_000n }),
+      },
+    };
+    return {
+      creditLimitChangeRequest: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          opts.request ?? {
+            id: "clcr-1",
+            customerId: "cust-1",
+            organizationId: "org-1",
+            requestedByUserId: "user-1",
+            requestedLimit: 5_000_000n,
+            status: "pending",
+          },
+        ),
+      },
+      $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
+      __tx: tx,
+    };
+  }
+
+  it("applique creditLimit au montant demandé et passe le statut à approved", async () => {
+    const prisma = createFakePrismaForResolve();
+    const service = new CustomersService(prisma as any);
+
+    await service.resolveCreditLimitRequest("clcr-1", "user-2", "approved");
+
+    expect(prisma.__tx.creditLimitChangeRequest.updateMany).toHaveBeenCalledWith({
+      where: { id: "clcr-1", status: "pending" },
+      data: { status: "approved", resolvedAt: expect.any(Date), resolvedByUserId: "user-2" },
+    });
+    expect(prisma.__tx.customer.update).toHaveBeenCalledWith({
+      where: { id: "cust-1" },
+      data: { creditLimit: 5_000_000n },
+    });
+  });
+
+  it("ne touche jamais creditLimit sur rejet", async () => {
+    const prisma = createFakePrismaForResolve();
+    const service = new CustomersService(prisma as any);
+
+    await service.resolveCreditLimitRequest("clcr-1", "user-2", "rejected");
+
+    expect(prisma.__tx.creditLimitChangeRequest.updateMany).toHaveBeenCalledWith({
+      where: { id: "clcr-1", status: "pending" },
+      data: { status: "rejected", resolvedAt: expect.any(Date), resolvedByUserId: "user-2" },
+    });
+    expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse que le demandeur approuve sa propre demande", async () => {
+    const prisma = createFakePrismaForResolve({
+      request: {
+        id: "clcr-1",
+        customerId: "cust-1",
+        organizationId: "org-1",
+        requestedByUserId: "user-1",
+        requestedLimit: 5_000_000n,
+        status: "pending",
+      },
+    });
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.resolveCreditLimitRequest("clcr-1", "user-1", "approved")).rejects.toThrow(/propre demande/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse une double résolution concurrente de la même demande", async () => {
+    const prisma = createFakePrismaForResolve({ updateManyCount: 0 });
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.resolveCreditLimitRequest("clcr-1", "user-2", "approved")).rejects.toThrow(/résolue/);
+    expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("findAllByOrganization", () => {
   it("liste les clients de l'organisation, paginés avec une limite par défaut", async () => {
     const prisma: any = {
