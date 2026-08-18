@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InvoiceEventType, type PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -7,6 +7,7 @@ import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
 import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organization.dto";
 import type { CreateFromApipDto } from "./dto/create-from-apip.dto";
+import type { InviteOrganizationMemberDto } from "./dto/invite-organization-member.dto";
 
 const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
 const DEFAULT_LIST_PAGE_SIZE = 50;
@@ -293,5 +294,46 @@ export class OrganizationsService {
     }
 
     return this.prisma.invoiceEvent.findMany({ where, orderBy: { createdAt: "desc" }, take, skip });
+  }
+
+  // F14, ADR-104 — première story à construire un mécanisme d'invitation au
+  // niveau organisation (jusqu'ici, seul role: "owner" était créé, à la
+  // création). Même pattern que PracticesService.inviteMember() (F8) :
+  // résolution par UserPhone, aucun flux d'acceptation, ajout immédiat.
+  // L'invité doit déjà avoir un compte facture.gn — inviter un utilisateur sans
+  // compte est un mécanisme distinct (F10/ADR-096), hors scope ici.
+  async inviteMember(organizationId: string, dto: InviteOrganizationMemberDto) {
+    const userPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
+    if (!userPhone) {
+      throw new NotFoundException(`Compte introuvable pour le numéro ${dto.msisdn}`);
+    }
+
+    // Contrainte unique (organizationId, userId) permanente (pas de "leftAt"
+    // comme PracticeMember, seulement revokedAt) : une ligne existante, même
+    // révoquée, bloque toute nouvelle invitation — pas de réactivation
+    // silencieuse (voir PLAN "Alternatives écartées").
+    const existingMembership = await this.prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId, userId: userPhone.userId } },
+    });
+    if (existingMembership) {
+      throw new ConflictException(`Cet utilisateur est déjà membre de l'organisation ${organizationId}`);
+    }
+
+    try {
+      return await this.prisma.organizationMember.create({
+        data: { organizationId, userId: userPhone.userId, role: dto.role },
+      });
+    } catch (error) {
+      // Le findUnique ci-dessus ne protège pas contre deux invitations
+      // concurrentes du même utilisateur — la contrainte unique
+      // (organizationId, userId) reste le seul garde-fou réel sous concurrence.
+      // Catch générique (pas isUniqueConstraintViolation) : cette table n'a
+      // qu'une seule contrainte unique possible ici, aucune ambiguïté sur la
+      // cause d'un P2002 à ce point du code.
+      if (typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002") {
+        throw new ConflictException(`Cet utilisateur est déjà membre de l'organisation ${organizationId}`);
+      }
+      throw error;
+    }
   }
 }
