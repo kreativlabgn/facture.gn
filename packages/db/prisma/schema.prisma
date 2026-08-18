@@ -224,6 +224,9 @@ enum OrganizationRole {
   field_agent
   delivery_driver
   client_portal
+  // G4, ADR-097 — lecture seule stricte du journal d'audit (invoice_event),
+  // aucune permission d'écriture, aucune exception.
+  auditor
 }
 
 // Le rôle n'est jamais mis en cache dans le JWT (voir AuthTokenService) : toujours

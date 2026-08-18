@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
@@ -11,6 +11,7 @@ import {
   createAssistedOrganizationSchema,
   type CreateAssistedOrganizationDto,
 } from "./dto/create-assisted-organization.dto";
+import { auditLogQuerySchema, type AuditLogQueryDto } from "./dto/audit-log-query.dto";
 import { OrganizationsService } from "./organizations.service";
 
 @ApiTags("organizations")
@@ -86,5 +87,18 @@ export class OrganizationsController {
   @OrganizationIdSource("organization")
   findOne(@Param("id") organizationId: string) {
     return this.organizationsService.findOneDetail(organizationId);
+  }
+
+  // G4, ADR-097 — lecture seule stricte, aucune exception : auditor s'ajoute au
+  // trio owner/admin déjà présent sur trust-score/findOne (mêmes routes de lecture
+  // organisationnelle), jamais sur une route d'écriture.
+  @Get(":id/audit-log")
+  @Roles("owner", "admin", "auditor")
+  @OrganizationIdSource("organization")
+  listAuditLog(
+    @Param("id") organizationId: string,
+    @Query(new ZodValidationPipe(auditLogQuerySchema)) query: AuditLogQueryDto,
+  ) {
+    return this.organizationsService.listAuditLog(organizationId, query);
   }
 }

@@ -3,6 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { describe, expect, it, vi } from "vitest";
 import { IS_PUBLIC_KEY } from "../auth/public.decorator";
 import { DgiVerificationAuthGuard } from "../common/dgi-verification-auth.guard";
+import { ROLES_KEY } from "../common/rbac/roles.decorator";
 import { OrganizationsController } from "./organizations.controller";
 
 // '__guards__' est la clé interne @nestjs/common (GUARDS_METADATA, non exportée
@@ -33,5 +34,23 @@ describe("OrganizationsController — POST /organizations/:id/verify-dgi (B2)", 
 
     expect(service.verifyDgi).toHaveBeenCalledWith("org-1");
     expect(result).toEqual({ dgiVerificationStatus: "verified" });
+  });
+});
+
+describe("OrganizationsController — GET /organizations/:id/audit-log (G4, ADR-097)", () => {
+  it("restreint la route exactement à owner/admin/auditor — lecture seule, aucun rôle d'écriture", () => {
+    const reflector = new Reflector();
+    const roles = reflector.get(ROLES_KEY, OrganizationsController.prototype.listAuditLog);
+
+    expect(roles).toEqual(["owner", "admin", "auditor"]);
+  });
+
+  it("délègue au service avec l'id d'organisation du paramètre d'URL et les filtres de la query", async () => {
+    const service = { listAuditLog: vi.fn().mockResolvedValue([]) };
+    const controller = new OrganizationsController(service as any);
+
+    await controller.listAuditLog("org-1", { category: "paiement" });
+
+    expect(service.listAuditLog).toHaveBeenCalledWith("org-1", { category: "paiement" });
   });
 });

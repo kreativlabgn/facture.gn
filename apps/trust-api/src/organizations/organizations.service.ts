@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import { InvoiceEventType, type PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
@@ -9,6 +9,40 @@ import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organi
 import type { CreateFromApipDto } from "./dto/create-from-apip.dto";
 
 const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
+const DEFAULT_LIST_PAGE_SIZE = 50;
+const MAX_LIST_PAGE_SIZE = 100;
+
+// G4, ADR-097 — mapping statique, jugement de classification documenté ici plutôt
+// qu'un contrat de spec figé (voir PLAN "Risques"). "paiement" = tout événement lié
+// à un mouvement ou une communication d'argent ; "facture" = tout le reste du cycle
+// de vie du document. Record<InvoiceEventType, ...> plutôt qu'une liste + complément :
+// le compilateur refuse toute build tant qu'un futur type ajouté à l'enum n'a pas
+// une entrée explicite ici — la classification ne peut jamais diverger en silence.
+const EVENT_CATEGORY_BY_TYPE: Record<InvoiceEventType, "facture" | "paiement"> = {
+  cancellation_indemnity: "facture",
+  no_show_forfeited: "facture",
+  dispute_raised: "facture",
+  dispute_resolved: "facture",
+  payment_reminder_sent: "paiement",
+  payment_link_generated: "paiement",
+  payment_link_expired: "paiement",
+  payment_link_regenerated: "paiement",
+  invoice_voided: "facture",
+  invoice_converted: "facture",
+  overpayment_recorded: "paiement",
+  refund_issued: "paiement",
+  suspicious_cash_pattern_detected: "paiement",
+  stale_invoice_detected: "facture",
+  mandate_requested: "facture",
+  mandate_granted: "facture",
+  mandate_revoked: "facture",
+  mandate_expired: "facture",
+  revenue_share_credited: "paiement",
+  regime_change: "facture",
+  delegated_key_tier_changed: "facture",
+  validation_revoked: "facture",
+  liquidation_validated: "facture",
+};
 
 @Injectable()
 export class OrganizationsService {
@@ -235,5 +269,29 @@ export class OrganizationsService {
   // de sensibilité comparable (bankAccountDetails, chiffreAffairesBrutDeclare).
   async findOneDetail(organizationId: string) {
     return this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+  }
+
+  // G4, ADR-097 — auditor (ou owner/admin) : lecture seule stricte, aucune
+  // exception. Scopé via invoice.organizationId (invoice_event n'a pas de FK
+  // organisation directe) — même relation que getVerifiedPaymentRatio() ci-dessus.
+  // "permission" n'est volontairement pas une valeur de category acceptée ici :
+  // aucun historique de changement de rôle n'existe encore dans ce repo (voir
+  // PLAN "Alternatives écartées") — l'exposer renverrait une liste vide qui
+  // masquerait silencieusement ce trou plutôt que de le rendre visible.
+  async listAuditLog(organizationId: string, filters: { category?: "facture" | "paiement"; take?: number; skip?: number }) {
+    const take = Math.min(filters.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
+    const skip = filters.skip ?? 0;
+
+    const where: { invoice: { organizationId: string }; type?: { in: InvoiceEventType[] } } = {
+      invoice: { organizationId },
+    };
+    if (filters.category) {
+      const matchingTypes = Object.values(InvoiceEventType).filter(
+        (type) => EVENT_CATEGORY_BY_TYPE[type] === filters.category,
+      );
+      where.type = { in: matchingTypes };
+    }
+
+    return this.prisma.invoiceEvent.findMany({ where, orderBy: { createdAt: "desc" }, take, skip });
   }
 }
