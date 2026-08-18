@@ -8,7 +8,7 @@ import { ROLES_KEY } from "./roles.decorator";
 // (E8), la seule résolution qui existait avant ce décorateur.
 function createReflector(
   roles: string[] | undefined,
-  idSource?: "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request",
+  idSource?: "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request" | "product",
 ) {
   return {
     getAllAndOverride: vi.fn((key: string) => (key === ROLES_KEY ? roles : idSource)),
@@ -333,6 +333,33 @@ describe("RolesGuard", () => {
     };
     const guard = new RolesGuard(createReflector(["approver"], "credit-limit-request"), prisma);
     const context = buildContext({ user: { id: "user-1" }, params: { id: "clcr-inconnue" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout params.id comme un PRODUIT avec @OrganizationIdSource(\"product\") (E6)", async () => {
+    const prisma: any = {
+      product: { findUnique: vi.fn().mockResolvedValue({ id: "product-1", organizationId: "org-1" }) },
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"], "product"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "product-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.product.findUnique).toHaveBeenCalledWith({ where: { id: "product-1" } });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  it("refuse (404) proprement quand le produit pointé par :id n'existe pas (E6) — jamais un 500 brut", async () => {
+    const prisma: any = {
+      product: { findUnique: vi.fn().mockResolvedValue(null) },
+      organizationMember: { findUnique: vi.fn() },
+    };
+    const guard = new RolesGuard(createReflector(["owner"], "product"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "product-inconnu" } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
