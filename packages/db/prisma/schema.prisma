@@ -210,6 +210,8 @@ model User {
   practiceMemberships           PracticeMember[]
   mandatesGranted               Mandate[]
   publicBuyerAccountMemberships PublicBuyerAccountMember[]
+  apiKeysCreated                ApiKey[]                   @relation("ApiKeyCreator")
+  apiKeysRevoked                ApiKey[]                   @relation("ApiKeyRevoker")
 
   @@map("user")
 }
@@ -263,16 +265,20 @@ enum ApiKeyEnvironment {
 // story (aucun mécanisme d'authentification par clé construit ici) — restera
 // null jusqu'à une story future.
 model ApiKey {
-  id             String            @id @default(uuid())
-  organizationId String            @map("organization_id")
-  environment    ApiKeyEnvironment
-  keyHash        String            @map("key_hash")
-  keySuffix      String            @map("key_suffix")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  revokedAt      DateTime?         @map("revoked_at")
-  lastUsedAt     DateTime?         @map("last_used_at")
+  id              String            @id @default(uuid())
+  organizationId  String            @map("organization_id")
+  environment     ApiKeyEnvironment
+  keyHash         String            @map("key_hash")
+  keySuffix       String            @map("key_suffix")
+  createdByUserId String            @map("created_by_user_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  revokedAt       DateTime?         @map("revoked_at")
+  revokedByUserId String?           @map("revoked_by_user_id")
+  lastUsedAt      DateTime?         @map("last_used_at")
 
-  organization Organization @relation(fields: [organizationId], references: [id])
+  organization  Organization @relation(fields: [organizationId], references: [id])
+  createdByUser User         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id])
+  revokedByUser User?        @relation("ApiKeyRevoker", fields: [revokedByUserId], references: [id])
 
   @@map("api_key")
 }

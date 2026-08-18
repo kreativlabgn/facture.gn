@@ -14,12 +14,16 @@ export class ApiKeysService {
 
   // F15, ADR-097 — secret retourné une seule fois, jamais stocké tel quel
   // (argon2id via PasswordService, même primitive que les mots de passe).
-  async createApiKey(organizationId: string, environment: ApiKeyEnvironment) {
+  // createdByUserId tracé (trouvé en revue dev-security-reviewer) : une clé
+  // d'API est un secret d'organisation, savoir qui l'a générée importe autant
+  // que pour un mot de passe temporaire (B3) — sans ça, aucune organisation
+  // à plusieurs owner/admin/developer_api ne peut savoir qui a créé quoi.
+  async createApiKey(organizationId: string, environment: ApiKeyEnvironment, requestedByUserId: string) {
     const { secret, keySuffix } = generateApiKeySecret(environment);
     const keyHash = await this.passwordService.hash(secret);
 
     const apiKey = await this.prisma.apiKey.create({
-      data: { organizationId, environment, keyHash, keySuffix },
+      data: { organizationId, environment, keyHash, keySuffix, createdByUserId: requestedByUserId },
     });
 
     return { id: apiKey.id, secret, environment };
@@ -47,7 +51,7 @@ export class ApiKeysService {
   // CustomersService.merge() (E4). NotFoundException générique dans les deux cas
   // (clé d'une autre organisation vs clé inexistante) : ne révèle jamais si une
   // clé existe ailleurs.
-  async revokeApiKey(organizationId: string, apiKeyId: string) {
+  async revokeApiKey(organizationId: string, apiKeyId: string, revokedByUserId: string) {
     const apiKey = await this.prisma.apiKey.findUniqueOrThrow({ where: { id: apiKeyId } });
     if (apiKey.organizationId !== organizationId) {
       throw new NotFoundException(`Clé API ${apiKeyId} introuvable pour cette organisation`);
@@ -56,7 +60,10 @@ export class ApiKeysService {
       throw new ConflictException(`Clé API ${apiKeyId} déjà révoquée`);
     }
 
-    return this.prisma.apiKey.update({ where: { id: apiKeyId }, data: { revokedAt: new Date() } });
+    return this.prisma.apiKey.update({
+      where: { id: apiKeyId },
+      data: { revokedAt: new Date(), revokedByUserId },
+    });
   }
 
   private buildLabel(environment: ApiKeyEnvironment, keySuffix: string): string {

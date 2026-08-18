@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
+import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { createApiKeySchema, type CreateApiKeyDto } from "./dto/create-api-key.dto";
 import { ApiKeysService } from "./api-keys.service";
 
@@ -22,8 +23,9 @@ export class ApiKeysController {
   create(
     @Param("id") organizationId: string,
     @Body(new ZodValidationPipe(createApiKeySchema)) dto: CreateApiKeyDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.apiKeysService.createApiKey(organizationId, dto.environment);
+    return this.apiKeysService.createApiKey(organizationId, dto.environment, user.id);
   }
 
   @Get()
@@ -42,7 +44,11 @@ export class ApiKeysController {
   @Post(":apiKeyId/revoke")
   @Roles("owner", "admin", "developer_api")
   @OrganizationIdSource("organization")
-  revoke(@Param("id") organizationId: string, @Param("apiKeyId") apiKeyId: string) {
-    return this.apiKeysService.revokeApiKey(organizationId, apiKeyId);
+  revoke(
+    @Param("id") organizationId: string,
+    @Param("apiKeyId") apiKeyId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.apiKeysService.revokeApiKey(organizationId, apiKeyId, user.id);
   }
 }

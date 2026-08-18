@@ -34,7 +34,7 @@ describe("ApiKeysService.createApiKey (F15, ADR-097)", () => {
     const passwordService = createFakePasswordService();
     const service = new ApiKeysService(prisma as any, passwordService as any);
 
-    const result = await service.createApiKey("org-1", "production");
+    const result = await service.createApiKey("org-1", "production", "user-1");
 
     expect(result.secret.startsWith("fg_live_")).toBe(true);
     expect(prisma.apiKey.create).toHaveBeenCalledWith({
@@ -42,6 +42,7 @@ describe("ApiKeysService.createApiKey (F15, ADR-097)", () => {
         organizationId: "org-1",
         environment: "production",
         keyHash: `hashed(${result.secret})`,
+        createdByUserId: "user-1",
       }),
     });
     // Le hash stocké n'est jamais égal au secret en clair.
@@ -54,7 +55,7 @@ describe("ApiKeysService.createApiKey (F15, ADR-097)", () => {
     const passwordService = createFakePasswordService();
     const service = new ApiKeysService(prisma as any, passwordService as any);
 
-    const result = await service.createApiKey("org-1", "sandbox");
+    const result = await service.createApiKey("org-1", "sandbox", "user-1");
 
     expect(result.secret.endsWith(result.secret.slice(-4))).toBe(true);
     const createCall = prisma.apiKey.create.mock.calls[0][0];
@@ -105,11 +106,11 @@ describe("ApiKeysService.revokeApiKey (F15, ADR-097)", () => {
     });
     const service = new ApiKeysService(prisma as any, createFakePasswordService() as any);
 
-    await service.revokeApiKey("org-1", "apikey-1");
+    await service.revokeApiKey("org-1", "apikey-1", "user-2");
 
     expect(prisma.apiKey.update).toHaveBeenCalledWith({
       where: { id: "apikey-1" },
-      data: { revokedAt: expect.any(Date) },
+      data: { revokedAt: expect.any(Date), revokedByUserId: "user-2" },
     });
   });
 
@@ -119,7 +120,7 @@ describe("ApiKeysService.revokeApiKey (F15, ADR-097)", () => {
     });
     const service = new ApiKeysService(prisma as any, createFakePasswordService() as any);
 
-    await expect(service.revokeApiKey("org-attaquant", "apikey-1")).rejects.toThrow(/introuvable/);
+    await expect(service.revokeApiKey("org-attaquant", "apikey-1", "user-2")).rejects.toThrow(/introuvable/);
     expect(prisma.apiKey.update).not.toHaveBeenCalled();
   });
 
@@ -129,7 +130,7 @@ describe("ApiKeysService.revokeApiKey (F15, ADR-097)", () => {
     });
     const service = new ApiKeysService(prisma as any, createFakePasswordService() as any);
 
-    await expect(service.revokeApiKey("org-1", "apikey-1")).rejects.toThrow(/déjà révoquée/);
+    await expect(service.revokeApiKey("org-1", "apikey-1", "user-2")).rejects.toThrow(/déjà révoquée/);
     expect(prisma.apiKey.update).not.toHaveBeenCalled();
   });
 });
