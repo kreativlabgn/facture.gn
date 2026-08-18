@@ -15,17 +15,34 @@ const MAX_LIST_PAGE_SIZE = 100;
 // G4, ADR-097 — mapping statique, jugement de classification documenté ici plutôt
 // qu'un contrat de spec figé (voir PLAN "Risques"). "paiement" = tout événement lié
 // à un mouvement ou une communication d'argent ; "facture" = tout le reste du cycle
-// de vie du document (le complément, jamais une seconde liste à maintenir en double).
-const PAYMENT_RELATED_EVENT_TYPES: InvoiceEventType[] = [
-  "payment_reminder_sent",
-  "payment_link_generated",
-  "payment_link_expired",
-  "payment_link_regenerated",
-  "overpayment_recorded",
-  "refund_issued",
-  "revenue_share_credited",
-  "suspicious_cash_pattern_detected",
-];
+// de vie du document. Record<InvoiceEventType, ...> plutôt qu'une liste + complément :
+// le compilateur refuse toute build tant qu'un futur type ajouté à l'enum n'a pas
+// une entrée explicite ici — la classification ne peut jamais diverger en silence.
+const EVENT_CATEGORY_BY_TYPE: Record<InvoiceEventType, "facture" | "paiement"> = {
+  cancellation_indemnity: "facture",
+  no_show_forfeited: "facture",
+  dispute_raised: "facture",
+  dispute_resolved: "facture",
+  payment_reminder_sent: "paiement",
+  payment_link_generated: "paiement",
+  payment_link_expired: "paiement",
+  payment_link_regenerated: "paiement",
+  invoice_voided: "facture",
+  invoice_converted: "facture",
+  overpayment_recorded: "paiement",
+  refund_issued: "paiement",
+  suspicious_cash_pattern_detected: "paiement",
+  stale_invoice_detected: "facture",
+  mandate_requested: "facture",
+  mandate_granted: "facture",
+  mandate_revoked: "facture",
+  mandate_expired: "facture",
+  revenue_share_credited: "paiement",
+  regime_change: "facture",
+  delegated_key_tier_changed: "facture",
+  validation_revoked: "facture",
+  liquidation_validated: "facture",
+};
 
 @Injectable()
 export class OrganizationsService {
@@ -268,11 +285,11 @@ export class OrganizationsService {
     const where: { invoice: { organizationId: string }; type?: { in: InvoiceEventType[] } } = {
       invoice: { organizationId },
     };
-    if (filters.category === "paiement") {
-      where.type = { in: PAYMENT_RELATED_EVENT_TYPES };
-    } else if (filters.category === "facture") {
-      const allTypes = Object.values(InvoiceEventType);
-      where.type = { in: allTypes.filter((type) => !PAYMENT_RELATED_EVENT_TYPES.includes(type)) };
+    if (filters.category) {
+      const matchingTypes = Object.values(InvoiceEventType).filter(
+        (type) => EVENT_CATEGORY_BY_TYPE[type] === filters.category,
+      );
+      where.type = { in: matchingTypes };
     }
 
     return this.prisma.invoiceEvent.findMany({ where, orderBy: { createdAt: "desc" }, take, skip });
