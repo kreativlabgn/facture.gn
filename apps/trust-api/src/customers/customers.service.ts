@@ -215,7 +215,11 @@ export class CustomersService {
         },
       });
 
-      if (data.phone) {
+      // .has() avant .set() : garde la PREMIÈRE occurrence du téléphone dans le lot
+      // comme cible unique — sans cette garde, 3 lignes partageant le même
+      // téléphone formeraient une chaîne (ligne3→ligne2→ligne1) au lieu que
+      // toutes pointent vers la première occurrence.
+      if (data.phone && !phoneToBatchCustomerId.has(data.phone)) {
         phoneToBatchCustomerId.set(data.phone, customer.id);
       }
 

@@ -420,6 +420,20 @@ describe("CustomersService — importCustomers (E9, ADR-100)", () => {
     expect(results[1]).toMatchObject({ status: "created", possibleDuplicateOf: results[0].customerId });
   });
 
+  it("pointe TOUTES les occurrences suivantes vers la PREMIÈRE ligne du lot, jamais une chaîne, quand 3+ lignes partagent le même téléphone", async () => {
+    const prisma = createFakePrismaForImport();
+    const service = new CustomersService(prisma as any);
+
+    const results: any[] = await service.importCustomers("org-1", [
+      { name: "Boutique Fanta", phone: "+224622334455" },
+      { name: "Boutique Fanta (doublon 1)", phone: "+224622334455" },
+      { name: "Boutique Fanta (doublon 2)", phone: "+224622334455" },
+    ]);
+
+    expect(results[1].possibleDuplicateOf).toBe(results[0].customerId);
+    expect(results[2].possibleDuplicateOf).toBe(results[0].customerId);
+  });
+
   it("rapporte une erreur ligne par ligne pour un nom vide, sans bloquer les autres lignes valides", async () => {
     const prisma = createFakePrismaForImport();
     const service = new CustomersService(prisma as any);
