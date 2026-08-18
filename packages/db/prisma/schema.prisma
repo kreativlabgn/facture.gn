@@ -230,9 +230,9 @@ enum OrganizationRole {
   // aucune permission d'écriture, aucune exception.
   auditor
   // E5, ADR-083 — seul rôle habilité à résoudre une CreditLimitChangeRequest
-  // (jamais owner/admin en substitut, "jamais une décision unilatérale").
-  // Défini sans cas d'usage concret depuis le DAT initial (ADR-105) ; reçoit
-  // ici son premier contenu fonctionnel réel.
+  // (jamais owner/admin en substitut, "jamais une décision unilatérale"). ADR-083
+  // le note déjà lui-même : "jusqu'ici défini sans cas d'usage concret au-delà
+  // d'un intitulé générique" — reçoit ici son premier contenu fonctionnel réel.
   approver
 }
 
