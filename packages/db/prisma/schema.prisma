@@ -210,6 +210,8 @@ model User {
   practiceMemberships           PracticeMember[]
   mandatesGranted               Mandate[]
   publicBuyerAccountMemberships PublicBuyerAccountMember[]
+  apiKeysCreated                ApiKey[]                   @relation("ApiKeyCreator")
+  apiKeysRevoked                ApiKey[]                   @relation("ApiKeyRevoker")
 
   @@map("user")
 }
@@ -239,6 +241,46 @@ enum OrganizationRole {
   // seule stricte (factures + export FEC), invité par l'organisation elle-même —
   // aucun rapport avec la persona institutionnelle DGI nationale (ADR-079).
   tax_controller_readonly
+  // F15, ADR-097 — gestion self-service des clés API (génération/révocation) et
+  // consultation des logs d'appels. Seule la gestion des clés est construite ici
+  // (voir PLAN "Alternatives écartées") — l'authentification par clé API elle-même
+  // et les logs restent un chantier distinct, non résolu.
+  developer_api
+}
+
+// F15, ADR-097 — distingue les clés de test (sandbox) des clés live, cohérent
+// avec le label affiché ("fg_live_••••9f2a" / "fg_test_••••") — openapi
+// ApiKey/ApiKeyCreated.
+enum ApiKeyEnvironment {
+  production
+  sandbox
+}
+
+// F15, ADR-097 — secret jamais stocké en clair (keyHash, argon2id via
+// PasswordService, même primitive que les mots de passe). keySuffix : 4
+// derniers caractères du secret en clair, conservés pour permettre à
+// l'utilisateur de reconnaître sa clé dans la liste sans jamais exposer le
+// secret complet après sa création. lastUsedAt inclus pour compatibilité avec
+// le schéma openapi déjà publié, mais jamais renseigné par aucun code de cette
+// story (aucun mécanisme d'authentification par clé construit ici) — restera
+// null jusqu'à une story future.
+model ApiKey {
+  id              String            @id @default(uuid())
+  organizationId  String            @map("organization_id")
+  environment     ApiKeyEnvironment
+  keyHash         String            @map("key_hash")
+  keySuffix       String            @map("key_suffix")
+  createdByUserId String            @map("created_by_user_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  revokedAt       DateTime?         @map("revoked_at")
+  revokedByUserId String?           @map("revoked_by_user_id")
+  lastUsedAt      DateTime?         @map("last_used_at")
+
+  organization  Organization @relation(fields: [organizationId], references: [id])
+  createdByUser User         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id])
+  revokedByUser User?        @relation("ApiKeyRevoker", fields: [revokedByUserId], references: [id])
+
+  @@map("api_key")
 }
 
 // E5, ADR-083 — même pattern qu'AccountRecoveryRequest (pending/approved/rejected,
@@ -382,6 +424,7 @@ model Organization {
   branches            Branch[]
   signingKey          OrganizationSigningKey?
   creditLimitRequests CreditLimitChangeRequest[]
+  apiKeys             ApiKey[]
 
   @@map("organization")
 }
