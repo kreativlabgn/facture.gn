@@ -195,18 +195,20 @@ model User {
   // Nullable : créé au premier accès *620# (décision utilisateur), jamais
   // depuis la PWA. pinFailedAttempts/pinLockedUntil : 3 essais puis blocage
   // 30 min (§3.3), voir ussd-auth.service.ts.
-  pinHash          String?   @map("pin_hash")
-  pinFailedAttempts Int      @default(0) @map("pin_failed_attempts")
-  pinLockedUntil   DateTime? @map("pin_locked_until")
+  pinHash           String?   @map("pin_hash")
+  pinFailedAttempts Int       @default(0) @map("pin_failed_attempts")
+  pinLockedUntil    DateTime? @map("pin_locked_until")
 
-  phones                   UserPhone[]
-  invoiceEvents            InvoiceEvent[]
-  memberships              OrganizationMember[]
-  recoveryRequestsMade     AccountRecoveryRequest[] @relation("RecoveryRequester")
-  recoveryRequestsResolved AccountRecoveryRequest[] @relation("RecoveryResolver")
-  assistedSessions         AssistedSession[]
-  practiceMemberships      PracticeMember[]
-  mandatesGranted          Mandate[]
+  phones                        UserPhone[]
+  invoiceEvents                 InvoiceEvent[]
+  memberships                   OrganizationMember[]
+  recoveryRequestsMade          AccountRecoveryRequest[]   @relation("RecoveryRequester")
+  recoveryRequestsResolved      AccountRecoveryRequest[]   @relation("RecoveryResolver")
+  creditLimitRequestsMade       CreditLimitChangeRequest[] @relation("CreditLimitRequester")
+  creditLimitRequestsResolved   CreditLimitChangeRequest[] @relation("CreditLimitResolver")
+  assistedSessions              AssistedSession[]
+  practiceMemberships           PracticeMember[]
+  mandatesGranted               Mandate[]
   publicBuyerAccountMemberships PublicBuyerAccountMember[]
 
   @@map("user")
@@ -227,6 +229,46 @@ enum OrganizationRole {
   // G4, ADR-097 — lecture seule stricte du journal d'audit (invoice_event),
   // aucune permission d'écriture, aucune exception.
   auditor
+  // E5, ADR-083 — seul rôle habilité à résoudre une CreditLimitChangeRequest
+  // (jamais owner/admin en substitut, "jamais une décision unilatérale"). ADR-083
+  // le note déjà lui-même : "jusqu'ici défini sans cas d'usage concret au-delà
+  // d'un intitulé générique" — reçoit ici son premier contenu fonctionnel réel.
+  approver
+}
+
+// E5, ADR-083 — même pattern qu'AccountRecoveryRequest (pending/approved/rejected,
+// resolvedByUserId/resolvedAt, transaction updateMany pour la sécurité de
+// concurrence) : approbation obligatoire d'une hausse de credit_limit au-delà
+// du seuil configuré (Organization.creditLimitApprovalThreshold). Une baisse,
+// ou une hausse sous le seuil, ne passe jamais par cette table — appliquée
+// directement par CustomersService.proposeCreditLimit().
+enum CreditLimitChangeStatus {
+  pending
+  approved
+  rejected
+}
+
+model CreditLimitChangeRequest {
+  id                String                  @id @default(uuid())
+  customerId        String                  @map("customer_id")
+  organizationId    String                  @map("organization_id")
+  requestedByUserId String                  @map("requested_by_user_id")
+  // Snapshot de creditLimit au moment de la demande — jamais recalculé après
+  // coup, pour que la demande reste lisible même si le client a changé entre
+  // temps (même principe que CommissionGridEntry, cost_price/ADR-084).
+  currentLimit      BigInt?                 @map("current_limit")
+  requestedLimit    BigInt                  @map("requested_limit")
+  status            CreditLimitChangeStatus @default(pending)
+  requestedAt       DateTime                @default(now()) @map("requested_at")
+  resolvedAt        DateTime?               @map("resolved_at")
+  resolvedByUserId  String?                 @map("resolved_by_user_id")
+
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  requestedByUser User         @relation("CreditLimitRequester", fields: [requestedByUserId], references: [id])
+  resolvedByUser  User?        @relation("CreditLimitResolver", fields: [resolvedByUserId], references: [id])
+
+  @@map("credit_limit_change_request")
 }
 
 // Le rôle n'est jamais mis en cache dans le JWT (voir AuthTokenService) : toujours
@@ -286,48 +328,55 @@ model AccountRecoveryRequest {
 }
 
 model Organization {
-  id                         String                @id @default(uuid())
-  name                       String
-  regimeFiscal               RegimeFiscal          @map("regime_fiscal")
-  legalForm                  LegalForm             @map("legal_form")
+  id                           String                @id @default(uuid())
+  name                         String
+  regimeFiscal                 RegimeFiscal          @map("regime_fiscal")
+  legalForm                    LegalForm             @map("legal_form")
   // Nullable : NIF optionnel à l'inscription (ADR-035, story B4 — self-service
   // jamais bloqué par une information que la PME n'a pas encore). Plusieurs
   // organisations sans NIF n'entrent jamais en conflit : Postgres autorise
   // plusieurs NULL sur une colonne @unique (même pattern qu'Invoice.number).
-  nif                        String?               @unique
-  etaxNumber                 String?               @map("etax_number")
-  rccm                       String?
-  registrationSource         RegistrationSource    @default(organic) @map("registration_source")
-  dgiVerificationStatus      DgiVerificationStatus @default(unverified) @map("dgi_verification_status")
+  nif                          String?               @unique
+  etaxNumber                   String?               @map("etax_number")
+  rccm                         String?
+  registrationSource           RegistrationSource    @default(organic) @map("registration_source")
+  dgiVerificationStatus        DgiVerificationStatus @default(unverified) @map("dgi_verification_status")
   // D4, §4 Spec USSD — nécessaire pour "T1+90j" (velocity_tier). Posé au
   // moment de la transition vers verified (organizations.service.ts:verifyDgi).
-  dgiVerifiedAt              DateTime?             @map("dgi_verified_at")
-  bankAccountDetails         Json?                 @map("bank_account_details")
-  preferredLanguage          PreferredLanguage     @default(fr) @map("preferred_language")
-  chiffreAffairesBrutDeclare BigInt                @default(0) @map("chiffre_affaires_brut_declare")
-  paymentLinkAutoSend        Boolean               @default(true) @map("payment_link_auto_send")
-  commercialTier             CommercialTier        @default(freemium) @map("commercial_tier")
-  createdAt                  DateTime              @default(now()) @map("created_at")
+  dgiVerifiedAt                DateTime?             @map("dgi_verified_at")
+  bankAccountDetails           Json?                 @map("bank_account_details")
+  preferredLanguage            PreferredLanguage     @default(fr) @map("preferred_language")
+  chiffreAffairesBrutDeclare   BigInt                @default(0) @map("chiffre_affaires_brut_declare")
+  paymentLinkAutoSend          Boolean               @default(true) @map("payment_link_auto_send")
+  commercialTier               CommercialTier        @default(freemium) @map("commercial_tier")
+  createdAt                    DateTime              @default(now()) @map("created_at")
   // Nullable : seules les organisations inscrites via le Chemin B (assisté, B5)
   // en ont un — ADR-046/047, 8 caractères Base32, vérification de collision à la
   // génération (voir organizations.service.ts:createAssisted).
-  accountCode                String?               @unique @map("account_code")
+  accountCode                  String?               @unique @map("account_code")
   // Nullable — null = jamais gelé ou gel expiré (comparé à now() à la lecture,
   // aucun nettoyage actif nécessaire). Posé par AuthService.resolveRecovery()
   // sur une récupération de compte owner approuvée (B3), lu par
   // InvoicesService.issue() (G2, réinterprété — voir plan
   // freeze-after-account-recovery : ni PIN ni "plafond" n'existent dans ce repo).
-  paymentsFrozenUntil        DateTime?             @map("payments_frozen_until")
+  paymentsFrozenUntil          DateTime?             @map("payments_frozen_until")
+  // E5, ADR-083 — seuil au-delà duquel une HAUSSE de credit_limit exige une
+  // validation approver. Nullable : pas de CONFIG_PARAMETER générique dans ce
+  // repo (ADR-058 jamais scaffoldée, même choix déjà accepté que
+  // commission-grid.ts/ADR-074 et tax-regime.ts/C4) — null retombe sur
+  // DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD (credit-limit-approval.ts).
+  creditLimitApprovalThreshold BigInt?               @map("credit_limit_approval_threshold")
 
-  invoices         Invoice[]
-  sequences        InvoiceSequence[]
-  members          OrganizationMember[]
-  recoveryRequests AccountRecoveryRequest[]
-  assistedSessions AssistedSession[]
-  mandates         Mandate[]
-  customers        Customer[]
-  branches         Branch[]
-  signingKey       OrganizationSigningKey?
+  invoices            Invoice[]
+  sequences           InvoiceSequence[]
+  members             OrganizationMember[]
+  recoveryRequests    AccountRecoveryRequest[]
+  assistedSessions    AssistedSession[]
+  mandates            Mandate[]
+  customers           Customer[]
+  branches            Branch[]
+  signingKey          OrganizationSigningKey?
+  creditLimitRequests CreditLimitChangeRequest[]
 
   @@map("organization")
 }
@@ -427,8 +476,8 @@ model Customer {
   phone          String?
   nif            String?
 
-  creditLimit         BigInt? @map("credit_limit")
-  possibleDuplicateOf String? @map("possible_duplicate_of")
+  creditLimit         BigInt?             @map("credit_limit")
+  possibleDuplicateOf String?             @map("possible_duplicate_of")
   // C9 — canal d'envoi du lien de paiement, choisi par la PME à la création du
   // client (pas au niveau organisation : le moyen de contact réel d'un client
   // est indépendant des autres clients de la même PME). Sans effet si phone
@@ -438,16 +487,17 @@ model Customer {
   // F16, ADR-105 — sans ce marquage, le portail Niveau 2 (J1/J2) n'a
   // structurellement aucune facture à présenter à un DAF. Réservé admin/owner
   // (CustomersService.flagPublicEntity()), même trio restreint que merge() (E4).
-  isPublicEntity      Boolean @default(false) @map("is_public_entity")
+  isPublicEntity       Boolean @default(false) @map("is_public_entity")
   publicBuyerAccountId String? @map("public_buyer_account_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  organization      Organization        @relation(fields: [organizationId], references: [id])
-  publicBuyerAccount PublicBuyerAccount? @relation(fields: [publicBuyerAccountId], references: [id])
-  invoices      Invoice[]
-  duplicateOf   Customer?    @relation("CustomerDuplicate", fields: [possibleDuplicateOf], references: [id])
-  possibleDupes Customer[]   @relation("CustomerDuplicate")
+  organization        Organization               @relation(fields: [organizationId], references: [id])
+  publicBuyerAccount  PublicBuyerAccount?        @relation(fields: [publicBuyerAccountId], references: [id])
+  invoices            Invoice[]
+  duplicateOf         Customer?                  @relation("CustomerDuplicate", fields: [possibleDuplicateOf], references: [id])
+  possibleDupes       Customer[]                 @relation("CustomerDuplicate")
+  creditLimitRequests CreditLimitChangeRequest[]
 
   @@map("customer")
 }
@@ -484,11 +534,11 @@ enum PublicBuyerAccountMemberRole {
 // cet invariant en amont (message d'erreur clair) — cette contrainte est le filet
 // qui le rend réellement infranchissable, y compris sous concurrence.
 model PublicBuyerAccountMember {
-  id                   String                        @id @default(uuid())
-  publicBuyerAccountId String                        @map("public_buyer_account_id")
-  userId               String                        @unique @map("user_id")
+  id                   String                       @id @default(uuid())
+  publicBuyerAccountId String                       @map("public_buyer_account_id")
+  userId               String                       @unique @map("user_id")
   role                 PublicBuyerAccountMemberRole
-  joinedAt             DateTime                      @default(now()) @map("joined_at")
+  joinedAt             DateTime                     @default(now()) @map("joined_at")
 
   publicBuyerAccount PublicBuyerAccount @relation(fields: [publicBuyerAccountId], references: [id])
   user               User               @relation(fields: [userId], references: [id])
@@ -565,8 +615,8 @@ model Invoice {
   branch        Branch?                 @relation(fields: [branchId], references: [id])
   customer      Customer?               @relation(fields: [customerId], references: [id])
   signingKey    OrganizationSigningKey? @relation(fields: [signingKeyId], references: [id])
-  convertedFrom Invoice?       @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
-  convertedInto Invoice[]      @relation("InvoiceConversion")
+  convertedFrom Invoice?                @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
+  convertedInto Invoice[]               @relation("InvoiceConversion")
   lines         InvoiceLine[]
   events        InvoiceEvent[]
   payments      Payment[]
@@ -756,10 +806,10 @@ model PaymentProviderAttempt {
   provider PaymentProviderName
   status   PaymentProviderAttemptStatus @default(pending)
 
-  providerRef String? @map("provider_ref")
-  amountGnf   BigInt  @map("amount_gnf")
-  feeGateway  BigInt  @default(0) @map("fee_gateway")
-  feePlatform BigInt  @default(0) @map("fee_platform")
+  providerRef    String?   @map("provider_ref")
+  amountGnf      BigInt    @map("amount_gnf")
+  feeGateway     BigInt    @default(0) @map("fee_gateway")
+  feePlatform    BigInt    @default(0) @map("fee_platform")
   // Transitoires dans CreatePaymentLinkResult jusqu'ici, jamais persistés — requis
   // pour que le checkout public (C19) réponde seul, sans traverser vers trust-api
   // depuis le frontend (voir plan public-checkout-page).
@@ -929,20 +979,20 @@ model Mandate {
 // (DAT §Performance) — une session expirée est traitée comme neuve, jamais
 // une erreur (voir ussd-session.service.ts).
 model UssdSession {
-  id             String    @id @default(uuid())
-  sessionId      String    @unique @map("session_id")
+  id             String   @id @default(uuid())
+  sessionId      String   @unique @map("session_id")
   phone          String
-  state          String    @default("root")
+  state          String   @default("root")
   // Données accumulées entre étapes (montant saisi, customerId choisi...) —
   // Json plutôt que des colonnes dédiées : la forme dépend de l'étape courante,
   // jamais la même pour "émettre" que pour "payer".
-  contextData    Json?     @map("context_data")
+  contextData    Json?    @map("context_data")
   // Peuplés après authentification (tâche ussd-pin-auth) — nullable ici,
   // aucune requête authentifiée construite dans cette tâche.
-  userId         String?   @map("user_id")
-  organizationId String?   @map("organization_id")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  expiresAt      DateTime  @map("expires_at")
+  userId         String?  @map("user_id")
+  organizationId String?  @map("organization_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  expiresAt      DateTime @map("expires_at")
 
   @@map("ussd_session")
 }

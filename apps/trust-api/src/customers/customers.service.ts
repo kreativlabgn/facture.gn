@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
+import { DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD } from "./credit-limit-approval";
 
 const OUTSTANDING_INVOICE_STATUSES = ["issued", "partially_paid"] as const;
 const DEFAULT_LIST_PAGE_SIZE = 50;
@@ -92,6 +93,65 @@ export class CustomersService {
       });
       await tx.customer.delete({ where: { id: duplicateCustomerId } });
       return tx.customer.findUniqueOrThrow({ where: { id: canonicalCustomerId } });
+    });
+  }
+
+  // E5, ADR-083 — "toute augmentation au-delà d'un seuil exige une validation
+  // approver, jamais une décision unilatérale". Une baisse, ou une hausse sous
+  // le seuil, s'applique immédiatement (admin/owner) : seul le dépassement
+  // déclenche la mise en attente, jamais l'égalité au seuil lui-même.
+  async proposeCreditLimit(customerId: string, newLimit: bigint, requestedByUserId: string) {
+    const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: customer.organizationId },
+    });
+    const currentLimit = customer.creditLimit ?? 0n;
+    const threshold = organization.creditLimitApprovalThreshold ?? DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD;
+    const increase = newLimit - currentLimit;
+
+    if (increase <= threshold) {
+      return this.prisma.customer.update({ where: { id: customerId }, data: { creditLimit: newLimit } });
+    }
+
+    return this.prisma.creditLimitChangeRequest.create({
+      data: {
+        customerId,
+        organizationId: customer.organizationId,
+        requestedByUserId,
+        currentLimit,
+        requestedLimit: newLimit,
+      },
+    });
+  }
+
+  // Même pattern qu'AuthService.resolveRecovery() (auth.service.ts) : transaction
+  // updateMany filtrée sur status="pending" pour la sécurité de concurrence, et
+  // interdiction que le demandeur résolve sa propre demande — c'est le sens même
+  // de "jamais une décision unilatérale" (ADR-083). RolesGuard (@Roles("approver"))
+  // garantit déjà le rôle du résolveur en amont, jamais revérifié ici.
+  async resolveCreditLimitRequest(requestId: string, resolverUserId: string, decision: "approved" | "rejected") {
+    const request = await this.prisma.creditLimitChangeRequest.findUniqueOrThrow({ where: { id: requestId } });
+
+    if (request.requestedByUserId === resolverUserId) {
+      throw new ConflictException("Vous ne pouvez pas résoudre votre propre demande de hausse de limite de crédit");
+    }
+
+    const resolvedAt = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.creditLimitChangeRequest.updateMany({
+        where: { id: requestId, status: "pending" },
+        data: { status: decision, resolvedAt, resolvedByUserId: resolverUserId },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException(`Demande ${requestId} a déjà été résolue`);
+      }
+
+      if (decision === "approved") {
+        await tx.customer.update({ where: { id: request.customerId }, data: { creditLimit: request.requestedLimit } });
+      }
+
+      return { ...request, status: decision, resolvedAt, resolvedByUserId: resolverUserId };
     });
   }
 }
