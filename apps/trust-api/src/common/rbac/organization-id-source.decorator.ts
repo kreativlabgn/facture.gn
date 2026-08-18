@@ -5,8 +5,9 @@ export const ORGANIZATION_ID_SOURCE_KEY = "organizationIdSource";
 // RolesGuard résout params.id comme un ID de FACTURE par défaut (issue/void/...) —
 // ce décorateur bascule explicitement vers une résolution directe, pour les routes
 // scopées à une organisation (E8, trust-score), un avoir (C13, refunds), un
-// client (C6, running balance), une succursale (E1, revenue) ou une demande de
-// hausse de limite de crédit (E5, ADR-083) plutôt qu'à une facture qui lui appartient.
+// client (C6, running balance), une succursale (E1, revenue), une demande de
+// hausse de limite de crédit (E5, ADR-083) ou un produit (E6, ADR-084) plutôt
+// qu'à une facture qui lui appartient.
 export const OrganizationIdSource = (
-  source: "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request",
+  source: "invoice" | "organization" | "credit-note" | "customer" | "branch" | "credit-limit-request" | "product",
 ) => SetMetadata(ORGANIZATION_ID_SOURCE_KEY, source);

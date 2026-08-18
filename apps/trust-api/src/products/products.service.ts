@@ -16,4 +16,13 @@ export class ProductsService {
       data: { organizationId: dto.organizationId, name: dto.name },
     });
   }
+
+  // E6, ADR-084 — "la création du produit n'est jamais bloquée en son
+  // absence" : ce endpoint est le seul chemin qui renseigne costPrice.
+  async setCostPrice(productId: string, costPrice: bigint) {
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { costPrice },
+    });
+  }
 }
