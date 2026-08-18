@@ -319,8 +319,21 @@ export class OrganizationsService {
       throw new ConflictException(`Cet utilisateur est déjà membre de l'organisation ${organizationId}`);
     }
 
-    return this.prisma.organizationMember.create({
-      data: { organizationId, userId: userPhone.userId, role: dto.role },
-    });
+    try {
+      return await this.prisma.organizationMember.create({
+        data: { organizationId, userId: userPhone.userId, role: dto.role },
+      });
+    } catch (error) {
+      // Le findUnique ci-dessus ne protège pas contre deux invitations
+      // concurrentes du même utilisateur — la contrainte unique
+      // (organizationId, userId) reste le seul garde-fou réel sous concurrence.
+      // Catch générique (pas isUniqueConstraintViolation) : cette table n'a
+      // qu'une seule contrainte unique possible ici, aucune ambiguïté sur la
+      // cause d'un P2002 à ce point du code.
+      if (typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002") {
+        throw new ConflictException(`Cet utilisateur est déjà membre de l'organisation ${organizationId}`);
+      }
+      throw error;
+    }
   }
 }

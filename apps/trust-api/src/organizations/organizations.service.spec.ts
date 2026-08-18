@@ -583,4 +583,19 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     ).rejects.toThrow(/déjà membre/);
     expect(prisma.organizationMember.create).not.toHaveBeenCalled();
   });
+
+  it("convertit une violation de contrainte unique concurrente (P2002) en ConflictException lisible", async () => {
+    const prisma = createFakePrismaForInvite();
+    prisma.organizationMember.create = vi.fn().mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["organization_id", "user_id"] },
+      }),
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
+    ).rejects.toThrow(/déjà membre/);
+  });
 });
