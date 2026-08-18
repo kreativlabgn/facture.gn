@@ -46,6 +46,13 @@ describe("FecService — autorisation à deux chemins (F9)", () => {
     await expect(service.export(ORG_ID, USER_ID)).resolves.toContain("JournalCode");
   });
 
+  it("autorise un tax_controller_readonly invité par l'organisation (F14, ADR-104)", async () => {
+    const prisma = createFakePrisma({ member: { role: "tax_controller_readonly", revokedAt: null } });
+    const service = new FecService(prisma as any, new OrganizationAccessService(prisma as any));
+
+    await expect(service.export(ORG_ID, USER_ID)).resolves.toContain("JournalCode");
+  });
+
   it("n'interroge jamais Mandate quand OrganizationMember autorise déjà (évite une requête inutile)", async () => {
     const prisma = createFakePrisma({ member: { role: "owner", revokedAt: null } });
     const service = new FecService(prisma as any, new OrganizationAccessService(prisma as any));

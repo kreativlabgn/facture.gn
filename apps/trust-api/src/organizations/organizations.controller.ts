@@ -12,6 +12,10 @@ import {
   type CreateAssistedOrganizationDto,
 } from "./dto/create-assisted-organization.dto";
 import { auditLogQuerySchema, type AuditLogQueryDto } from "./dto/audit-log-query.dto";
+import {
+  inviteOrganizationMemberSchema,
+  type InviteOrganizationMemberDto,
+} from "./dto/invite-organization-member.dto";
 import { OrganizationsService } from "./organizations.service";
 
 @ApiTags("organizations")
@@ -100,5 +104,17 @@ export class OrganizationsController {
     @Query(new ZodValidationPipe(auditLogQuerySchema)) query: AuditLogQueryDto,
   ) {
     return this.organizationsService.listAuditLog(organizationId, query);
+  }
+
+  // F14, ADR-104 — même trio owner/admin que findOne()/trust-score ci-dessus
+  // (élévation de privilège : seul owner/admin peut donner accès à un tiers).
+  @Post(":id/members")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  inviteMember(
+    @Param("id") organizationId: string,
+    @Body(new ZodValidationPipe(inviteOrganizationMemberSchema)) dto: InviteOrganizationMemberDto,
+  ) {
+    return this.organizationsService.inviteMember(organizationId, dto);
   }
 }

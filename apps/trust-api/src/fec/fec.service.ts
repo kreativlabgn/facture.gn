@@ -5,7 +5,10 @@ import { OrganizationAccessService } from "../common/rbac/organization-access.se
 import { FEC_HEADER } from "./fec-formatting";
 import { generateFecEntries } from "./fec-generation";
 
-const FEC_ELIGIBLE_ROLES: OrganizationRole[] = ["owner", "admin", "accountant_internal"];
+// F14, ADR-104 — tax_controller_readonly ajouté : "consulter en lecture seule
+// mes propres factures et exporter mon FEC" est le cas d'usage explicite du
+// Backlog pour ce rôle.
+const FEC_ELIGIBLE_ROLES: OrganizationRole[] = ["owner", "admin", "accountant_internal", "tax_controller_readonly"];
 
 @Injectable()
 export class FecService {

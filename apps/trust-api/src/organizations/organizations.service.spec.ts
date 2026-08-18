@@ -510,3 +510,77 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
     });
   });
 });
+
+describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
+  function createFakePrismaForInvite(opts: { userPhone?: any; existingMembership?: any } = {}) {
+    return {
+      userPhone: {
+        // "userPhone" in opts, jamais ?? : le test "téléphone sans compte" passe
+        // explicitement null, qu'un ?? traiterait à tort comme absent (null est
+        // nullish) et retomberait sur le défaut.
+        findUnique: vi.fn().mockResolvedValue("userPhone" in opts ? opts.userPhone : { userId: "user-invite-1" }),
+      },
+      organizationMember: {
+        findUnique: vi.fn().mockResolvedValue(opts.existingMembership ?? null),
+        create: vi.fn().mockResolvedValue({
+          id: "member-invite-1",
+          organizationId: "org-1",
+          userId: "user-invite-1",
+          role: "tax_controller_readonly",
+        }),
+      },
+    };
+  }
+
+  it("crée un OrganizationMember tax_controller_readonly pour un utilisateur déjà inscrit", async () => {
+    const prisma = createFakePrismaForInvite();
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    const result = await service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" });
+
+    expect(prisma.userPhone.findUnique).toHaveBeenCalledWith({ where: { msisdn: "+224612345678" } });
+    expect(prisma.organizationMember.create).toHaveBeenCalledWith({
+      data: { organizationId: "org-1", userId: "user-invite-1", role: "tax_controller_readonly" },
+    });
+    expect(result.role).toBe("tax_controller_readonly");
+  });
+
+  it("rejette un téléphone sans compte facture.gn associé", async () => {
+    const prisma = createFakePrismaForInvite({ userPhone: null });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224699999999", role: "tax_controller_readonly" }),
+    ).rejects.toThrow(/introuvable/);
+    expect(prisma.organizationMember.create).not.toHaveBeenCalled();
+  });
+
+  it("rejette un utilisateur déjà membre actif de l'organisation", async () => {
+    const prisma = createFakePrismaForInvite({
+      existingMembership: { organizationId: "org-1", userId: "user-invite-1", role: "cashier", revokedAt: null },
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
+    ).rejects.toThrow(/déjà membre/);
+    expect(prisma.organizationMember.create).not.toHaveBeenCalled();
+  });
+
+  it("rejette un utilisateur déjà membre même révoqué — pas de réactivation silencieuse", async () => {
+    const prisma = createFakePrismaForInvite({
+      existingMembership: {
+        organizationId: "org-1",
+        userId: "user-invite-1",
+        role: "cashier",
+        revokedAt: new Date(),
+      },
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
+    ).rejects.toThrow(/déjà membre/);
+    expect(prisma.organizationMember.create).not.toHaveBeenCalled();
+  });
+});

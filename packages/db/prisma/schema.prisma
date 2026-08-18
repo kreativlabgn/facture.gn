@@ -234,6 +234,11 @@ enum OrganizationRole {
   // le note déjà lui-même : "jusqu'ici défini sans cas d'usage concret au-delà
   // d'un intitulé générique" — reçoit ici son premier contenu fonctionnel réel.
   approver
+  // F14, ADR-104 — renommé depuis dgi_readonly pour lever l'ambiguïté "facture.gn
+  // n'est jamais une autorité d'État" (positionnement non négociable). Lecture
+  // seule stricte (factures + export FEC), invité par l'organisation elle-même —
+  // aucun rapport avec la persona institutionnelle DGI nationale (ADR-079).
+  tax_controller_readonly
 }
 
 // E5, ADR-083 — même pattern qu'AccountRecoveryRequest (pending/approved/rejected,
