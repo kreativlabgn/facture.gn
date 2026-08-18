@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import { InvoiceEventType, type PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
@@ -9,6 +9,23 @@ import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organi
 import type { CreateFromApipDto } from "./dto/create-from-apip.dto";
 
 const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
+const DEFAULT_LIST_PAGE_SIZE = 50;
+const MAX_LIST_PAGE_SIZE = 100;
+
+// G4, ADR-097 — mapping statique, jugement de classification documenté ici plutôt
+// qu'un contrat de spec figé (voir PLAN "Risques"). "paiement" = tout événement lié
+// à un mouvement ou une communication d'argent ; "facture" = tout le reste du cycle
+// de vie du document (le complément, jamais une seconde liste à maintenir en double).
+const PAYMENT_RELATED_EVENT_TYPES: InvoiceEventType[] = [
+  "payment_reminder_sent",
+  "payment_link_generated",
+  "payment_link_expired",
+  "payment_link_regenerated",
+  "overpayment_recorded",
+  "refund_issued",
+  "revenue_share_credited",
+  "suspicious_cash_pattern_detected",
+];
 
 @Injectable()
 export class OrganizationsService {
@@ -235,5 +252,29 @@ export class OrganizationsService {
   // de sensibilité comparable (bankAccountDetails, chiffreAffairesBrutDeclare).
   async findOneDetail(organizationId: string) {
     return this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+  }
+
+  // G4, ADR-097 — auditor (ou owner/admin) : lecture seule stricte, aucune
+  // exception. Scopé via invoice.organizationId (invoice_event n'a pas de FK
+  // organisation directe) — même relation que getVerifiedPaymentRatio() ci-dessus.
+  // "permission" n'est volontairement pas une valeur de category acceptée ici :
+  // aucun historique de changement de rôle n'existe encore dans ce repo (voir
+  // PLAN "Alternatives écartées") — l'exposer renverrait une liste vide qui
+  // masquerait silencieusement ce trou plutôt que de le rendre visible.
+  async listAuditLog(organizationId: string, filters: { category?: "facture" | "paiement"; take?: number; skip?: number }) {
+    const take = Math.min(filters.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
+    const skip = filters.skip ?? 0;
+
+    const where: { invoice: { organizationId: string }; type?: { in: InvoiceEventType[] } } = {
+      invoice: { organizationId },
+    };
+    if (filters.category === "paiement") {
+      where.type = { in: PAYMENT_RELATED_EVENT_TYPES };
+    } else if (filters.category === "facture") {
+      const allTypes = Object.values(InvoiceEventType);
+      where.type = { in: allTypes.filter((type) => !PAYMENT_RELATED_EVENT_TYPES.includes(type)) };
+    }
+
+    return this.prisma.invoiceEvent.findMany({ where, orderBy: { createdAt: "desc" }, take, skip });
   }
 }

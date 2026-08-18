@@ -443,4 +443,70 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
       expect(result).toEqual({ id: "org-1", name: "Boutique Aissatou" });
     });
   });
+
+  describe("listAuditLog — journal d'audit en lecture seule (G4, ADR-097)", () => {
+    function createFakePrismaForAuditLog() {
+      return {
+        invoiceEvent: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      };
+    }
+
+    it("scope les événements aux factures de l'organisation demandée", async () => {
+      const prisma = createFakePrismaForAuditLog();
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listAuditLog("org-1", {});
+
+      expect(prisma.invoiceEvent.findMany).toHaveBeenCalledWith({
+        where: { invoice: { organizationId: "org-1" } },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        skip: 0,
+      });
+    });
+
+    it("filtre sur les types de la catégorie paiement quand category=paiement", async () => {
+      const prisma = createFakePrismaForAuditLog();
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listAuditLog("org-1", { category: "paiement" });
+
+      const calledWhere = prisma.invoiceEvent.findMany.mock.calls[0][0].where;
+      expect(calledWhere.type.in).toContain("payment_link_generated");
+      expect(calledWhere.type.in).toContain("refund_issued");
+      expect(calledWhere.type.in).not.toContain("invoice_voided");
+    });
+
+    it("filtre sur les types hors catégorie paiement quand category=facture", async () => {
+      const prisma = createFakePrismaForAuditLog();
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listAuditLog("org-1", { category: "facture" });
+
+      const calledWhere = prisma.invoiceEvent.findMany.mock.calls[0][0].where;
+      expect(calledWhere.type.in).toContain("invoice_voided");
+      expect(calledWhere.type.in).toContain("liquidation_validated");
+      expect(calledWhere.type.in).not.toContain("payment_link_generated");
+    });
+
+    it("plafonne take à 100 quel que soit ce que le client demande", async () => {
+      const prisma = createFakePrismaForAuditLog();
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listAuditLog("org-1", { take: 500 });
+
+      expect(prisma.invoiceEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+    });
+
+    it("respecte skip fourni par le client", async () => {
+      const prisma = createFakePrismaForAuditLog();
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listAuditLog("org-1", { skip: 20 });
+
+      expect(prisma.invoiceEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20 }));
+    });
+  });
 });
