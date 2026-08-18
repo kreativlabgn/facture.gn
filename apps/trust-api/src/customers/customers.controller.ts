@@ -9,6 +9,7 @@ import {
   type OrganizationScopedListQueryDto,
 } from "../common/dto/organization-scoped-list-query.dto";
 import { createCustomerSchema, type CreateCustomerDto } from "./dto/create-customer.dto";
+import { importCustomersSchema, type ImportCustomersDto } from "./dto/import-customers.dto";
 import { mergeCustomerSchema, type MergeCustomerDto } from "./dto/merge-customer.dto";
 import { flagPublicEntitySchema, type FlagPublicEntityDto } from "./dto/flag-public-entity.dto";
 import { proposeCreditLimitSchema, type ProposeCreditLimitDto } from "./dto/propose-credit-limit.dto";
@@ -30,6 +31,16 @@ export class CustomersController {
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
   create(@Body(new ZodValidationPipe(createCustomerSchema)) dto: CreateCustomerDto) {
     return this.customersService.create(dto);
+  }
+
+  // E9, ADR-100 — "seul gap réel" signalé par l'ADR : import en masse, un seul
+  // à la fois aujourd'hui. Même trio que create() ("aucune permission
+  // nouvelle", Backlog E9). Pas de @OrganizationIdSource : organizationId
+  // porté par le body, création — pas de ressource pré-existante à usurper.
+  @Post("import")
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
+  importCustomers(@Body(new ZodValidationPipe(importCustomersSchema)) dto: ImportCustomersDto) {
+    return this.customersService.importCustomers(dto.organizationId, dto.customers);
   }
 
   // Sélecteur client (émission de facture) + section "liste des clients"

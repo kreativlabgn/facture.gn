@@ -362,6 +362,93 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
   });
 });
 
+describe("CustomersService — importCustomers (E9, ADR-100)", () => {
+  function createFakePrismaForImport(opts: { existingCustomers?: any[] } = {}) {
+    let createCallCount = 0;
+    return {
+      customer: {
+        findMany: vi.fn().mockResolvedValue(opts.existingCustomers ?? []),
+        create: vi.fn().mockImplementation(({ data }: any) => {
+          createCallCount += 1;
+          return Promise.resolve({ id: `cust-new-${createCallCount}`, ...data });
+        }),
+      },
+    };
+  }
+
+  it("crée toutes les lignes d'un lot valide sans doublon, possibleDuplicateOf null partout", async () => {
+    const prisma = createFakePrismaForImport();
+    const service = new CustomersService(prisma as any);
+
+    const results = await service.importCustomers("org-1", [
+      { name: "Boutique Sory" },
+      { name: "Boutique Fanta", phone: "+224622334455" },
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ status: "created", possibleDuplicateOf: null });
+    expect(results[1]).toMatchObject({ status: "created", possibleDuplicateOf: null });
+    expect(prisma.customer.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("marque possibleDuplicateOf quand le téléphone matche un client déjà en base de l'organisation", async () => {
+    const prisma = createFakePrismaForImport({
+      existingCustomers: [{ id: "cust-existant", phone: "+224622334455" }],
+    });
+    const service = new CustomersService(prisma as any);
+
+    const results = await service.importCustomers("org-1", [
+      { name: "Boutique Fanta", phone: "+224622334455" },
+    ]);
+
+    expect(results[0]).toMatchObject({ status: "created", possibleDuplicateOf: "cust-existant" });
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: "cust-existant" }),
+    });
+  });
+
+  it("marque la seconde ligne du lot comme doublon de la première quand elles partagent le même téléphone", async () => {
+    const prisma = createFakePrismaForImport();
+    const service = new CustomersService(prisma as any);
+
+    const results: any[] = await service.importCustomers("org-1", [
+      { name: "Boutique Fanta", phone: "+224622334455" },
+      { name: "Boutique Fanta (doublon saisie)", phone: "+224622334455" },
+    ]);
+
+    expect(results[0]).toMatchObject({ status: "created", possibleDuplicateOf: null });
+    expect(results[1]).toMatchObject({ status: "created", possibleDuplicateOf: results[0].customerId });
+  });
+
+  it("rapporte une erreur ligne par ligne pour un nom vide, sans bloquer les autres lignes valides", async () => {
+    const prisma = createFakePrismaForImport();
+    const service = new CustomersService(prisma as any);
+
+    const results: any[] = await service.importCustomers("org-1", [
+      { name: "" },
+      { name: "Boutique Fanta" },
+    ]);
+
+    expect(results[0]).toMatchObject({ status: "error" });
+    expect(results[0].reason).toBeTruthy();
+    expect(results[1]).toMatchObject({ status: "created" });
+    expect(prisma.customer.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rapporte une erreur pour un téléphone mal formé, sans affecter les autres lignes", async () => {
+    const prisma = createFakePrismaForImport();
+    const service = new CustomersService(prisma as any);
+
+    const results = await service.importCustomers("org-1", [
+      { name: "Boutique Sory", phone: "0620000000" },
+      { name: "Boutique Fanta" },
+    ]);
+
+    expect(results[0].status).toBe("error");
+    expect(results[1].status).toBe("created");
+  });
+});
+
 describe("findAllByOrganization", () => {
   it("liste les clients de l'organisation, paginés avec une limite par défaut", async () => {
     const prisma: any = {

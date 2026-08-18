@@ -3,6 +3,11 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import { DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD } from "./credit-limit-approval";
+import { importCustomerRowSchema, type ImportCustomerRowDto } from "./dto/import-customers.dto";
+
+type ImportRowResult =
+  | { index: number; status: "created"; customerId: string; possibleDuplicateOf: string | null }
+  | { index: number; status: "error"; reason: string; input: unknown };
 
 const OUTSTANDING_INVOICE_STATUSES = ["issued", "partially_paid"] as const;
 const DEFAULT_LIST_PAGE_SIZE = 50;
@@ -153,5 +158,70 @@ export class CustomersService {
 
       return { ...request, status: decision, resolvedAt, resolvedByUserId: resolverUserId };
     });
+  }
+
+  // E9, ADR-100 — chaque ligne traitée indépendamment (jamais de transaction
+  // globale) : une ligne invalide ne doit jamais bloquer les autres. Dédoublonnage
+  // par téléphone contre la base ET contre le lot en cours, jamais bloquant —
+  // création systématique, possibleDuplicateOf renseigné pour résolution manuelle
+  // ultérieure (merge(), E4), jamais de fusion automatique.
+  async importCustomers(organizationId: string, rows: unknown[]): Promise<ImportRowResult[]> {
+    const results: ImportRowResult[] = [];
+    const parsedRows: { index: number; data: ImportCustomerRowDto }[] = [];
+    const phonesInPayload = new Set<string>();
+
+    rows.forEach((row, index) => {
+      const parsed = importCustomerRowSchema.safeParse(row);
+      if (!parsed.success) {
+        results[index] = {
+          index,
+          status: "error",
+          reason: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "),
+          input: row,
+        };
+        return;
+      }
+      parsedRows.push({ index, data: parsed.data });
+      if (parsed.data.phone) {
+        phonesInPayload.add(parsed.data.phone);
+      }
+    });
+
+    const existingMatches =
+      phonesInPayload.size > 0
+        ? await this.prisma.customer.findMany({
+            where: { organizationId, phone: { in: [...phonesInPayload] } },
+          })
+        : [];
+    const phoneToExistingCustomerId = new Map(
+      existingMatches.filter((c) => c.phone).map((c) => [c.phone as string, c.id]),
+    );
+    const phoneToBatchCustomerId = new Map<string, string>();
+
+    for (const { index, data } of parsedRows) {
+      const possibleDuplicateOf = data.phone
+        ? phoneToBatchCustomerId.get(data.phone) ?? phoneToExistingCustomerId.get(data.phone) ?? null
+        : null;
+
+      const customer = await this.prisma.customer.create({
+        data: {
+          organizationId,
+          name: data.name,
+          phone: data.phone,
+          nif: data.nif,
+          creditLimit: data.creditLimit,
+          notificationChannel: data.notificationChannel,
+          possibleDuplicateOf,
+        },
+      });
+
+      if (data.phone) {
+        phoneToBatchCustomerId.set(data.phone, customer.id);
+      }
+
+      results[index] = { index, status: "created", customerId: customer.id, possibleDuplicateOf };
+    }
+
+    return results;
   }
 }
