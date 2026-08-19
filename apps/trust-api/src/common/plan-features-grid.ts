@@ -8,7 +8,10 @@ import type { CommercialTier, OrganizationRole } from "@facture-gn/db";
 // "Starter Plus" (ADR-106, 6e palier commercial) n'existe pas dans l'enum
 // CommercialTier (5 paliers) — gap hors scope H1, voir
 // docs/plans/2026-08-19-plan-feature-gating.md.
-const TIER_ORDER: CommercialTier[] = ["freemium", "starter", "pro", "enterprise", "custom"];
+// Exporté uniquement pour le test de garde-fou (plan-features-grid.spec.ts)
+// qui vérifie sa cohérence avec l'enum Prisma CommercialTier — jamais consommé
+// par un autre service, qui doit toujours passer par les fonctions ci-dessous.
+export const TIER_ORDER: CommercialTier[] = ["freemium", "starter", "pro", "enterprise", "custom"];
 
 // null = illimité.
 const MAX_BRANCHES_BY_TIER: Record<CommercialTier, number | null> = {

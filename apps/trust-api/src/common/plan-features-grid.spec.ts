@@ -1,3 +1,4 @@
+import { CommercialTier } from "@facture-gn/db";
 import { describe, expect, it } from "vitest";
 import {
   ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER,
@@ -5,7 +6,18 @@ import {
   isRoleAllowedForTier,
   maxBranchesForTier,
   maxMembersForTier,
+  TIER_ORDER,
 } from "./plan-features-grid";
+
+// dev-domain-model-reviewer (H1) — protège contre l'ajout d'un palier au
+// schéma (ex. Starter Plus, ADR-106) sans mise à jour de la grille : sans ce
+// garde-fou, tierIndex() renverrait -1 pour le nouveau palier et toutes les
+// comparaisons deviendraient silencieusement fausses.
+describe("TIER_ORDER (H1) — cohérence avec l'enum Prisma CommercialTier", () => {
+  it("contient exactement les paliers déclarés dans le schéma", () => {
+    expect(new Set(TIER_ORDER)).toEqual(new Set(Object.values(CommercialTier)));
+  });
+});
 
 describe("isRoleAllowedForTier (H1, Grille §2)", () => {
   it("un rôle de base (owner) est toujours autorisé, y compris en Freemium", () => {
