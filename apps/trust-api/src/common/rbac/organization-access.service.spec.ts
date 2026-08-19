@@ -68,3 +68,48 @@ describe("OrganizationAccessService — accès par membership OU mandat actif", 
     await expect(service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES])).rejects.toThrow(/accès/);
   });
 });
+
+describe("OrganizationAccessService — filtre optionnel requiredMandateGrantedRole (E7, ADR-084)", () => {
+  it("autorise un mandat actif dont grantedRole correspond au filtre demandé", async () => {
+    const prisma = createFakePrisma({ member: null, mandate: { id: "mandate-1", status: "active" } });
+    const service = new OrganizationAccessService(prisma as any);
+
+    await expect(
+      service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES], "business_manager"),
+    ).resolves.toBeUndefined();
+    expect(prisma.mandate.findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: ORG_ID,
+        status: "active",
+        practice: { members: { some: { userId: USER_ID, leftAt: null } } },
+        grantedRole: "business_manager",
+      },
+    });
+  });
+
+  it("rejette un mandat actif dont grantedRole ne correspond PAS au filtre demandé (accountant_external ≠ business_manager)", async () => {
+    // Le mock findFirst filtre lui-même côté "DB" — un mandat accountant_external
+    // ne matche jamais un where incluant grantedRole: "business_manager".
+    const prisma = createFakePrisma({ member: null, mandate: null });
+    const service = new OrganizationAccessService(prisma as any);
+
+    await expect(
+      service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES], "business_manager"),
+    ).rejects.toThrow(/accès/);
+  });
+
+  it("non-régression FEC : sans le paramètre, accepte tout mandat actif quel que soit grantedRole", async () => {
+    const prisma = createFakePrisma({ member: null, mandate: { id: "mandate-1", status: "active" } });
+    const service = new OrganizationAccessService(prisma as any);
+
+    await service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES]);
+
+    expect(prisma.mandate.findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: ORG_ID,
+        status: "active",
+        practice: { members: { some: { userId: USER_ID, leftAt: null } } },
+      },
+    });
+  });
+});

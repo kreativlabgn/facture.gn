@@ -22,6 +22,7 @@ import { PublicBuyerModule } from "./public-buyer/public-buyer.module";
 import { ApiKeysModule } from "./api-keys/api-keys.module";
 import { ProductsModule } from "./products/products.module";
 import { ProductStockModule } from "./product-stock/product-stock.module";
+import { MarginModule } from "./margin/margin.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -51,6 +52,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     ApiKeysModule,
     ProductsModule,
     ProductStockModule,
+    MarginModule,
   ],
   providers: [
     // Ordre significatif : JwtAuthGuard peuple request.user avant que RolesGuard

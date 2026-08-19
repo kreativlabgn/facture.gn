@@ -113,3 +113,48 @@ describe("createInvoiceSchema — montant de référence en devise étrangère (
     expect(troisLettresManquantes.success).toBe(false);
   });
 });
+
+describe("createInvoiceSchema — productId optionnel par ligne (E7, ADR-084)", () => {
+  it("accepte une ligne sans productId — rétrocompatibilité totale avec la vente libre", () => {
+    const result = createInvoiceSchema.safeParse({
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 2, unitPrice: "350000" }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.lines[0].productId).toBeUndefined();
+    }
+  });
+
+  it("accepte un productId uuid valide", () => {
+    const result = createInvoiceSchema.safeParse({
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      documentType: "invoice",
+      lines: [
+        {
+          description: "Sac de riz 50kg",
+          quantity: 2,
+          unitPrice: "350000",
+          productId: "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.lines[0].productId).toBe("22222222-2222-4222-8222-222222222222");
+    }
+  });
+
+  it("rejette un productId mal formé", () => {
+    const result = createInvoiceSchema.safeParse({
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 2, unitPrice: "350000", productId: "pas-un-uuid" }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
