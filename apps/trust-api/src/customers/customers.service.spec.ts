@@ -1,3 +1,4 @@
+import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { CustomersService } from "./customers.service";
 
@@ -105,7 +106,7 @@ describe("CustomersService — solde calculé à la volée (C6, ADR-039)", () =>
 });
 
 describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
-  function createFakePrismaForMerge(canonical: any, duplicate: any) {
+  function createFakePrismaForMerge(canonical: any, duplicate: any, organization?: any) {
     const tx = {
       invoice: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
       customer: {
@@ -117,6 +118,9 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(canonical),
         findUnique: vi.fn().mockResolvedValue(duplicate),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(organization ?? { id: "org-1", commercialTier: "pro" }),
       },
       $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
       __tx: tx,
@@ -164,6 +168,16 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
 
     await expect(service.merge("cust-1", "cust-inconnu")).rejects.toThrow(/introuvable pour cette organisation/);
   });
+
+  it("rejette la fusion en Freemium (gestion client avancée réservée Pro+, H1)", async () => {
+    const canonical = { id: "cust-1", organizationId: "org-1" };
+    const duplicate = { id: "cust-2", organizationId: "org-1" };
+    const prisma = createFakePrismaForMerge(canonical, duplicate, { id: "org-1", commercialTier: "freemium" });
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(ForbiddenException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("CustomersService — marquage entité publique (F16, ADR-105)", () => {
@@ -205,7 +219,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
       },
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(
-          opts.organization ?? { id: "org-1", creditLimitApprovalThreshold: 2_000_000n },
+          opts.organization ?? { id: "org-1", creditLimitApprovalThreshold: 2_000_000n, commercialTier: "pro" },
         ),
       },
       creditLimitChangeRequest: {
@@ -263,7 +277,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
 
   it("retombe sur le seuil par défaut quand l'organisation n'a pas configuré de seuil", async () => {
     const prisma = createFakePrismaForCreditLimit({
-      organization: { id: "org-1", creditLimitApprovalThreshold: null },
+      organization: { id: "org-1", creditLimitApprovalThreshold: null, commercialTier: "pro" },
     });
     const service = new CustomersService(prisma as any);
 
@@ -273,6 +287,17 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
     expect(prisma.customer.update).not.toHaveBeenCalled();
     expect(prisma.creditLimitChangeRequest.create).toHaveBeenCalled();
     expect(result.status).toBe("pending");
+  });
+
+  it("rejette proposeCreditLimit en Starter (gestion client avancée réservée Pro+, H1)", async () => {
+    const prisma = createFakePrismaForCreditLimit({
+      organization: { id: "org-1", creditLimitApprovalThreshold: 2_000_000n, commercialTier: "starter" },
+    });
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.proposeCreditLimit("cust-1", 2_500_000n, "user-1")).rejects.toThrow(ForbiddenException);
+    expect(prisma.customer.update).not.toHaveBeenCalled();
+    expect(prisma.creditLimitChangeRequest.create).not.toHaveBeenCalled();
   });
 });
 

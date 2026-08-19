@@ -11,10 +11,17 @@ describe("inviteOrganizationMemberSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejette role owner — élévation de privilège hors périmètre de cette story", () => {
+  it("rejette role owner — jamais assignable par invitation, seulement à la création (H1)", () => {
     const result = inviteOrganizationMemberSchema.safeParse({ msisdn: "+224612345678", role: "owner" });
 
     expect(result.success).toBe(false);
+  });
+
+  it("accepte les rôles avancés du catalogue (H1, gate désormais porté par plan-features-grid)", () => {
+    for (const role of ["inventory_manager", "approver", "auditor", "developer_api", "admin", "cashier"]) {
+      const result = inviteOrganizationMemberSchema.safeParse({ msisdn: "+224612345678", role });
+      expect(result.success).toBe(true);
+    }
   });
 
   it("rejette un msisdn mal formé (pas +224 E.164)", () => {
