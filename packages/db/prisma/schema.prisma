@@ -430,6 +430,7 @@ model Organization {
   creditLimitRequests CreditLimitChangeRequest[]
   apiKeys             ApiKey[]
   products            Product[]
+  revenueShareCredits RevenueShareCredit[]
 
   @@map("organization")
 }
@@ -1001,8 +1002,9 @@ model ProfessionalPractice {
   email              String?
   createdAt          DateTime                 @default(now()) @map("created_at")
 
-  members  PracticeMember[]
-  mandates Mandate[]
+  members             PracticeMember[]
+  mandates            Mandate[]
+  revenueShareCredits RevenueShareCredit[]
 
   @@map("professional_practice")
 }
@@ -1077,6 +1079,37 @@ model Mandate {
   granter      User?                @relation(fields: [grantedBy], references: [id])
 
   @@map("mandate")
+}
+
+enum RevenueShareCreditStatus {
+  pending
+  paid
+}
+
+// H4, ADR-071 — revenue share cabinet/CGA : 10% de Payment.platformFeeAmount
+// (commission facture.gn déjà perçue, status completed uniquement) généré par
+// une organisation MANDATÉE (pas ses propres clients CUSTOMER), plafonné à
+// 500 000 centimes GNF (5000 GNF)/mois/organisation (revenue-share-grid.ts).
+// periodMonth (format "YYYY-MM") + @@unique : idempotence de la génération,
+// jamais deux crédits pour la même pratique/organisation/mois — régénérer met
+// à jour (upsert), jamais un doublon. status reste "pending" indéfiniment tant
+// qu'aucune exécution réelle du virement Djomy Payout n'existe (aucune
+// intégration dans ce repo, même limite déjà documentée par refunds.service.ts).
+model RevenueShareCredit {
+  id                      String                   @id @default(uuid())
+  practiceId              String                   @map("practice_id")
+  organizationId          String                   @map("organization_id")
+  periodMonth             String                   @map("period_month")
+  grossCommissionCentimes BigInt                   @map("gross_commission_centimes")
+  creditedAmountCentimes  BigInt                   @map("credited_amount_centimes")
+  status                  RevenueShareCreditStatus @default(pending)
+  createdAt               DateTime                 @default(now()) @map("created_at")
+
+  practice     ProfessionalPractice @relation(fields: [practiceId], references: [id])
+  organization Organization         @relation(fields: [organizationId], references: [id])
+
+  @@unique([practiceId, organizationId, periodMonth])
+  @@map("revenue_share_credit")
 }
 
 // Canal USSD *620# (D1-D4, Spec-USSD-facture-gn.md) — table de session au lieu
