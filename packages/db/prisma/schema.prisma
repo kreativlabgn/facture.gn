@@ -102,7 +102,7 @@ enum FinancialPartnerStatus {
 // comme un risque réglementaire non tranché, hors scope.
 model FinancialPartner {
   id        String                 @id @default(uuid())
-  name      String
+  name      String                 @unique
   type      FinancialPartnerType
   apiKey    String?                @map("api_key")
   status    FinancialPartnerStatus @default(active)
