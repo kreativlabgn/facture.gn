@@ -1,3 +1,4 @@
+import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { OrganizationsService } from "./organizations.service";
 
@@ -512,7 +513,9 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 });
 
 describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
-  function createFakePrismaForInvite(opts: { userPhone?: any; existingMembership?: any } = {}) {
+  function createFakePrismaForInvite(
+    opts: { userPhone?: any; existingMembership?: any; organization?: any; memberCount?: number } = {},
+  ) {
     return {
       userPhone: {
         // "userPhone" in opts, jamais ?? : le test "téléphone sans compte" passe
@@ -522,12 +525,16 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
       },
       organizationMember: {
         findUnique: vi.fn().mockResolvedValue(opts.existingMembership ?? null),
+        count: vi.fn().mockResolvedValue(opts.memberCount ?? 0),
         create: vi.fn().mockResolvedValue({
           id: "member-invite-1",
           organizationId: "org-1",
           userId: "user-invite-1",
           role: "tax_controller_readonly",
         }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(opts.organization ?? { id: "org-1", commercialTier: "pro" }),
       },
     };
   }
@@ -597,5 +604,85 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
     ).rejects.toThrow(/déjà membre/);
+  });
+});
+
+describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §2)", () => {
+  function createFakePrismaForInvite(
+    opts: { organization?: any; memberCount?: number } = {},
+  ) {
+    return {
+      userPhone: {
+        findUnique: vi.fn().mockResolvedValue({ userId: "user-invite-1" }),
+      },
+      organizationMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        count: vi.fn().mockResolvedValue(opts.memberCount ?? 0),
+        create: vi.fn().mockResolvedValue({
+          id: "member-invite-1",
+          organizationId: "org-1",
+          userId: "user-invite-1",
+          role: "inventory_manager",
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(opts.organization ?? { id: "org-1", commercialTier: "pro" }),
+      },
+    };
+  }
+
+  it("refuse d'assigner inventory_manager en Freemium (nécessite Starter+)", async () => {
+    const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "freemium" } });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "inventory_manager" }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.organizationMember.create).not.toHaveBeenCalled();
+  });
+
+  it("refuse d'assigner approver en Starter (nécessite Pro+)", async () => {
+    const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "starter" } });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "approver" }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it("refuse au-delà du plafond de collaborateurs (Freemium, plafond = 1)", async () => {
+    const prisma = createFakePrismaForInvite({
+      organization: { id: "org-1", commercialTier: "freemium" },
+      memberCount: 1,
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.organizationMember.create).not.toHaveBeenCalled();
+  });
+
+  it("ne compte que les membres actifs (revokedAt: null) contre le plafond", async () => {
+    const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "freemium" } });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" });
+
+    expect(prisma.organizationMember.count).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", revokedAt: null },
+    });
+  });
+
+  it("aucun plafond de collaborateurs en Enterprise", async () => {
+    const prisma = createFakePrismaForInvite({
+      organization: { id: "org-1", commercialTier: "enterprise" },
+      memberCount: 500,
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" });
+
+    expect(prisma.organizationMember.create).toHaveBeenCalled();
   });
 });
