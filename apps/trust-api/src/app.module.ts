@@ -23,6 +23,7 @@ import { ApiKeysModule } from "./api-keys/api-keys.module";
 import { ProductsModule } from "./products/products.module";
 import { ProductStockModule } from "./product-stock/product-stock.module";
 import { MarginModule } from "./margin/margin.module";
+import { RevenueShareModule } from "./revenue-share/revenue-share.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -53,6 +54,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     ProductsModule,
     ProductStockModule,
     MarginModule,
+    RevenueShareModule,
   ],
   providers: [
     // Ordre significatif : JwtAuthGuard peuple request.user avant que RolesGuard
