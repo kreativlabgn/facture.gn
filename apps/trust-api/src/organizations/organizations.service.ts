@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotF
 import { InvoiceEventType, type PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
@@ -306,6 +307,28 @@ export class OrganizationsService {
   // L'invité doit déjà avoir un compte facture.gn — inviter un utilisateur sans
   // compte est un mécanisme distinct (F10/ADR-096), hors scope ici.
   async inviteMember(organizationId: string, dto: InviteOrganizationMemberDto) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    // H1, Grille §2 — vérifié avant le comptage des collaborateurs (moins
+    // coûteux) : un rôle non débloqué par le palier ne doit jamais consommer
+    // le quota de collaborateurs pour rien.
+    if (!isRoleAllowedForTier(dto.role, organization.commercialTier)) {
+      throw new ForbiddenException(
+        `Le rôle ${dto.role} nécessite un palier commercial supérieur à ${organization.commercialTier}`,
+      );
+    }
+
+    const maxMembers = maxMembersForTier(organization.commercialTier);
+    if (maxMembers !== null) {
+      const activeMemberCount = await this.prisma.organizationMember.count({
+        where: { organizationId, revokedAt: null },
+      });
+      if (activeMemberCount >= maxMembers) {
+        throw new ForbiddenException(
+          `Palier ${organization.commercialTier} limité à ${maxMembers} collaborateur(s) — upgrade requis`,
+        );
+      }
+    }
+
     const userPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
     if (!userPhone) {
       throw new NotFoundException(`Compte introuvable pour le numéro ${dto.msisdn}`);

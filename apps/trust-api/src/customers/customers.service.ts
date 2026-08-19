@@ -1,9 +1,10 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import { DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD } from "./credit-limit-approval";
 import { importCustomerRowSchema, type ImportCustomerRowDto } from "./dto/import-customers.dto";
+import { isAdvancedCustomerManagementAllowed } from "../common/plan-features-grid";
 
 type ImportRowResult =
   | { index: number; status: "created"; customerId: string; possibleDuplicateOf: string | null }
@@ -91,6 +92,17 @@ export class CustomersService {
       throw new ConflictException(`Client ${duplicateCustomerId} introuvable pour cette organisation`);
     }
 
+    // H1, Grille §2 — "gestion client avancée" (merge doublons + credit_limit)
+    // dépend structurellement du rôle approver (ADR-083, Pro+ uniquement).
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: canonical.organizationId },
+    });
+    if (!isAdvancedCustomerManagementAllowed(organization.commercialTier)) {
+      throw new ForbiddenException(
+        `La fusion de clients nécessite le palier pro ou supérieur (palier actuel : ${organization.commercialTier})`,
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
       await tx.invoice.updateMany({
         where: { customerId: duplicateCustomerId },
@@ -110,6 +122,12 @@ export class CustomersService {
     const organization = await this.prisma.organization.findUniqueOrThrow({
       where: { id: customer.organizationId },
     });
+    // H1, Grille §2 — même garde que merge(), "gestion client avancée" Pro+.
+    if (!isAdvancedCustomerManagementAllowed(organization.commercialTier)) {
+      throw new ForbiddenException(
+        `La gestion de limite de crédit nécessite le palier pro ou supérieur (palier actuel : ${organization.commercialTier})`,
+      );
+    }
     const currentLimit = customer.creditLimit ?? 0n;
     const threshold = organization.creditLimitApprovalThreshold ?? DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD;
     const increase = newLimit - currentLimit;
