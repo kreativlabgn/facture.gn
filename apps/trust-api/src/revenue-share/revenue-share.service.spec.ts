@@ -8,6 +8,7 @@ function createFakePrisma(
     mandates?: any[];
     platformFeeSum?: bigint | null;
     credits?: any[];
+    existingCredit?: any;
   } = {},
 ) {
   return {
@@ -25,6 +26,7 @@ function createFakePrisma(
       aggregate: vi.fn().mockResolvedValue({ _sum: { platformFeeAmount: overrides.platformFeeSum ?? null } }),
     },
     revenueShareCredit: {
+      findUnique: vi.fn().mockResolvedValue(overrides.existingCredit ?? null),
       upsert: vi.fn().mockImplementation(({ create }: any) => Promise.resolve({ id: "credit-1", ...create })),
       findMany: vi.fn().mockResolvedValue(overrides.credits ?? []),
     },
@@ -134,6 +136,30 @@ describe("RevenueShareService.generate (H4, ADR-071)", () => {
           },
         },
       }),
+    );
+  });
+
+  it("ne touche jamais un crédit déjà marqué paid — jamais un montant payé silencieusement changé", async () => {
+    const prisma = createFakePrisma({
+      mandates: [{ id: "mandate-1", practiceId: "practice-1", organizationId: "org-1", status: "active" }],
+      platformFeeSum: 999_999n, // montant différent de l'existant, ne doit jamais écraser
+      existingCredit: {
+        id: "credit-existing",
+        practiceId: "practice-1",
+        organizationId: "org-1",
+        periodMonth: "2026-08",
+        status: "paid",
+        creditedAmountCentimes: 8_000n,
+      },
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    const result = await service.generate("practice-1", "user-1", "2026-08");
+
+    expect(prisma.revenueShareCredit.upsert).not.toHaveBeenCalled();
+    expect(prisma.payment.aggregate).not.toHaveBeenCalled();
+    expect(result[0]).toEqual(
+      expect.objectContaining({ id: "credit-existing", status: "paid", creditedAmountCentimes: 8_000n }),
     );
   });
 

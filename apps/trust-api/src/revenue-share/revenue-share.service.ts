@@ -24,6 +24,24 @@ export class RevenueShareService {
 
     const credits = [];
     for (const mandate of activeMandates) {
+      // Un crédit déjà marqué "paid" (futur mécanisme, pas encore construit)
+      // n'est jamais recalculé/écrasé — un paiement tardif ne doit jamais
+      // changer silencieusement un montant déjà versé. Trouvé en revue
+      // dev-code-reviewer (agent 1, idempotence).
+      const existingCredit = await this.prisma.revenueShareCredit.findUnique({
+        where: {
+          practiceId_organizationId_periodMonth: {
+            practiceId,
+            organizationId: mandate.organizationId,
+            periodMonth,
+          },
+        },
+      });
+      if (existingCredit && existingCredit.status === "paid") {
+        credits.push(existingCredit);
+        continue;
+      }
+
       const aggregate = await this.prisma.payment.aggregate({
         where: {
           invoice: { organizationId: mandate.organizationId },
