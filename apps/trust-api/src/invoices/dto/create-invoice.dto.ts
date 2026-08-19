@@ -7,6 +7,10 @@ const invoiceLineSchema = z.object({
   description: z.string().min(1),
   quantity: z.number().int().positive(),
   unitPrice: z.coerce.bigint().positive(),
+  // E7, ADR-084 — optionnel : rétrocompatibilité totale avec la vente libre
+  // (cas majoritaire actuel). Une ligne sans productId n'a simplement pas de
+  // marge calculable, jamais une erreur.
+  productId: z.string().uuid().optional(),
 });
 
 export const createInvoiceSchema = z

@@ -1768,3 +1768,127 @@ describe("findAllByOrganization", () => {
     );
   });
 });
+
+describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-084)", () => {
+  function createFakePrismaWithProducts(products: any[]) {
+    return {
+      invoice: {
+        create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal: "normal_tva" }),
+      },
+      product: {
+        findMany: vi.fn().mockResolvedValue(products),
+      },
+    };
+  }
+
+  it("snapshotte costPrice du produit référencé dans costPriceAtTime de la ligne", async () => {
+    const prisma = createFakePrismaWithProducts([{ id: "product-1", organizationId: "org-1", costPrice: 15_000n }]);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 25_000n, productId: "product-1" }],
+    } as any);
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["product-1"] }, organizationId: "org-1" },
+    });
+    const createCall = (prisma.invoice.create as any).mock.calls[0][0];
+    expect(createCall.data.lines.create[0]).toMatchObject({ productId: "product-1", costPriceAtTime: 15_000n });
+  });
+
+  it("laisse costPriceAtTime undefined pour une ligne sans productId, jamais une requête product", async () => {
+    const prisma = createFakePrismaWithProducts([]);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 25_000n }],
+    } as any);
+
+    expect(prisma.product.findMany).not.toHaveBeenCalled();
+    const createCall = (prisma.invoice.create as any).mock.calls[0][0];
+    expect(createCall.data.lines.create[0].costPriceAtTime).toBeUndefined();
+    expect(createCall.data.lines.create[0].productId).toBeUndefined();
+  });
+
+  it("ne fabrique jamais costPriceAtTime=0 quand Product.costPrice est null (E6, jamais renseigné)", async () => {
+    const prisma = createFakePrismaWithProducts([{ id: "product-1", organizationId: "org-1", costPrice: null }]);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 25_000n, productId: "product-1" }],
+    } as any);
+
+    const createCall = (prisma.invoice.create as any).mock.calls[0][0];
+    expect(createCall.data.lines.create[0].costPriceAtTime).toBeNull();
+  });
+
+  it("rejette un productId appartenant à une AUTRE organisation (IDOR)", async () => {
+    const prisma = createFakePrismaWithProducts([]);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(
+      service.createDraft({
+        organizationId: "org-1",
+        documentType: "invoice",
+        lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 25_000n, productId: "product-victime" }],
+      } as any),
+    ).rejects.toThrow(/introuvable pour cette organisation/);
+    expect(prisma.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it("résout tous les produits en un seul findMany batché, même avec plusieurs lignes", async () => {
+    const prisma = createFakePrismaWithProducts([
+      { id: "product-1", organizationId: "org-1", costPrice: 10_000n },
+      { id: "product-2", organizationId: "org-1", costPrice: 20_000n },
+    ]);
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [
+        { description: "Sac de riz 50kg", quantity: 1, unitPrice: 25_000n, productId: "product-1" },
+        { description: "Huile 5L", quantity: 1, unitPrice: 45_000n, productId: "product-2" },
+      ],
+    } as any);
+
+    expect(prisma.product.findMany).toHaveBeenCalledTimes(1);
+    const createCall = (prisma.invoice.create as any).mock.calls[0][0];
+    expect(createCall.data.lines.create[0].costPriceAtTime).toBe(10_000n);
+    expect(createCall.data.lines.create[1].costPriceAtTime).toBe(20_000n);
+  });
+});

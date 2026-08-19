@@ -64,6 +64,23 @@ export class InvoicesService {
       }
     }
 
+    // E7, ADR-084 — batch (jamais un findUnique par ligne, évite le N+1) : une
+    // facture peut avoir plusieurs lignes référençant des produits différents.
+    // IDOR : même discipline que customerId/branchId ci-dessus.
+    const productIds = [...new Set(dto.lines.map((line) => line.productId).filter((id): id is string => !!id))];
+    const products =
+      productIds.length > 0
+        ? await this.prisma.product.findMany({
+            where: { id: { in: productIds }, organizationId: dto.organizationId },
+          })
+        : [];
+    if (products.length !== productIds.length) {
+      const foundIds = new Set(products.map((product) => product.id));
+      const missingId = productIds.find((id) => !foundIds.has(id));
+      throw new ConflictException(`Produit ${missingId} introuvable pour cette organisation`);
+    }
+    const costPriceByProductId = new Map(products.map((product) => [product.id, product.costPrice]));
+
     const totalTtcBrut = dto.lines.reduce((sum, line) => sum + BigInt(line.quantity) * line.unitPrice, 0n);
     // Remise globale (E2) appliquée AVANT le calcul HT/TVA — convention TTC-first
     // (C4) : la remise réduit le montant TTC brut, la ventilation HT/TVA est
@@ -97,6 +114,12 @@ export class InvoicesService {
             quantity: line.quantity,
             unitPrice: line.unitPrice,
             taxRateBps,
+            productId: line.productId,
+            // undefined si pas de productId (pas de champ envoyé, cohérent avec
+            // referenceCurrency etc. plus haut) ; costPriceByProductId.get() peut
+            // légitimement retourner null (E6, cost_price jamais renseigné) —
+            // jamais coalescé à 0n dans les deux cas.
+            costPriceAtTime: line.productId ? costPriceByProductId.get(line.productId) : undefined,
           })),
         },
       },

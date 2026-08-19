@@ -520,6 +520,7 @@ model Product {
 
   organization Organization   @relation(fields: [organizationId], references: [id])
   stocks       ProductStock[]
+  invoiceLines InvoiceLine[]
 
   @@map("product")
 }
@@ -761,6 +762,14 @@ model Payment {
   @@map("payment")
 }
 
+// E7, ADR-084 — productId devient une vraie relation FK : la condition qui
+// l'empêchait ("tant que PRODUCT n'existe pas") n'est plus vraie depuis E10.
+// costPriceAtTime est un SNAPSHOT immuable de Product.costPrice au moment de
+// la création de la ligne (jamais recalculé si le coût change ensuite) —
+// jamais inclus dans le payload certifié (CertifiablePayload ne porte que
+// invoiceId/organizationNif/number/totalTtc/issuedAt/previousHash, vérifié
+// dans organization-signing-key.service.ts) : aucun risque de contaminer la
+// signature publique avec une donnée commerciale confidentielle.
 model InvoiceLine {
   id        String  @id @default(uuid())
   invoiceId String  @map("invoice_id")
@@ -774,6 +783,9 @@ model InvoiceLine {
   costPriceAtTime BigInt? @map("cost_price_at_time")
 
   invoice         Invoice          @relation(fields: [invoiceId], references: [id])
+  // ON DELETE SET NULL : la suppression future d'un produit ne doit jamais
+  // bloquer/casser une ligne de facture déjà émise (immuable après issue()).
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
   creditNoteLines CreditNoteLine[]
 
   @@map("invoice_line")

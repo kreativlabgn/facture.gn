@@ -1,5 +1,5 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
-import type { OrganizationRole, PrismaClient } from "@facture-gn/db";
+import type { MandateGrantedRole, OrganizationRole, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../prisma.module";
 
 // Généralisé depuis FecService.assertAccess() (F9) — même double chemin
@@ -14,7 +14,16 @@ export class OrganizationAccessService {
   // rôle dans eligibleRoles. Branche 2 (seulement si la 1re échoue) : Mandate
   // actif via une practice dont l'appelant est membre actif — tout
   // PracticeMember suffit (ADR-070), pas seulement practice_admin.
-  async assertAccess(organizationId: string, requesterUserId: string, eligibleRoles: OrganizationRole[]): Promise<void> {
+  // E7, ADR-084 — requiredMandateGrantedRole optionnel : filtre le mandat sur
+  // Mandate.grantedRole (ex. "business_manager", jamais un OrganizationRole).
+  // Omis, comportement bit-à-bit identique à avant (FEC, F9) — tout
+  // PracticeMember avec mandat actif suffit, quel que soit son grantedRole.
+  async assertAccess(
+    organizationId: string,
+    requesterUserId: string,
+    eligibleRoles: OrganizationRole[],
+    requiredMandateGrantedRole?: MandateGrantedRole,
+  ): Promise<void> {
     const member = await this.prisma.organizationMember.findUnique({
       where: { organizationId_userId: { organizationId, userId: requesterUserId } },
     });
@@ -27,6 +36,7 @@ export class OrganizationAccessService {
         organizationId,
         status: "active",
         practice: { members: { some: { userId: requesterUserId, leftAt: null } } },
+        ...(requiredMandateGrantedRole ? { grantedRole: requiredMandateGrantedRole } : {}),
       },
     });
     if (!activeMandate) {
