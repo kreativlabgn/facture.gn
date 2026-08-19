@@ -1,6 +1,7 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { maxBranchesForTier } from "../common/plan-features-grid";
 import type { CreateBranchDto } from "./dto/create-branch.dto";
 
 const REVENUE_INVOICE_STATUSES = ["issued", "partially_paid", "paid"] as const;
@@ -9,7 +10,25 @@ const REVENUE_INVOICE_STATUSES = ["issued", "partially_paid", "paid"] as const;
 export class BranchesService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
+  // H1, Grille §2 — garde de palier commercial : jamais de plafond sur le
+  // volume de factures (§1.1), mais les succursales font partie des
+  // fonctionnalités qui différencient les paliers.
   async create(dto: CreateBranchDto) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: dto.organizationId },
+    });
+    const maxBranches = maxBranchesForTier(organization.commercialTier);
+    if (maxBranches !== null) {
+      const activeBranchCount = await this.prisma.branch.count({
+        where: { organizationId: dto.organizationId },
+      });
+      if (activeBranchCount >= maxBranches) {
+        throw new ForbiddenException(
+          `Palier ${organization.commercialTier} limité à ${maxBranches} succursale(s) — upgrade requis`,
+        );
+      }
+    }
+
     return this.prisma.branch.create({
       data: { organizationId: dto.organizationId, name: dto.name, type: dto.type },
     });
