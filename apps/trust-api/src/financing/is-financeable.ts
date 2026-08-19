@@ -10,3 +10,17 @@ export function isFinanceable(invoice: {
 }): boolean {
   return invoice.validatedByAdministration && invoice.financedByPartnerId === null && invoice.status !== "voided";
 }
+
+// Reproduit les 3 conditions de isFinanceable() sous forme de clause Prisma
+// `where` — c'est cette clause, pas isFinanceable(), qui protège réellement
+// contre la concurrence au moment du commit (voir chooseFinancing()). Extrait
+// ici (revue dev-domain-model-reviewer, K4/K5) pour que les deux ne puissent
+// plus diverger silencieusement.
+export function financeableInvoiceWhere(invoiceId: string) {
+  return {
+    id: invoiceId,
+    financedByPartnerId: null,
+    validatedByAdministration: true,
+    status: { not: "voided" as const },
+  };
+}

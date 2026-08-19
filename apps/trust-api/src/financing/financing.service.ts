@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { isFinanceable } from "./is-financeable";
+import { financeableInvoiceWhere, isFinanceable } from "./is-financeable";
 import type { ChooseFinancingDto } from "./dto/choose-financing.dto";
 
 @Injectable()
@@ -40,18 +40,8 @@ export class FinancingService {
     const financedAt = new Date();
 
     return this.prisma.$transaction(async (tx) => {
-      // La clause where reproduit is_financeable() en entier, pas seulement
-      // financedByPartnerId : sans ça, une facture pourrait être annulée
-      // (void(), même trio owner/admin) ENTRE la vérification ci-dessus et ce
-      // commit, et se retrouver quand même financée. Trouvé en revue
-      // dev-code-reviewer (agent 1, race condition).
       const claimed = await tx.invoice.updateMany({
-        where: {
-          id: invoiceId,
-          financedByPartnerId: null,
-          validatedByAdministration: true,
-          status: { not: "voided" },
-        },
+        where: financeableInvoiceWhere(invoiceId),
         data: { financedByPartnerId: dto.financialPartnerId, financedAt },
       });
       if (claimed.count === 0) {

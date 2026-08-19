@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFinanceable } from "./is-financeable";
+import { financeableInvoiceWhere, isFinanceable } from "./is-financeable";
 
 function baseInvoice(overrides: Partial<{ validatedByAdministration: boolean; financedByPartnerId: string | null; status: string }> = {}) {
   return {
@@ -25,5 +25,16 @@ describe("isFinanceable (K4, ADR-031/080/088)", () => {
 
   it("non finançable : facture annulée (voided)", () => {
     expect(isFinanceable(baseInvoice({ status: "voided" }))).toBe(false);
+  });
+});
+
+describe("financeableInvoiceWhere (K4/K5) — reproduit isFinanceable() en clause Prisma", () => {
+  it("reproduit les 3 conditions de isFinanceable()", () => {
+    expect(financeableInvoiceWhere("inv-1")).toEqual({
+      id: "inv-1",
+      financedByPartnerId: null,
+      validatedByAdministration: true,
+      status: { not: "voided" },
+    });
   });
 });
