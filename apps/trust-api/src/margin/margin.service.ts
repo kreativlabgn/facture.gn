@@ -42,6 +42,9 @@ export class MarginService {
       const { marginGnf, marginPct } = computeMargin(line.unitPrice, line.costPriceAtTime, line.quantity);
       return {
         invoiceId: line.invoice.id,
+        // Non-null garanti par le filtre productId: { not: null } ci-dessus,
+        // jamais une supposition aveugle (même principe que invoice.number!/
+        // issuedAt! dans FecService.export()).
         productId: line.product!.id,
         productName: line.product!.name,
         quantity: line.quantity,
