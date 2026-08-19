@@ -5,10 +5,10 @@
 // Référence : Desktop/facture.gn/V/ERD-facture-gn.md (26/07/2026).
 //
 // Divergences assumées vis-à-vis de l'ERD complet (27 entités) :
-// - product_id, recurring_template_id, financed_by_partner_id sur INVOICE /
-//   INVOICE_LINE sont des colonnes scalaires SANS relation FK tant que PRODUCT,
-//   RECURRING_INVOICE_TEMPLATE, FINANCIAL_PARTNER n'existent pas. customer_id
-//   (C6) et branch_id (E1) sont désormais de vraies relations FK.
+// - recurring_template_id sur INVOICE reste une colonne scalaire SANS relation
+//   FK tant que RECURRING_INVOICE_TEMPLATE n'existe pas. customer_id (C6),
+//   branch_id (E1), product_id sur INVOICE_LINE (E7) et financed_by_partner_id
+//   sur INVOICE (K4/K5) sont désormais de vraies relations FK.
 // - InvoiceSequence est un ajout (absent de l'ERD) pour garantir number sans trou
 //   par organisation/année sous concurrence (voir Registre-ADR, Article 23 OHADA).
 // - Colonnes en snake_case en base (@map), camelCase côté client Prisma.
@@ -83,6 +83,36 @@ model Partner {
   @@map("partner")
 }
 
+enum FinancialPartnerType {
+  banque
+  mfi
+}
+
+enum FinancialPartnerStatus {
+  active
+  suspended
+}
+
+// K4/K5, ADR-089 — structurellement distincte de PARTNER (institutionnel léger :
+// apip/fodip/partner_3ae) : une banque/MFI a des besoins différents (API dédiée,
+// KYC, conditions de financement). apiKey présent pour fidélité à l'ADR, jamais
+// lu ni écrit par aucun code de cette story — aucune intégration API réelle
+// (même pattern que ApiKey.lastUsedAt, F15). Seuls banque/mfi sont couverts ici
+// (MVP du financement B2G) — fournisseur_crediteur (ADR-100) reste V2, signalé
+// comme un risque réglementaire non tranché, hors scope.
+model FinancialPartner {
+  id        String                 @id @default(uuid())
+  name      String                 @unique
+  type      FinancialPartnerType
+  apiKey    String?                @map("api_key")
+  status    FinancialPartnerStatus @default(active)
+  createdAt DateTime               @default(now()) @map("created_at")
+
+  financedInvoices Invoice[]
+
+  @@map("financial_partner")
+}
+
 enum DgiVerificationStatus {
   unverified
   pending
@@ -130,9 +160,10 @@ enum DisputeStatus {
   resolved
 }
 
-// 22 types confirmés au périmètre MVP/V1 (DAT §4.1 / ERD note de lecture).
-// Les types V2 (liquidation_validated, service_fait_confirmed, financing_disbursed)
-// sont volontairement exclus tant que le B2G Context n'est pas scaffoldé.
+// 24 types confirmés au périmètre MVP/V1 (DAT §4.1 / ERD note de lecture) +
+// liquidation_validated (J1, avancé en V1) et financing_disbursed (K4/K5).
+// service_fait_confirmed (Niveau 1 B2G optionnel, ADR-098) reste seul exclu tant
+// que le reste du B2G Context au-delà du Niveau 2 n'est pas scaffoldé.
 // cash pour C1 (ce plan) ; payment_link (C2, orchestrateur Djomy/Moneroo) et
 // bank_transfer (C3) sont des stories séparées — l'enum couvre les 3 valeurs de
 // l'ERD par cohérence long terme, mais seul "cash" est accepté par le DTO/service
@@ -176,6 +207,10 @@ enum InvoiceEventType {
   // Ne constate JAMAIS le paiement effectif ni l'ordonnancement Trésor — voir
   // PublicBuyerPortalService.validateLiquidation().
   liquidation_validated
+  // K4/K5, ADR-088/089 — Rail A choisi (avance FINANCIAL_PARTNER). Jamais émis
+  // pour le Rail B (ADR-088 : "la PME n'utilise aucun financement", absence
+  // d'action, jamais un événement).
+  financing_disbursed
 }
 
 model User {
@@ -691,8 +726,12 @@ model Invoice {
   quoteValidUntil DateTime? @map("quote_valid_until")
   referenceMarche String?   @map("reference_marche")
 
-  financedByPartnerId String?   @map("financed_by_partner_id")
-  financedAt          DateTime? @map("financed_at")
+  // K4/K5, ADR-089 — la seule présence de financedByPartnerId bloque tout second
+  // financement (K5). Snapshot jamais réévalué : une facture financée le reste,
+  // même si le partenaire change de statut ensuite.
+  financedByPartnerId String?           @map("financed_by_partner_id")
+  financedAt          DateTime?         @map("financed_at")
+  financedByPartner   FinancialPartner? @relation(fields: [financedByPartnerId], references: [id])
 
   hash         String?
   previousHash String? @map("previous_hash")

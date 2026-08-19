@@ -42,6 +42,9 @@ const EVENT_CATEGORY_BY_TYPE: Record<InvoiceEventType, "facture" | "paiement"> =
   regime_change: "facture",
   delegated_key_tier_changed: "facture",
   validation_revoked: "facture",
+  // K4/K5, ADR-088/089 — avance d'un montant réel par un partenaire financier :
+  // un mouvement d'argent, pas un événement de cycle de vie du document.
+  financing_disbursed: "paiement",
   liquidation_validated: "facture",
 };
 
