@@ -78,10 +78,12 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
       "user-1",
     );
 
-    expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", financedByPartnerId: null },
-      data: { financedByPartnerId: "partner-1", financedAt: expect.any(Date) },
-    });
+    expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "inv-1", financedByPartnerId: null }),
+        data: { financedByPartnerId: "partner-1", financedAt: expect.any(Date) },
+      }),
+    );
     expect(prisma.__tx.invoiceEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         invoiceId: "inv-1",
@@ -129,6 +131,27 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     await expect(
       service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it("la clause where transactionnelle revérifie status et validatedByAdministration, pas seulement financedByPartnerId (protège contre un void() concurrent)", async () => {
+    const prisma = createFakePrisma();
+    const service = new FinancingService(prisma as any);
+
+    await service.chooseFinancing(
+      "inv-1",
+      { financialPartnerId: "partner-1", disbursementMethod: "payment_link_payout" },
+      "user-1",
+    );
+
+    expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "inv-1",
+        financedByPartnerId: null,
+        validatedByAdministration: true,
+        status: { not: "voided" },
+      },
+      data: { financedByPartnerId: "partner-1", financedAt: expect.any(Date) },
+    });
   });
 
   it("refuse une double demande concurrente — la seconde requête échoue proprement (K5)", async () => {
