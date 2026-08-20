@@ -1,17 +1,23 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { z } from "zod";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { InvoicesService } from "../invoices/invoices.service";
 import type { CreateRecurringTemplateDto } from "./dto/create-recurring-template.dto";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-interface StoredLine {
-  description: string;
-  quantity: number;
-  unitPrice: string;
-  productId?: string;
-}
+// Revalidé à la LECTURE (generate()), pas seulement à l'écriture (create()) —
+// dev-domain-model-reviewer (I1) : `lines` est un Json non typé une fois en
+// base, rien ne garantit qu'un futur chemin d'écriture y insère la bonne
+// forme. Un cast non sûr aurait fait planter generate() avec un TypeError
+// opaque (ex. BigInt(undefined)) plutôt qu'une erreur de domaine claire.
+const storedLineSchema = z.object({
+  description: z.string().min(1),
+  quantity: z.number().int().positive(),
+  unitPrice: z.string().regex(/^\d+$/),
+  productId: z.string().uuid().optional(),
+});
 
 @Injectable()
 export class RecurringTemplatesService {
@@ -70,7 +76,12 @@ export class RecurringTemplatesService {
       where: { id: template.organizationId },
     });
 
-    const lines = (template.lines as unknown as StoredLine[]).map((line) => ({
+    const parsedLines = z.array(storedLineSchema).safeParse(template.lines);
+    if (!parsedLines.success) {
+      throw new ConflictException(`Modèle ${templateId} contient des lignes corrompues — génération impossible`);
+    }
+
+    const lines = parsedLines.data.map((line) => ({
       description: line.description,
       quantity: line.quantity,
       unitPrice: BigInt(line.unitPrice),

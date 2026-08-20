@@ -201,4 +201,19 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
       data: { lastGeneratedAt: expect.any(Date), lastKnownRegimeFiscal: "normal_tva" },
     });
   });
+
+  it("rejette (ConflictException, jamais un TypeError opaque) un modèle dont lines est corrompu", async () => {
+    const prisma = createFakePrisma({
+      template: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue(baseTemplate({ lines: [{ description: "Ligne sans unitPrice", quantity: 1 }] })),
+      },
+    });
+    const invoicesService = createFakeInvoicesService();
+    const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
+
+    await expect(service.generate("template-1", "user-1")).rejects.toThrow(ConflictException);
+    expect(invoicesService.createDraft).not.toHaveBeenCalled();
+  });
 });
