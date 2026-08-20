@@ -1,7 +1,7 @@
 import { Body, Controller, Param, Post, UseGuards, UsePipes } from "@nestjs/common";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
-import { FieldAgentAuthGuard } from "../common/field-agent-auth.guard";
+import { CommercialAgentAuthGuard } from "../common/commercial-agent-auth.guard";
 import { CurrentUser, type CurrentUserPayload } from "./current-user.decorator";
 import { Public } from "./public.decorator";
 import { AuthService } from "./auth.service";
@@ -64,15 +64,16 @@ export class AuthController {
     return this.authService.addPhone(user.id, dto.msisdn, dto.password);
   }
 
-  // Appel machine-à-machine exclusif (B5) — même pattern que verify-dgi
+  // Appel machine-à-machine exclusif (B5, ADR-107) — même pattern que verify-dgi
   // (organizations.controller.ts) : aucun OrganizationRole ne couvre l'octroi du
-  // statut agent terrain plateforme, donc @Public() + FieldAgentAuthGuard plutôt
-  // que JwtAuthGuard/RolesGuard.
-  @Post("field-agents/:userId/grant")
+  // statut Agent commercial terrain plateforme, donc @Public() + CommercialAgentAuthGuard
+  // plutôt que JwtAuthGuard/RolesGuard. Route renommée depuis field-agents/ (ADR-107) —
+  // sans rapport avec OrganizationRole.field_agent.
+  @Post("commercial-agents/:userId/grant")
   @Public()
   @ApiSecurity("internal-api-key")
-  @UseGuards(FieldAgentAuthGuard)
-  grantFieldAgent(@Param("userId") userId: string) {
-    return this.authService.grantFieldAgentStatus(userId);
+  @UseGuards(CommercialAgentAuthGuard)
+  grantCommercialAgent(@Param("userId") userId: string) {
+    return this.authService.grantCommercialAgentStatus(userId);
   }
 }

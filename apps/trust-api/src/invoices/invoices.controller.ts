@@ -24,8 +24,8 @@ export class InvoicesController {
     return this.invoicesService.createDraft(dto);
   }
 
-  // F2, ADR-045 — aucun @Roles() : l'agent terrain (User.isFieldAgent, flag
-  // plateforme) n'est PAS un OrganizationRole, jamais de membership permanente
+  // F2, ADR-045, ADR-107 — aucun @Roles() : l'Agent commercial terrain
+  // (User.isCommercialAgent, flag plateforme) n'est PAS un OrganizationRole, jamais de membership permanente
   // (même principe que POST /organizations/assisted, B5). Autorisation
   // entièrement en ligne dans le service (AssistedSession). Pipe scopé au
   // paramètre @Body() — un @UsePipes() au niveau méthode s'appliquerait aussi à

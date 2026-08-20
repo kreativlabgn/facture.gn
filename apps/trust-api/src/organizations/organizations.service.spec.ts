@@ -152,13 +152,13 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
   });
 });
 
-function createFakePrismaForAssisted(overrides?: { isFieldAgent?: boolean; accountCodeCollisions?: number }) {
+function createFakePrismaForAssisted(overrides?: { isCommercialAgent?: boolean; accountCodeCollisions?: number }) {
   let organizationCreateCalls = 0;
   const collisions = overrides?.accountCodeCollisions ?? 0;
 
   const prisma: any = {
     user: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "agent-1", isFieldAgent: overrides?.isFieldAgent ?? true }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "agent-1", isCommercialAgent: overrides?.isCommercialAgent ?? true }),
       create: vi.fn().mockResolvedValue({ id: "merchant-1" }),
     },
     userPhone: {
@@ -196,8 +196,8 @@ const ASSISTED_DTO = {
 };
 
 describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
-  it("refuse si l'appelant n'a pas le statut agent terrain (isFieldAgent=false)", async () => {
-    const prisma = createFakePrismaForAssisted({ isFieldAgent: false });
+  it("refuse si l'appelant n'a pas le statut agent terrain (isCommercialAgent=false)", async () => {
+    const prisma = createFakePrismaForAssisted({ isCommercialAgent: false });
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(service.createAssisted("agent-1", ASSISTED_DTO)).rejects.toThrow(/agent terrain/);
@@ -226,7 +226,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
     expect(prisma.assistedSession.create).toHaveBeenCalledWith({
       data: {
-        fieldAgentUserId: "agent-1",
+        commercialAgentUserId: "agent-1",
         organizationId: "org-1",
         consentRecordedAt: expect.any(Date),
       },
@@ -241,6 +241,20 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
     expect(result).toEqual({ id: "org-1" });
     expect(prisma.organization.create).toHaveBeenCalledTimes(3);
+  });
+
+  // ADR-107 — avant ce correctif, registrationSource retombait silencieusement sur
+  // le défaut "organic" du schema : une organisation créée par l'Agent commercial
+  // terrain était mal étiquetée dans les données, sans qu'aucun test ne le détecte.
+  it("marque l'organisation registrationSource=agent_terrain (ADR-107)", async () => {
+    const prisma = createFakePrismaForAssisted();
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await service.createAssisted("agent-1", ASSISTED_DTO);
+
+    expect(prisma.organization.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ registrationSource: "agent_terrain" }),
+    });
   });
 
   it("provisionne une clé racine pour l'organisation créée en inscription assistée (A3, ADR-026)", async () => {

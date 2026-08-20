@@ -53,6 +53,7 @@ enum RegistrationSource {
   cga_referral
   fodip
   partner_3ae
+  agent_terrain
 }
 
 // F11, ADR-077/078/082 — "APIP en premier lieu", seul type avec une intégration
@@ -219,11 +220,14 @@ model User {
   preferredLanguage PreferredLanguage @default(fr) @map("preferred_language")
   createdAt         DateTime          @default(now()) @map("created_at")
 
-  // ADR-045, B5 — flag plateforme, indépendant de tout OrganizationRole (les 7 rôles
-  // existants sont tous scopés à une organisation). Accordé exclusivement via un
-  // endpoint interne dédié (FieldAgentAuthGuard, secret propre — jamais confondu
-  // avec MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY).
-  isFieldAgent Boolean @default(false) @map("is_field_agent")
+  // ADR-045, B5, ADR-107 — flag plateforme, indépendant de tout OrganizationRole
+  // (les 7 rôles existants sont tous scopés à une organisation). Nommage aligné
+  // ADR-107 : distingue explicitement l'Agent commercial terrain (persona facture.gn,
+  // ce flag) du rôle RBAC OrganizationRole.field_agent (personnel de la PME,
+  // assisted_session sur une organisation déjà existante — jamais ce flag). Accordé
+  // exclusivement via un endpoint interne dédié (CommercialAgentAuthGuard, secret
+  // propre — jamais confondu avec MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY).
+  isCommercialAgent Boolean @default(false) @map("is_commercial_agent")
 
   // Canal USSD *620# (D2, Spec USSD §3) — distinct de passwordHash (PWA/agent).
   // Nullable : créé au premier accès *620# (décision utilisateur), jamais
@@ -492,20 +496,22 @@ model OrganizationSigningKey {
   @@map("organization_signing_key")
 }
 
-// ADR-045, B5 — trace de l'inscription assistée. Jamais de membership pour l'agent
-// terrain lui-même (fieldAgentUserId n'est PAS dans OrganizationMember) : cette
-// table EST la seule preuve du lien agent↔organisation. consentRecordedAt (jamais
-// un booléen simple) — horodatage du consentement explicitement recueilli, cohérent
-// avec le reste du schema (resolvedAt, revokedAt...).
+// ADR-045, B5, ADR-107 — trace de l'inscription assistée par l'Agent commercial
+// terrain. Jamais de membership pour l'agent lui-même (commercialAgentUserId n'est
+// PAS dans OrganizationMember) : cette table EST la seule preuve du lien
+// agent↔organisation. consentRecordedAt (jamais un booléen simple) — horodatage du
+// consentement explicitement recueilli, cohérent avec le reste du schema
+// (resolvedAt, revokedAt...). Nommage aligné ADR-107 : sans rapport avec
+// OrganizationRole.field_agent (personnel de la PME).
 model AssistedSession {
   id                String   @id @default(uuid())
-  fieldAgentUserId  String   @map("field_agent_user_id")
+  commercialAgentUserId String   @map("commercial_agent_user_id")
   organizationId    String   @map("organization_id")
   consentRecordedAt DateTime @map("consent_recorded_at")
   createdAt         DateTime @default(now()) @map("created_at")
 
-  fieldAgent   User         @relation(fields: [fieldAgentUserId], references: [id])
-  organization Organization @relation(fields: [organizationId], references: [id])
+  commercialAgent User         @relation(fields: [commercialAgentUserId], references: [id])
+  organization    Organization @relation(fields: [organizationId], references: [id])
 
   @@map("assisted_session")
 }

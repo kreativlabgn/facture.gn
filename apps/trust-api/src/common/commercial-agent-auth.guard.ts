@@ -3,22 +3,22 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 
 const INTERNAL_API_KEY_HEADER = "x-internal-api-key";
 
-// Déclenche AuthService.grantFieldAgentStatus() (B5) — comme pour B2 (DGI), aucun
-// OrganizationRole ne couvre cet acteur plateforme (les 7 rôles sont tous scopés à
-// une organisation). Secret STRICTEMENT dédié : ne jamais réutiliser
+// Déclenche AuthService.grantCommercialAgentStatus() (B5, ADR-107) — comme pour B2
+// (DGI), aucun OrganizationRole ne couvre cet acteur plateforme (les 7 rôles sont
+// tous scopés à une organisation). Secret STRICTEMENT dédié : ne jamais réutiliser
 // MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY — périmètres de confiance
 // distincts, les confondre serait une élévation de privilège croisée.
 // TODO(ADR-008) : HashiCorp Vault Transit en prod ; trafic sur réseau privé cluster
 // uniquement (K8s OVH Gravelines, DAT §1), jamais exposé publiquement.
 @Injectable()
-export class FieldAgentAuthGuard implements CanActivate {
+export class CommercialAgentAuthGuard implements CanActivate {
   private readonly expectedKey: string;
 
   constructor() {
-    const key = process.env.FIELD_AGENT_GRANT_INTERNAL_KEY;
+    const key = process.env.COMMERCIAL_AGENT_GRANT_INTERNAL_KEY;
     if (!key) {
       throw new Error(
-        "FIELD_AGENT_GRANT_INTERNAL_KEY manquant — voir README pour générer le secret inter-service",
+        "COMMERCIAL_AGENT_GRANT_INTERNAL_KEY manquant — voir README pour générer le secret inter-service",
       );
     }
     this.expectedKey = key;

@@ -10,7 +10,7 @@ export class MandatesService {
   // Un mandat est une action PRACTICE-scopée, pas organisation-scopée (ADR-068) —
   // RolesGuard ne s'applique pas (il résout exclusivement une organisation via
   // OrganizationMember). Autorisation vérifiée en ligne, même précédent que
-  // OrganizationsService.createAssisted() (isFieldAgent relu depuis la DB).
+  // OrganizationsService.createAssisted() (isCommercialAgent relu depuis la DB).
   // Factorisé ici car utilisé par create() (F5) ET revoke() (F6) — même garde,
   // 2e occurrence identique, seuil "règle de trois" atteint (anticipé lors de la
   // revue F5).
