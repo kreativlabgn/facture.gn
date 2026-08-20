@@ -17,6 +17,18 @@ describe("inviteOrganizationMemberSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  // ADR-096 — client_portal est une identité transverse auto-résolue par téléphone
+  // vérifié, jamais un accès délégué classique : elle ne peut structurellement pas
+  // être "accordée" par un owner/admin via ce mécanisme d'invitation, qui crée un
+  // OrganizationMember révocable — contradiction directe avec "jamais révocable par
+  // l'organisation". Élargi par erreur en H1 en même temps qu'ADR-096 était acté,
+  // les deux n'ayant jamais été réconciliés.
+  it("rejette role client_portal — identité auto-résolue (ADR-096), jamais un accès délégué invitable", () => {
+    const result = inviteOrganizationMemberSchema.safeParse({ msisdn: "+224612345678", role: "client_portal" });
+
+    expect(result.success).toBe(false);
+  });
+
   it("accepte les rôles avancés du catalogue (H1, gate désormais porté par plan-features-grid)", () => {
     for (const role of ["inventory_manager", "approver", "auditor", "developer_api", "admin", "cashier"]) {
       const result = inviteOrganizationMemberSchema.safeParse({ msisdn: "+224612345678", role });
