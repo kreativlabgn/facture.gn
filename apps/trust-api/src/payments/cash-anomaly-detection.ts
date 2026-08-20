@@ -12,7 +12,8 @@ const STRUCTURING_LOOP_MIN_OCCURRENCES = 3;
 // G3, ADR-091 — "juste sous" le seuil de preuve = dans les 10% en dessous du seuil
 // effectif, arbitraire MVP documenté ici (même posture que STRUCTURING_LOOP_MIN_OCCURRENCES
 // ci-dessus). Récurrence org-wide (pas par client, contrairement à sameAmountRecentCount) :
-// voir non-cash-ratio-drop.ts et PaymentsService.computeSubThresholdRecurrence().
+// calculée dans PaymentsService.detectAndRecordCashAnomaly() (inline, pas de méthode
+// dédiée) — voir aussi non-cash-ratio-drop.ts pour le signal de ratio non-cash.
 const SUB_THRESHOLD_BAND_RATIO_PERCENT = 10n;
 const SUB_THRESHOLD_RECURRENCE_MIN_OCCURRENCES = 3;
 

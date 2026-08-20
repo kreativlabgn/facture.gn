@@ -321,6 +321,10 @@ export class PaymentsService {
       const bandFloor = effectiveProofThreshold - band;
       let sameOrgSubThresholdRecentCount = 0;
       if (amount >= bandFloor && amount < effectiveProofThreshold) {
+        // Compte CE paiement (déjà committé par createPaymentAndApply() ci-dessus,
+        // donc déjà dans la fenêtre) — même précédent que sameAmountRecentCount
+        // au-dessus ("ce paiement inclus", G1) : le seuil de récurrence (3) reste
+        // cohérent avec cette convention déjà établie.
         sameOrgSubThresholdRecentCount = await this.prisma.payment.count({
           where: {
             method: "cash",
