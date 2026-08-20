@@ -126,23 +126,24 @@ export class InvoicesService {
     });
   }
 
-  // F2, ADR-045 — "Agent terrain : assisted_session, jamais de membership
-  // persistant" (DAT). Mirroir de OrganizationsService.createAssisted() (B5) :
-  // isFieldAgent relu depuis la DB, jamais fait confiance au JWT. Réutilise
+  // F2, ADR-045, ADR-107 — "Agent commercial terrain : assisted_session, jamais de
+  // membership persistant" (DAT). Mirroir de OrganizationsService.createAssisted()
+  // (B5) : isCommercialAgent relu depuis la DB, jamais fait confiance au JWT — sans
+  // rapport avec OrganizationRole.field_agent (personnel de la PME). Réutilise
   // createDraft()+issue() déjà testés — zéro duplication, une seule action
   // atomique (créer ET émettre) plutôt qu'un brouillon assisté orphelin.
-  async createAssisted(dto: CreateInvoiceDto, fieldAgentUserId: string) {
-    const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: fieldAgentUserId } });
-    if (!agent.isFieldAgent) {
+  async createAssisted(dto: CreateInvoiceDto, commercialAgentUserId: string) {
+    const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: commercialAgentUserId } });
+    if (!agent.isCommercialAgent) {
       throw new ForbiddenException("Seul un agent terrain peut assister une organisation sans accès permanent");
     }
 
     const session = await this.prisma.assistedSession.findFirst({
-      where: { fieldAgentUserId, organizationId: dto.organizationId },
+      where: { commercialAgentUserId, organizationId: dto.organizationId },
     });
     if (!session) {
       throw new ForbiddenException(
-        `Aucune AssistedSession entre l'agent ${fieldAgentUserId} et l'organisation ${dto.organizationId}`,
+        `Aucune AssistedSession entre l'agent ${commercialAgentUserId} et l'organisation ${dto.organizationId}`,
       );
     }
 

@@ -1586,14 +1586,14 @@ function createFakePrismaForCreateAssisted(
   return {
     user: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(
-        overrides.user !== undefined ? overrides.user : { id: "agent-1", isFieldAgent: true },
+        overrides.user !== undefined ? overrides.user : { id: "agent-1", isCommercialAgent: true },
       ),
     },
     assistedSession: {
       findFirst: vi.fn().mockResolvedValue(
         overrides.assistedSession !== undefined
           ? overrides.assistedSession
-          : { id: "session-1", fieldAgentUserId: "agent-1", organizationId: "org-1" },
+          : { id: "session-1", commercialAgentUserId: "agent-1", organizationId: "org-1" },
       ),
     },
     organization: {
@@ -1641,8 +1641,8 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
   });
 
-  it("refuse si l'appelant n'a pas isFieldAgent (relu depuis la DB)", async () => {
-    const prisma = createFakePrismaForCreateAssisted({ user: { id: "agent-1", isFieldAgent: false } });
+  it("refuse si l'appelant n'a pas isCommercialAgent (relu depuis la DB)", async () => {
+    const prisma = createFakePrismaForCreateAssisted({ user: { id: "agent-1", isCommercialAgent: false } });
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,

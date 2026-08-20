@@ -120,16 +120,19 @@ export class OrganizationsService {
     return verified;
   }
 
-  // ADR-045/046/047, B5 — Chemin B : un agent terrain saisit l'inscription à la
-  // place du marchand. isFieldAgent est rechargé depuis la DB (jamais fait confiance
-  // au JWT/params) : c'est la seule frontière d'autorisation ici, RolesGuard ne
-  // couvre pas ce statut plateforme. Le marchand créé (passwordHash: null, comme
-  // tout placeholder Chemin B) devient owner — jamais l'agent lui-même, qui n'obtient
-  // aucune OrganizationMember : AssistedSession est la seule preuve du lien
-  // agent↔organisation (voir schema.prisma).
-  async createAssisted(fieldAgentUserId: string, dto: CreateAssistedOrganizationDto) {
-    const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: fieldAgentUserId } });
-    if (!agent.isFieldAgent) {
+  // ADR-045/046/047, B5, ADR-107 — Chemin B : l'Agent commercial terrain saisit
+  // l'inscription à la place du marchand. isCommercialAgent est rechargé depuis la
+  // DB (jamais fait confiance au JWT/params) : c'est la seule frontière
+  // d'autorisation ici, RolesGuard ne couvre pas ce statut plateforme (sans rapport
+  // avec OrganizationRole.field_agent, personnel de la PME). Le marchand créé
+  // (passwordHash: null, comme tout placeholder Chemin B) devient owner — jamais
+  // l'agent lui-même, qui n'obtient aucune OrganizationMember : AssistedSession est
+  // la seule preuve du lien agent↔organisation (voir schema.prisma).
+  // registrationSource=agent_terrain (ADR-107) : avant correctif, retombait
+  // silencieusement sur le défaut "organic" du schema — organisations mal étiquetées.
+  async createAssisted(commercialAgentUserId: string, dto: CreateAssistedOrganizationDto) {
+    const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: commercialAgentUserId } });
+    if (!agent.isCommercialAgent) {
       throw new ForbiddenException("Seul un agent terrain peut créer une organisation en inscription assistée");
     }
 
@@ -154,6 +157,7 @@ export class OrganizationsService {
               nif: dto.nif,
               etaxNumber: dto.etaxNumber,
               accountCode: generateAccountCode(),
+              registrationSource: "agent_terrain",
             },
           });
 
@@ -168,7 +172,7 @@ export class OrganizationsService {
           });
 
           await tx.assistedSession.create({
-            data: { fieldAgentUserId, organizationId: organization.id, consentRecordedAt: new Date() },
+            data: { commercialAgentUserId, organizationId: organization.id, consentRecordedAt: new Date() },
           });
 
           // A3, ADR-026 — même discipline que create() : jamais une organisation

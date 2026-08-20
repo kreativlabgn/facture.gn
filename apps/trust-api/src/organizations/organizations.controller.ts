@@ -52,11 +52,12 @@ export class OrganizationsController {
     return this.organizationsService.verifyDgi(organizationId);
   }
 
-  // JWT requis (B5) — jamais @Public() : l'appelant doit être authentifié comme
-  // l'agent terrain lui-même (pas de FieldAgentAuthGuard ici, contrairement à
-  // /auth/field-agents/:userId/grant qui est un octroi machine-à-machine ponctuel).
-  // Aucun @Roles() : isFieldAgent n'est pas un OrganizationRole, la garde vit dans
-  // le service (relit isFieldAgent depuis la DB, jamais fait confiance au client).
+  // JWT requis (B5, ADR-107) — jamais @Public() : l'appelant doit être authentifié
+  // comme l'Agent commercial terrain lui-même (pas de CommercialAgentAuthGuard ici,
+  // contrairement à /auth/commercial-agents/:userId/grant qui est un octroi
+  // machine-à-machine ponctuel). Aucun @Roles() : isCommercialAgent n'est pas un
+  // OrganizationRole, la garde vit dans le service (relit isCommercialAgent depuis
+  // la DB, jamais fait confiance au client).
   @Post("assisted")
   createAssisted(
     @Body(new ZodValidationPipe(createAssistedOrganizationSchema)) dto: CreateAssistedOrganizationDto,
