@@ -40,6 +40,7 @@ export class RolesGuard implements CanActivate {
         | "branch"
         | "credit-limit-request"
         | "product"
+        | "recurring-template"
         | undefined
       >(ORGANIZATION_ID_SOURCE_KEY, [context.getHandler(), context.getClass()]) ?? "invoice";
 
@@ -85,7 +86,8 @@ export class RolesGuard implements CanActivate {
       | "customer"
       | "branch"
       | "credit-limit-request"
-      | "product",
+      | "product"
+      | "recurring-template",
   ): Promise<string> {
     if (request.params?.id) {
       // findUnique + 404 explicite plutôt que findUniqueOrThrow : une NotFoundError
@@ -136,6 +138,15 @@ export class RolesGuard implements CanActivate {
           throw new NotFoundException(`Produit ${request.params.id} introuvable`);
         }
         return product.organizationId;
+      }
+      if (idSource === "recurring-template") {
+        const template = await this.prisma.recurringInvoiceTemplate.findUnique({
+          where: { id: request.params.id },
+        });
+        if (!template) {
+          throw new NotFoundException(`Modèle récurrent ${request.params.id} introuvable`);
+        }
+        return template.organizationId;
       }
       const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
       if (!invoice) {
