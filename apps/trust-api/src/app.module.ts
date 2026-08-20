@@ -25,6 +25,7 @@ import { ProductStockModule } from "./product-stock/product-stock.module";
 import { MarginModule } from "./margin/margin.module";
 import { RevenueShareModule } from "./revenue-share/revenue-share.module";
 import { FinancingModule } from "./financing/financing.module";
+import { RecurringTemplatesModule } from "./recurring-templates/recurring-templates.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -57,6 +58,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     MarginModule,
     RevenueShareModule,
     FinancingModule,
+    RecurringTemplatesModule,
   ],
   providers: [
     // Ordre significatif : JwtAuthGuard peuple request.user avant que RolesGuard
