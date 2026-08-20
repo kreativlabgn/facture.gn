@@ -681,3 +681,41 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     expect(paymentLinkClient.tryGenerate).not.toHaveBeenCalled();
   });
 });
+
+// C12, ADR-062 — "Cash et lien mixables" : chaque moteur (recordCashPayment,
+// recordProviderPayment, recordBankTransferPayment) applique son paiement via le
+// même applyPaymentToInvoice() partagé (incrément/décrément relatif, C1), sans
+// jamais lire ni contraindre le method des paiements précédents sur la facture —
+// mixer est donc une propriété émergente de C11 (paiements successifs), jamais
+// vérifiée jusqu'ici par un scénario dédié qui alterne réellement les moteurs.
+describe("PaymentsService — mixer les modes de paiement sur une même facture (C12, ADR-062)", () => {
+  it("cumule correctement cash, virement puis lien de paiement sur la même facture", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const paymentLinkClient = createFakePaymentLinkClient();
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+
+    await service.recordCashPayment("inv-1", { amount: 500_000n, method: "cash" as const }, "idem-mix-cash");
+    let invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(1_000_000n);
+    expect(invoice.status).toBe("partially_paid");
+
+    await service.recordBankTransferPayment("inv-1", { amount: 500_000n }, "idem-mix-bt");
+    invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(500_000n);
+    expect(invoice.status).toBe("partially_paid");
+
+    await service.recordProviderPayment("inv-1", {
+      amountGnf: 500_000n,
+      provider: "djomy" as const,
+      providerRef: "djomy-stub-mix",
+      feeGatewayGnf: 5_000n,
+    });
+    invoice = await prisma.invoice.findUnique();
+    expect(invoice.amountDue).toBe(0n);
+    expect(invoice.amountPaid).toBe(1_500_000n);
+    expect(invoice.status).toBe("paid");
+
+    const methods = prisma.payment.create.mock.calls.map((call: any) => call[0].data.method);
+    expect(methods).toEqual(["cash", "bank_transfer", "payment_link"]);
+  });
+});
