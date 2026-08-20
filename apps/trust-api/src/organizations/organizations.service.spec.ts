@@ -686,3 +686,52 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
     expect(prisma.organizationMember.create).toHaveBeenCalled();
   });
 });
+
+describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
+  function createFakePrismaForUpgrade(organization: any) {
+    return {
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(organization),
+        update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...organization, ...data })),
+      },
+    };
+  }
+
+  it("change commercialTier vers le palier demandé", async () => {
+    const organization = { id: "org-1", commercialTier: "freemium", dgiVerificationStatus: "verified" };
+    const prisma = createFakePrismaForUpgrade(organization);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    const result = await service.upgradeCommercialTier("org-1", "pro");
+
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { commercialTier: "pro" },
+    });
+    expect(result.commercialTier).toBe("pro");
+  });
+
+  it("autorise l'upgrade même pour une organisation dgiVerificationStatus='unverified' (ADR-049, jamais dépendant de DGI)", async () => {
+    const organization = { id: "org-1", commercialTier: "freemium", dgiVerificationStatus: "unverified" };
+    const prisma = createFakePrismaForUpgrade(organization);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    const result = await service.upgradeCommercialTier("org-1", "starter");
+
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { commercialTier: "starter" },
+    });
+    expect(result.commercialTier).toBe("starter");
+  });
+
+  it("autorise un downgrade (pro → freemium)", async () => {
+    const organization = { id: "org-1", commercialTier: "pro", dgiVerificationStatus: "verified" };
+    const prisma = createFakePrismaForUpgrade(organization);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    const result = await service.upgradeCommercialTier("org-1", "freemium");
+
+    expect(result.commercialTier).toBe("freemium");
+  });
+});
