@@ -5,10 +5,9 @@
 // Référence : Desktop/facture.gn/V/ERD-facture-gn.md (26/07/2026).
 //
 // Divergences assumées vis-à-vis de l'ERD complet (27 entités) :
-// - recurring_template_id sur INVOICE reste une colonne scalaire SANS relation
-//   FK tant que RECURRING_INVOICE_TEMPLATE n'existe pas. customer_id (C6),
-//   branch_id (E1), product_id sur INVOICE_LINE (E7) et financed_by_partner_id
-//   sur INVOICE (K4/K5) sont désormais de vraies relations FK.
+// - customer_id (C6), branch_id (E1), product_id sur INVOICE_LINE (E7),
+//   financed_by_partner_id (K4/K5) et recurring_template_id (I1) sur INVOICE
+//   sont désormais tous de vraies relations FK — plus aucun scalaire orphelin.
 // - InvoiceSequence est un ajout (absent de l'ERD) pour garantir number sans trou
 //   par organisation/année sous concurrence (voir Registre-ADR, Article 23 OHADA).
 // - Colonnes en snake_case en base (@map), camelCase côté client Prisma.
@@ -466,6 +465,7 @@ model Organization {
   apiKeys             ApiKey[]
   products            Product[]
   revenueShareCredits RevenueShareCredit[]
+  recurringTemplates  RecurringInvoiceTemplate[]
 
   @@map("organization")
 }
@@ -536,9 +536,10 @@ model Branch {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  organization  Organization   @relation(fields: [organizationId], references: [id])
-  invoices      Invoice[]
-  productStocks ProductStock[]
+  organization       Organization               @relation(fields: [organizationId], references: [id])
+  invoices           Invoice[]
+  productStocks      ProductStock[]
+  recurringTemplates RecurringInvoiceTemplate[]
 
   @@map("branch")
 }
@@ -629,6 +630,7 @@ model Customer {
   duplicateOf         Customer?                  @relation("CustomerDuplicate", fields: [possibleDuplicateOf], references: [id])
   possibleDupes       Customer[]                 @relation("CustomerDuplicate")
   creditLimitRequests CreditLimitChangeRequest[]
+  recurringTemplates  RecurringInvoiceTemplate[]
 
   @@map("customer")
 }
@@ -723,6 +725,8 @@ model Invoice {
   recurringTemplateId  String? @map("recurring_template_id")
   convertedToInvoiceId String? @unique @map("converted_to_invoice_id")
 
+  recurringTemplate RecurringInvoiceTemplate? @relation(fields: [recurringTemplateId], references: [id])
+
   quoteValidUntil DateTime? @map("quote_valid_until")
   referenceMarche String?   @map("reference_marche")
 
@@ -760,6 +764,41 @@ model Invoice {
 
   @@unique([organizationId, number])
   @@map("invoice")
+}
+
+// I1, ADR-056 — jamais de taux/régime fiscal figé : lines ne contient que des
+// données commerciales pures (description, quantity, unitPrice, productId
+// optionnel — même shape que createInvoiceSchema.lines), le régime est
+// toujours recalculé par InvoicesService.createDraft() au moment de chaque
+// génération (C4), jamais lu depuis ce modèle. lastKnownRegimeFiscal N'EST PAS
+// une valeur figée pour la facturation — seulement une référence de
+// comparaison pour détecter une dérive et déclencher un InvoiceEvent
+// regime_change (flag de revue, jamais bloquant — "alerte, jamais un mur
+// silencieux", ADR-056). intervalDays + lastGeneratedAt protègent contre une
+// double génération pour la même période (garde de concurrence, voir
+// recurring-templates.service.ts).
+model RecurringInvoiceTemplate {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  customerId     String? @map("customer_id")
+  branchId       String? @map("branch_id")
+
+  lines Json
+
+  discountPct  Int @default(0) @map("discount_pct")
+  intervalDays Int @map("interval_days")
+
+  lastGeneratedAt       DateTime?     @map("last_generated_at")
+  lastKnownRegimeFiscal RegimeFiscal? @map("last_known_regime_fiscal")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer?    @relation(fields: [customerId], references: [id])
+  branch       Branch?      @relation(fields: [branchId], references: [id])
+  invoices     Invoice[]
+
+  @@map("recurring_invoice_template")
 }
 
 model Payment {
