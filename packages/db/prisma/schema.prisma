@@ -490,6 +490,15 @@ model OrganizationSigningKey {
   encryptedPrivateKey String   @map("encrypted_private_key")
   createdAt           DateTime @default(now()) @map("created_at")
 
+  // A4, ADR-025 — "révocation jamais rétroactive" : ne bloque JAMAIS
+  // verifyWithKey() (intégrité des factures déjà signées), uniquement
+  // certifyForOrganization() (nouvelles signatures) et le champ public
+  // keyValidAtIssuance (VerificationService). Pas de rotation construite ici
+  // (voir commentaire A3/ADR-026 plus haut, "rotation-safe mais aucun
+  // mécanisme actif") — une organisation révoquée ne peut plus émettre tant
+  // qu'une story future ne construit pas le remplacement de clé.
+  revokedAt DateTime? @map("revoked_at")
+
   organization Organization @relation(fields: [organizationId], references: [id])
   invoices     Invoice[]
 
