@@ -379,4 +379,11 @@ export class OrganizationsService {
       data: { commercialTier: tier },
     });
   }
+
+  // A4, ADR-025 — simple délégation, OrganizationSigningKeyService (@Global(),
+  // certification.module.ts) porte toute la logique métier (idempotence,
+  // jamais rétroactif).
+  async revokeSigningKey(organizationId: string) {
+    return this.signingKeyService.revoke(organizationId);
+  }
 }

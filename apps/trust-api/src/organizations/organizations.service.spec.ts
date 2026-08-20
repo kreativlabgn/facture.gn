@@ -7,7 +7,10 @@ import { OrganizationsService } from "./organizations.service";
 // une clé racine, mais la plupart des tests existants ne portent pas sur CE
 // comportement — un double par défaut minimal suffit.
 function createFakeSigningKeyService() {
-  return { provisionRootKey: vi.fn().mockResolvedValue({ id: "signing-key-1", publicKey: "pubkey-hex" }) };
+  return {
+    provisionRootKey: vi.fn().mockResolvedValue({ id: "signing-key-1", publicKey: "pubkey-hex" }),
+    revoke: vi.fn().mockResolvedValue({ id: "signing-key-1", revokedAt: new Date() }),
+  };
 }
 
 function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
@@ -747,5 +750,18 @@ describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
     const result = await service.upgradeCommercialTier("org-1", "freemium");
 
     expect(result.commercialTier).toBe("freemium");
+  });
+});
+
+describe("OrganizationsService.revokeSigningKey (A4, ADR-025)", () => {
+  it("délègue à OrganizationSigningKeyService.revoke()", async () => {
+    const prisma = {} as any;
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService(prisma, signingKeyService as any);
+
+    const result = await service.revokeSigningKey("org-1");
+
+    expect(signingKeyService.revoke).toHaveBeenCalledWith("org-1");
+    expect(result.revokedAt).toBeInstanceOf(Date);
   });
 });

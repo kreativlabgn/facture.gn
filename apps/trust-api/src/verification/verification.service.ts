@@ -3,7 +3,7 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import { resolveNifForCertification } from "../certification/certification.service";
-import type { CertificationService } from "../certification/certification.service";
+import type { CertificationResult, CertificationService } from "../certification/certification.service";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 
 export interface PublicInvoiceVerification {
@@ -20,6 +20,11 @@ export interface PublicInvoiceVerification {
   disputeStatus: string;
   validatedByAdministration: boolean;
   integrityValid: boolean;
+  // A4, ADR-025 — distinct de integrityValid (recalcul cryptographique) : ce
+  // champ répond à "la clé était-elle valide AU MOMENT de l'émission", jamais
+  // à l'horloge courante. Toujours true pour la clé légataire globale
+  // (signingKeyId null), qui n'a pas de registre de révocation dans ce repo.
+  keyValidAtIssuance: boolean;
 }
 
 @Injectable()
@@ -62,14 +67,30 @@ export class VerificationService {
       issuedAt: invoice.issuedAt.toISOString(),
       previousHash: invoice.previousHash ?? "GENESIS",
     };
-    const recomputed = invoice.signingKeyId
-      ? await this.signingKeyService.verifyWithKey(invoice.signingKeyId, payload)
-      : this.certification.certify(payload);
+    // A4, ADR-025 — un seul appel à verifyWithKey() fournit à la fois le
+    // recalcul cryptographique ET le statut de révocation (revoke() de la même
+    // ligne OrganizationSigningKey) : jamais un second aller-retour DB sur ce
+    // endpoint public.
+    let recomputed: CertificationResult;
+    let revokedAt: Date | null = null;
+    if (invoice.signingKeyId) {
+      const result = await this.signingKeyService.verifyWithKey(invoice.signingKeyId, payload);
+      recomputed = result;
+      revokedAt = result.revokedAt;
+    } else {
+      // A3, ADR-026 — clé légataire globale, hors scope du registre de
+      // révocation (aucun mécanisme de révocation pour cette clé dans ce repo).
+      recomputed = this.certification.certify(payload);
+    }
 
     const integrityValid =
       recomputed.hash === invoice.hash &&
       recomputed.certificationId === certificationId &&
       recomputed.signature === invoice.signature.toString("hex");
+
+    // A4, ADR-025 — "révocation jamais rétroactive" : valide si jamais révoquée,
+    // OU révoquée APRÈS issuedAt.
+    const keyValidAtIssuance = revokedAt === null || invoice.issuedAt < revokedAt;
 
     return {
       certificationId,
@@ -82,6 +103,7 @@ export class VerificationService {
       disputeStatus: invoice.disputeStatus,
       validatedByAdministration: invoice.validatedByAdministration,
       integrityValid,
+      keyValidAtIssuance,
     };
   }
 }

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { ed25519 } from "@noble/curves/ed25519";
 import { bytesToHex } from "@noble/hashes/utils";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
@@ -45,16 +45,48 @@ export class OrganizationSigningKeyService {
     payload: CertifiablePayload,
   ): Promise<CertificationResult & { signingKeyId: string }> {
     const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { organizationId } });
+    // A4, ADR-025 — garde additive, jamais rétroactive : bloque uniquement de
+    // NOUVELLES signatures, ne touche jamais verifyWithKey() (intégrité des
+    // factures déjà signées avant la révocation).
+    if (key.revokedAt) {
+      throw new ConflictException(
+        `La clé de signature de l'organisation ${organizationId} a été révoquée le ${key.revokedAt.toISOString()} — aucune nouvelle facture ne peut être émise`,
+      );
+    }
     const service = this.buildServiceFromEncryptedKey(key.encryptedPrivateKey);
 
     return { ...service.certify(payload), signingKeyId: key.id };
   }
 
-  async verifyWithKey(signingKeyId: string, payload: CertifiablePayload): Promise<CertificationResult> {
+  // A4, ADR-025 — self-service owner/admin, jamais un workflow d'approbation
+  // (contrairement à CreditLimitChangeRequest, E5) : une clé compromise doit
+  // pouvoir être révoquée immédiatement. Idempotent : un second appel ne
+  // réécrit jamais revokedAt (préserve l'horodatage exact de la 1ère révocation,
+  // dont dépend keyValidAtIssuance côté VerificationService).
+  async revoke(organizationId: string) {
+    const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { organizationId } });
+    if (key.revokedAt) {
+      return key;
+    }
+
+    return this.prisma.organizationSigningKey.update({
+      where: { organizationId },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  // A4, ADR-025 — revokedAt inclus dans le résultat (jamais un second lookup
+  // séparé, revue dev-code-reviewer) : verifyWithKey() a déjà la ligne
+  // OrganizationSigningKey en main, un getRevokedAt() dédié aurait requêté la
+  // MÊME ligne une seconde fois sur le endpoint public de vérification.
+  async verifyWithKey(
+    signingKeyId: string,
+    payload: CertifiablePayload,
+  ): Promise<CertificationResult & { revokedAt: Date | null }> {
     const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { id: signingKeyId } });
     const service = this.buildServiceFromEncryptedKey(key.encryptedPrivateKey);
 
-    return service.certify(payload);
+    return { ...service.certify(payload), revokedAt: key.revokedAt };
   }
 
   private buildServiceFromEncryptedKey(encryptedPrivateKey: string): StubEd25519CertificationService {
