@@ -36,6 +36,15 @@ describe("inviteOrganizationMemberSchema", () => {
     }
   });
 
+  // F3, DAT §3.5 — "proche/assistant", contrairement à client_portal (ADR-096)
+  // ceci EST un accès délégué classique, révocable par l'organisation : rien ne
+  // s'oppose à ce qu'il transite par le mécanisme d'invitation générique.
+  it("accepte role viewer (F3, invitable aussi depuis la PWA)", () => {
+    const result = inviteOrganizationMemberSchema.safeParse({ msisdn: "+224612345678", role: "viewer" });
+
+    expect(result.success).toBe(true);
+  });
+
   it("rejette un msisdn mal formé (pas +224 E.164)", () => {
     const result = inviteOrganizationMemberSchema.safeParse({ msisdn: "0612345678", role: "tax_controller_readonly" });
 

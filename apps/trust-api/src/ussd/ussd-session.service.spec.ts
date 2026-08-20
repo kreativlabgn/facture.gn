@@ -72,6 +72,7 @@ function createFakeUssdAccount(overrides: {
   listActiveMandates?: ReturnType<typeof vi.fn>;
   acceptMandate?: ReturnType<typeof vi.fn>;
   revokeMandate?: ReturnType<typeof vi.fn>;
+  inviteViewer?: ReturnType<typeof vi.fn>;
 } = {}) {
   return {
     changePin: overrides.changePin ?? vi.fn().mockResolvedValue(undefined),
@@ -80,6 +81,7 @@ function createFakeUssdAccount(overrides: {
     listActiveMandates: overrides.listActiveMandates ?? vi.fn().mockResolvedValue([]),
     acceptMandate: overrides.acceptMandate ?? vi.fn().mockResolvedValue(undefined),
     revokeMandate: overrides.revokeMandate ?? vi.fn().mockResolvedValue(undefined),
+    inviteViewer: overrides.inviteViewer ?? vi.fn().mockResolvedValue({ id: "member-1", role: "viewer" }),
   };
 }
 
@@ -827,6 +829,69 @@ describe("UssdSessionService — option 5, gérer mon compte (§2.5 Spec USSD)",
 
       expect(ussdAccount.revokeMandate).not.toHaveBeenCalled();
       expect(result.continue).toBe(false);
+    });
+  });
+
+  describe("5.5 — inviter un proche (F3, DAT §3.5)", () => {
+    it("choix 5 → demande le numéro du proche", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "manage_account_menu", organizationId: ORG_ID }),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "5");
+
+      expect(result).toEqual({ continue: true, text: "Numéro du proche à inviter :" });
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ state: "account_invite_viewer_phone" }) }),
+      );
+    });
+
+    it("numéro valide → délègue à UssdAccountService.inviteViewer, confirme", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "account_invite_viewer_phone",
+          userId: USER_ID,
+          organizationId: ORG_ID,
+        }),
+      });
+      const ussdAccount = createFakeUssdAccount();
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, ussdAccount as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "+224655667788");
+
+      expect(ussdAccount.inviteViewer).toHaveBeenCalledWith(ORG_ID, USER_ID, "+224655667788");
+      expect(result).toEqual({ continue: false, text: "+224655667788 peut désormais consulter vos factures." });
+    });
+
+    it("numéro invalide → redemande sans appeler inviteViewer", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "account_invite_viewer_phone", userId: USER_ID, organizationId: ORG_ID }),
+      });
+      const ussdAccount = createFakeUssdAccount();
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, ussdAccount as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "0612345678");
+
+      expect(ussdAccount.inviteViewer).not.toHaveBeenCalled();
+      expect(result).toEqual({ continue: true, text: "Numéro invalide. Réessayez :" });
+    });
+
+    it("refus (rôle insuffisant ou compte introuvable) → message d'erreur renvoyé tel quel, jamais un 500", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "account_invite_viewer_phone", userId: USER_ID, organizationId: ORG_ID }),
+      });
+      const ussdAccount = createFakeUssdAccount({
+        inviteViewer: vi.fn().mockRejectedValue(new ForbiddenException("Seul le propriétaire ou un administrateur peut inviter un proche")),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, ussdAccount as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "+224655667788");
+
+      expect(result).toEqual({
+        continue: false,
+        text: "Seul le propriétaire ou un administrateur peut inviter un proche",
+      });
     });
   });
 });
