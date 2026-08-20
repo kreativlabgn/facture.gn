@@ -44,7 +44,7 @@ export class CommissionBypassReviewService {
   // l'override de seuil posé au Niveau 2 (aucune instruction contraire, et
   // level_4 n'est lu par aucun autre module ce MVP, voir gap documenté dans
   // resolveCase() ci-dessous).
-  async resolveCase(caseId: string, decision: "dismiss" | "restrict") {
+  async resolveCase(caseId: string, decision: "dismiss" | "restrict", operatorId: string) {
     const bypassCase = await this.prisma.commissionBypassCase.findUniqueOrThrow({ where: { id: caseId } });
     const resolvedAt = new Date();
     const status = decision === "dismiss" ? "dismissed" : "restricted";
@@ -52,7 +52,7 @@ export class CommissionBypassReviewService {
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.commissionBypassCase.updateMany({
         where: { id: caseId, status: "pending" },
-        data: { status, resolvedAt },
+        data: { status, resolvedAt, resolvedByOperatorId: operatorId },
       });
       if (claimed.count === 0) {
         throw new ConflictException(`Case ${caseId} a déjà été résolu`);
@@ -73,7 +73,7 @@ export class CommissionBypassReviewService {
         });
       }
 
-      return { ...bypassCase, status, resolvedAt };
+      return { ...bypassCase, status, resolvedAt, resolvedByOperatorId: operatorId };
     });
   }
 }

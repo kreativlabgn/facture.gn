@@ -898,6 +898,15 @@ model CommissionBypassCase {
   detectedPatterns Json                       @map("detected_patterns")
   createdAt        DateTime                   @default(now()) @map("created_at")
   resolvedAt       DateTime?                  @map("resolved_at")
+  // Revue dev-domain-model-reviewer : resolveCase() est une décision humaine
+  // discrétionnaire (dismiss/restrict) sur un dossier de fraude potentielle —
+  // même nature que CreditLimitChangeRequest.resolvedByUserId (E5), jamais
+  // verifyDgi() (B2, déclenchement automatisé sans nuance). Pas de FK vers
+  // User (Squad Money n'y est représenté par aucune ligne) : chaîne libre
+  // fournie par l'outil interne appelant, jamais validée contre une table —
+  // traçabilité "qui" en plus du "pourquoi" (detectedPatterns), sans les
+  // garanties d'intégrité référentielle qu'une vraie FK offrirait.
+  resolvedByOperatorId String? @map("resolved_by_operator_id")
 
   organization Organization @relation(fields: [organizationId], references: [id])
 

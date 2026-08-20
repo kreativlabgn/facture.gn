@@ -26,6 +26,6 @@ export class CommissionBypassCaseResolutionController {
     @Param("id") caseId: string,
     @Body(new ZodValidationPipe(resolveCommissionBypassCaseSchema)) dto: ResolveCommissionBypassCaseDto,
   ) {
-    return this.commissionBypassReviewService.resolveCase(caseId, dto.decision);
+    return this.commissionBypassReviewService.resolveCase(caseId, dto.decision, dto.operatorId);
   }
 }

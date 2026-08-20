@@ -92,9 +92,10 @@ describe("CommissionBypassReviewService — résolution d'un case (G3, ADR-091)"
     );
     const service = new CommissionBypassReviewService(prisma);
 
-    await service.resolveCase("case-1", "dismiss");
+    await service.resolveCase("case-1", "dismiss", "squad-money-1");
 
     expect(getCaseState().status).toBe("dismissed");
+    expect(getCaseState().resolvedByOperatorId).toBe("squad-money-1");
     expect(getOrgState().commissionBypassLevel).toBe("none");
     expect(getOrgState().commissionBypassProofThresholdOverrideGnf).toBeNull();
   });
@@ -106,7 +107,7 @@ describe("CommissionBypassReviewService — résolution d'un case (G3, ADR-091)"
     );
     const service = new CommissionBypassReviewService(prisma);
 
-    await service.resolveCase("case-1", "restrict");
+    await service.resolveCase("case-1", "restrict", "squad-money-2");
 
     expect(getCaseState().status).toBe("restricted");
     expect(getOrgState().commissionBypassLevel).toBe("level_4_restricted");
@@ -120,6 +121,6 @@ describe("CommissionBypassReviewService — résolution d'un case (G3, ADR-091)"
     );
     const service = new CommissionBypassReviewService(prisma);
 
-    await expect(service.resolveCase("case-1", "dismiss")).rejects.toThrow(ConflictException);
+    await expect(service.resolveCase("case-1", "dismiss", "squad-money-1")).rejects.toThrow(ConflictException);
   });
 });

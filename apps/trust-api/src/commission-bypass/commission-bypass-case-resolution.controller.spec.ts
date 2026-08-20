@@ -28,9 +28,9 @@ describe("CommissionBypassCaseResolutionController — POST /commission-bypass-c
     const service = { resolveCase: vi.fn().mockResolvedValue({ id: "case-1", status: "dismissed" }) };
     const controller = new CommissionBypassCaseResolutionController(service as any);
 
-    const result = await controller.resolve("case-1", { decision: "dismiss" });
+    const result = await controller.resolve("case-1", { decision: "dismiss", operatorId: "squad-money-1" });
 
-    expect(service.resolveCase).toHaveBeenCalledWith("case-1", "dismiss");
+    expect(service.resolveCase).toHaveBeenCalledWith("case-1", "dismiss", "squad-money-1");
     expect(result.status).toBe("dismissed");
   });
 });
