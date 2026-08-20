@@ -8,6 +8,14 @@ function createFakePaymentLinkClient(result: any = null) {
   return { tryGenerate: vi.fn().mockResolvedValue(result) };
 }
 
+// G3, ADR-091 — escalade toujours best-effort côté PaymentsService (meilleur
+// effort, jamais bloquant) : un no-op suffit pour la quasi-totalité des tests
+// existants, qui ne portent pas sur l'escalade elle-même (voir
+// commission-bypass-escalation.service.spec.ts pour son comportement propre).
+function createFakeCommissionBypassEscalation() {
+  return { evaluateAndEscalate: vi.fn().mockResolvedValue(undefined) };
+}
+
 // Mock à état mutable (pas juste des retours figés) : nécessaire pour prouver que
 // l'incrément/décrément est bien relatif (Prisma { increment }/{ decrement }) et non
 // une valeur absolue recalculée — deux appels séquentiels sur la même facture doivent
@@ -104,7 +112,7 @@ const cashDto = {
 describe("PaymentsService — encaissement cash", () => {
   it("fait passer la facture à paid quand le montant réglé couvre exactement le solde dû", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-key-1");
 
@@ -116,7 +124,7 @@ describe("PaymentsService — encaissement cash", () => {
 
   it("fait passer la facture à partially_paid quand le montant réglé est inférieur au solde dû", async () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-key-2");
 
@@ -128,7 +136,7 @@ describe("PaymentsService — encaissement cash", () => {
 
   it("cumule correctement deux paiements successifs sur la même facture (pas d'écrasement par valeur absolue)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 700_000n, method: "cash" as const }, "idem-key-a");
     await service.recordCashPayment("inv-1", { amount: 300_000n, method: "cash" as const }, "idem-key-b");
@@ -145,14 +153,14 @@ describe("PaymentsService — encaissement cash", () => {
 
   it("refuse un paiement sur une facture draft", async () => {
     const prisma = createFakePrisma({ status: "draft" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-4")).rejects.toThrow(ConflictException);
   });
 
   it("refuse un paiement sur une facture voided", async () => {
     const prisma = createFakePrisma({ status: "voided" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-5")).rejects.toThrow(ConflictException);
   });
@@ -160,14 +168,14 @@ describe("PaymentsService — encaissement cash", () => {
   it("refuse un paiement sur une facture introuvable", async () => {
     const prisma = createFakePrisma();
     prisma.invoice.findUnique = vi.fn().mockResolvedValue(null);
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-6")).rejects.toThrow(NotFoundException);
   });
 
   it("un replay avec le même idempotencyKey renvoie le paiement déjà créé, ne recrée rien", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const first = await service.recordCashPayment("inv-1", cashDto, "idem-key-replay");
     const second = await service.recordCashPayment("inv-1", cashDto, "idem-key-replay");
@@ -189,7 +197,7 @@ describe("PaymentsService — encaissement cash", () => {
       .fn()
       .mockResolvedValueOnce(null) // premier lookup : rien trouvé, on tente de créer
       .mockResolvedValueOnce(existingPayment); // second lookup après l'échec : la course concurrente l'a créé entre-temps
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const result = await service.recordCashPayment("inv-1", cashDto, "idem-key-race");
 
@@ -198,7 +206,7 @@ describe("PaymentsService — encaissement cash", () => {
 
   it("commission toujours nulle pour un encaissement cash (0%, C1)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-key-7");
 
@@ -213,7 +221,7 @@ describe("PaymentsService — encaissement cash", () => {
 describe("PaymentsService — trop-perçu cash (C14)", () => {
   it("accepte un paiement cash supérieur au solde dû et trace l'excédent dans overpaymentAmount", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 1_300_000n, method: "cash" as const }, "idem-key-overpaid");
 
@@ -226,7 +234,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
 
   it("montant cash exactement égal au solde dû — overpaymentAmount reste 0 (non-régression)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 1_000_000n, method: "cash" as const }, "idem-key-exact");
 
@@ -238,7 +246,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
 
   it("montant cash inférieur au solde dû — overpaymentAmount reste 0 (non-régression)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 400_000n, method: "cash" as const }, "idem-key-partiel");
 
@@ -259,7 +267,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
   // amountDue.
   it("accepte un dto.amountGnf largement supérieur à amountDue (commission incluse) sans jamais déclencher le trop-perçu C14", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const payment = await service.recordProviderPayment("inv-1", {
       amountGnf: 1_300_000n,
@@ -281,7 +289,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
 describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR-091)", () => {
   it("rejette un encaissement cash au-delà du seuil global sans preuve (comportement préservé, ex-refine Zod)", async () => {
     const prisma = createFakePrisma({ amountDue: 150_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordCashPayment("inv-1", { amount: 150_000_000n, method: "cash" as const }, "idem-proof-1"),
@@ -290,7 +298,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
 
   it("accepte un encaissement cash au-delà du seuil global avec les 4 champs de preuve", async () => {
     const prisma = createFakePrisma({ amountDue: 150_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const result = await service.recordCashPayment(
       "inv-1",
@@ -314,7 +322,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
       0,
       { commissionBypassProofThresholdOverrideGnf: 50_000_000n },
     );
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordCashPayment("inv-1", { amount: 60_000_000n, method: "cash" as const }, "idem-proof-3"),
@@ -323,7 +331,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
 
   it("retombe sur le seuil global quand aucun override n'est posé sur l'organisation", async () => {
     const prisma = createFakePrisma({ amountDue: 50_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const result = await service.recordCashPayment(
       "inv-1",
@@ -338,7 +346,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
 describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-032)", () => {
   it("écrit un InvoiceEvent suspicious_cash_pattern_detected pour un montant rond ≥ 1M GNF", async () => {
     const prisma = createFakePrisma({ amountDue: 150_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment(
       "inv-1",
@@ -368,7 +376,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
 
   it("écrit un InvoiceEvent client_amount_loop au 3e paiement identique pour le même client", async () => {
     const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" }, 3);
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-loop");
 
@@ -383,19 +391,24 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
     });
   });
 
-  it("ignore la vérification de boucle quand customerId est absent, même si le montant se répète", async () => {
+  it("ignore la vérification de boucle quand customerId est absent, même si le montant se répète — G3 continue d'interroger org-wide (ratio non-cash, récurrence sous seuil), jamais la boucle par client", async () => {
     const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: null }, 5);
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-no-client");
 
-    expect(prisma.payment.count).not.toHaveBeenCalled();
+    // Aucun des appels payment.count() (org-wide G3 inclus) ne filtre jamais par
+    // customerId — seule la boucle client/montant (G1) le ferait, et n'est jamais
+    // interrogée ici (invoice.customerId est null).
+    for (const call of prisma.payment.count.mock.calls) {
+      expect(call[0]?.where?.invoice?.customerId).toBeUndefined();
+    }
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 
   it("n'écrit aucun InvoiceEvent pour un paiement cash normal — le paiement réussit toujours (non-régression)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const result = await service.recordCashPayment("inv-1", cashDto, "idem-key-normal");
 
@@ -406,7 +419,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
   it("un paiement cash légitime réussit même si la détection d'anomalie échoue — meilleur effort, jamais couplé (revue sécurité)", async () => {
     const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" });
     prisma.payment.count = vi.fn().mockRejectedValue(new Error("panne DB inattendue sur la détection"));
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const result = await service.recordCashPayment(
       "inv-1",
@@ -465,7 +478,7 @@ const depositDto = { amount: 300_000n };
 describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
   it("refuse un dépôt sur un document qui n'est pas un proforma", async () => {
     const prisma = createFakePrismaForDeposit({ documentType: "invoice" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-1"),
@@ -474,7 +487,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
 
   it("refuse un dépôt sur un devis — C16 élargit convertToInvoice() aux devis, jamais recordDepositPayment() (non-régression)", async () => {
     const prisma = createFakePrismaForDeposit({ documentType: "quote" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-quote"),
@@ -483,7 +496,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
 
   it("refuse un dépôt sur un proforma qui n'est plus draft", async () => {
     const prisma = createFakePrismaForDeposit({ status: "converted" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-2"),
@@ -492,7 +505,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
 
   it("enregistre l'arrhes sans jamais toucher amountPaid/amountDue de la facture", async () => {
     const prisma = createFakePrismaForDeposit();
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const payment = await service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-3");
 
@@ -503,7 +516,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
 
   it("refuse un second dépôt sur un proforma qui en a déjà un", async () => {
     const prisma = createFakePrismaForDeposit({}, { id: "payment-existing", depositType: "arrhes" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-4"),
@@ -512,7 +525,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
 
   it("refuse une arrhes au-delà du seuil de preuve effectif sans les 4 champs requis (G3, ADR-091)", async () => {
     const prisma = createFakePrismaForDeposit();
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordDepositPayment("proforma-1", { amount: 150_000_000n }, "idem-deposit-proof"),
@@ -531,7 +544,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     });
     const prisma = createFakePrismaForDeposit();
     prisma.payment.create = vi.fn().mockRejectedValue(uniqueViolation);
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-race"),
@@ -549,7 +562,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
 
   it("fait passer la facture à paid et réutilise le même incrément atomique que le cash (C1)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordProviderPayment("inv-1", providerDto);
 
@@ -561,7 +574,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
 
   it("enregistre le paiement avec method payment_link, providerRef et la commission gateway réelle", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordProviderPayment("inv-1", providerDto);
 
@@ -579,7 +592,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
 
   it("est idempotent par providerRef — un replay renvoie le paiement déjà créé, ne double-crédite jamais", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const first = await service.recordProviderPayment("inv-1", providerDto);
     const second = await service.recordProviderPayment("inv-1", providerDto);
@@ -591,7 +604,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
 
   it("calcule platformFeeAmount selon le palier commercial de l'organisation (ADR-074) — pro 1,5%, pas freemium", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n }, 0, { commercialTier: "pro" });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordProviderPayment("inv-1", providerDto);
 
@@ -604,7 +617,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
   it("refuse un paiement sur une facture introuvable", async () => {
     const prisma = createFakePrisma();
     prisma.invoice.findUnique = vi.fn().mockResolvedValue(null);
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(service.recordProviderPayment("inv-1", providerDto)).rejects.toThrow(NotFoundException);
   });
@@ -613,7 +626,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
 describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)", () => {
   it("enregistre le virement avec method bank_transfer et une commission nulle", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-1");
 
@@ -630,7 +643,7 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
 
   it("refuse un virement dont le montant dépasse le solde dû — contrairement au cash (C14 non étendu ici)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
       service.recordBankTransferPayment("inv-1", { amount: 1_300_000n }, "idem-bt-2"),
@@ -639,7 +652,7 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
 
   it("un replay avec le même idempotencyKey renvoie le paiement déjà créé, ne recrée rien", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     const first = await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-replay");
     const second = await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-replay");
@@ -651,7 +664,7 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
 
   it("n'écrit aucun InvoiceEvent de détection d'anomalie — G1 reste strictement cash-only", async () => {
     const prisma = createFakePrisma({ amountDue: 150_000_000n });
-    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordBankTransferPayment("inv-1", { amount: 150_000_000n }, "idem-bt-3");
 
@@ -669,7 +682,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
   it("régénère le lien de paiement pour amountDue (solde restant) après un paiement cash partiel", async () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-relink-1");
 
@@ -691,7 +704,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
   it("écrit un InvoiceEvent payment_link_regenerated avec actorId null (régénération système, pas humaine)", async () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-relink-2");
 
@@ -705,7 +718,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
   it("ne régénère AUCUN lien quand le paiement cash solde entièrement la facture (paid)", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-relink-3");
 
@@ -715,7 +728,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
   it("un échec de génération de lien (tryGenerate renvoie null) n'empêche jamais le paiement de réussir", async () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
     const paymentLinkClient = createFakePaymentLinkClient(null);
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     const payment = await service.recordCashPayment("inv-1", cashDto, "idem-relink-4");
 
@@ -727,7 +740,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
   it("même comportement pour un virement bancaire partiel (C3)", async () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-relink-5");
 
@@ -747,7 +760,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
         return relinkResult;
       }),
     };
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", cashDto, "idem-relink-race");
 
@@ -761,7 +774,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
   it("ne régénère jamais après un paiement provider (C2 Phase 2b) — exclusion volontaire", async () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordProviderPayment("inv-1", {
       amountGnf: 1_500_000n,
@@ -784,7 +797,7 @@ describe("PaymentsService — mixer les modes de paiement sur une même facture 
   it("cumule correctement cash, virement puis lien de paiement sur la même facture", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const paymentLinkClient = createFakePaymentLinkClient();
-    const service = new PaymentsService(prisma as any, paymentLinkClient as any);
+    const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
     await service.recordCashPayment("inv-1", { amount: 500_000n, method: "cash" as const }, "idem-mix-cash");
     let invoice = await prisma.invoice.findUnique();
