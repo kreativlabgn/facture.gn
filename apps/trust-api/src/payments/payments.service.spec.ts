@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { PaymentsService } from "./payments.service";
 
@@ -278,12 +278,82 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
   });
 });
 
+describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR-091)", () => {
+  it("rejette un encaissement cash au-delà du seuil global sans preuve (comportement préservé, ex-refine Zod)", async () => {
+    const prisma = createFakePrisma({ amountDue: 150_000_000n });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+
+    await expect(
+      service.recordCashPayment("inv-1", { amount: 150_000_000n, method: "cash" as const }, "idem-proof-1"),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("accepte un encaissement cash au-delà du seuil global avec les 4 champs de preuve", async () => {
+    const prisma = createFakePrisma({ amountDue: 150_000_000n });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+
+    const result = await service.recordCashPayment(
+      "inv-1",
+      {
+        amount: 150_000_000n,
+        method: "cash" as const,
+        proofPhotoUrl: "https://storage.facture.gn/proofs/inv-1.jpg",
+        proofGpsLat: 9.535,
+        proofGpsLng: -13.6785,
+        proofSignature: "data:image/svg+xml;base64,PHN2Zy8+",
+      },
+      "idem-proof-2",
+    );
+
+    expect(result).toBeDefined();
+  });
+
+  it("utilise le seuil abaissé par organisation (Niveau 2, ADR-091) — rejette un montant accepté au seuil global", async () => {
+    const prisma = createFakePrisma(
+      { amountDue: 60_000_000n },
+      0,
+      { commissionBypassProofThresholdOverrideGnf: 50_000_000n },
+    );
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+
+    await expect(
+      service.recordCashPayment("inv-1", { amount: 60_000_000n, method: "cash" as const }, "idem-proof-3"),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("retombe sur le seuil global quand aucun override n'est posé sur l'organisation", async () => {
+    const prisma = createFakePrisma({ amountDue: 50_000_000n });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+
+    const result = await service.recordCashPayment(
+      "inv-1",
+      { amount: 50_000_000n, method: "cash" as const },
+      "idem-proof-4",
+    );
+
+    expect(result).toBeDefined();
+  });
+});
+
 describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-032)", () => {
   it("écrit un InvoiceEvent suspicious_cash_pattern_detected pour un montant rond ≥ 1M GNF", async () => {
     const prisma = createFakePrisma({ amountDue: 150_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 150_000_000n, method: "cash" as const }, "idem-key-round");
+    await service.recordCashPayment(
+      "inv-1",
+      {
+        amount: 150_000_000n,
+        method: "cash" as const,
+        // G3, ADR-091 — preuve requise au-delà du seuil (assertCashProofRequirement),
+        // fournie ici pour isoler ce test sur la détection G1 elle-même.
+        proofPhotoUrl: "https://storage.facture.gn/proofs/inv-1.jpg",
+        proofGpsLat: 9.535,
+        proofGpsLng: -13.6785,
+        proofSignature: "data:image/svg+xml;base64,PHN2Zy8+",
+      },
+      "idem-key-round",
+    );
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: {
@@ -351,11 +421,16 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
   });
 });
 
-function createFakePrismaForDeposit(invoiceOverrides: Record<string, unknown> = {}, existingDeposit: any = null) {
+function createFakePrismaForDeposit(
+  invoiceOverrides: Record<string, unknown> = {},
+  existingDeposit: any = null,
+  organizationOverrides: Record<string, unknown> = {},
+) {
   const invoiceState: any = {
     id: "proforma-1",
     documentType: "proforma",
     status: "draft",
+    organizationId: "org-1",
     ...invoiceOverrides,
   };
   let nextPaymentId = 1;
@@ -371,6 +446,14 @@ function createFakePrismaForDeposit(invoiceOverrides: Record<string, unknown> = 
     invoice: {
       findUnique: vi.fn().mockResolvedValue(invoiceState),
       update: vi.fn(),
+    },
+    // G3, ADR-091 — assertCashProofRequirement() charge l'organisation avant tout
+    // dépôt cash désormais (Niveau 2, seuil abaissé). null par défaut = pas
+    // d'override, retombe sur CASH_PROOF_THRESHOLD_GNF_CENTIMES.
+    organization: {
+      findUniqueOrThrow: vi
+        .fn()
+        .mockResolvedValue({ id: "org-1", commissionBypassProofThresholdOverrideGnf: null, ...organizationOverrides }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
   };
@@ -425,6 +508,15 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     await expect(
       service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-4"),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it("refuse une arrhes au-delà du seuil de preuve effectif sans les 4 champs requis (G3, ADR-091)", async () => {
+    const prisma = createFakePrismaForDeposit();
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any);
+
+    await expect(
+      service.recordDepositPayment("proforma-1", { amount: 150_000_000n }, "idem-deposit-proof"),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it("refuse proprement (jamais un 500 brut) une course concurrente détectée par l'index unique payment_one_arrhes_per_invoice, pas seulement par le lookup idempotency_key", async () => {

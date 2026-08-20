@@ -1,11 +1,12 @@
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { computePlatformFee } from "../common/commission-grid";
 import { detectCashAnomalyPatterns } from "./cash-anomaly-detection";
-import type { CreatePaymentDto } from "./dto/create-payment.dto";
+import { isCashProofRequirementMet } from "./cash-proof-requirement";
+import { CASH_PROOF_THRESHOLD_GNF_CENTIMES, type CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
 import type { RecordDepositDto } from "./dto/record-deposit.dto";
 import type { CreateBankTransferPaymentDto } from "./dto/create-bank-transfer-payment.dto";
@@ -33,6 +34,7 @@ export class PaymentsService {
     // allowOverpayment: true — trop-perçu cash uniquement (C14, backlog explicite),
     // jamais pour recordProviderPayment() (lien généré pour un montant exact).
     const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amount, true);
+    await this.assertCashProofRequirement(invoice.organizationId, dto);
 
     const payment = await this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
       amount: dto.amount,
@@ -151,6 +153,8 @@ export class PaymentsService {
       throw new ConflictException(`Proforma ${proformaId} a déjà une arrhes enregistrée`);
     }
 
+    await this.assertCashProofRequirement(proforma.organizationId, dto);
+
     try {
       return await this.prisma.payment.create({
         data: {
@@ -203,6 +207,42 @@ export class PaymentsService {
       );
     }
     return invoice;
+  }
+
+  // G3, ADR-091 — la règle vivait dans le refine() Zod de create-payment.dto.ts/
+  // record-deposit.dto.ts (seuil global figé) ; elle vit ici désormais pour
+  // pouvoir lire un seuil abaissé par organisation (Niveau 2 de l'escalade,
+  // Organization.commissionBypassProofThresholdOverrideGnf). Comportement HTTP
+  // légèrement changé (documenté, pas une régression silencieuse) : le corps
+  // d'erreur passe d'un objet Zod flatten() à un message plat, le code 400 est
+  // préservé.
+  private async assertCashProofRequirement(
+    organizationId: string,
+    dto: {
+      amount: bigint;
+      proofPhotoUrl?: string;
+      proofGpsLat?: number;
+      proofGpsLng?: number;
+      proofSignature?: string;
+    },
+  ) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const effectiveThresholdGnfCentimes =
+      organization.commissionBypassProofThresholdOverrideGnf ?? CASH_PROOF_THRESHOLD_GNF_CENTIMES;
+
+    const met = isCashProofRequirementMet({
+      amount: dto.amount,
+      effectiveThresholdGnfCentimes,
+      proofPhotoUrl: dto.proofPhotoUrl,
+      proofGpsLat: dto.proofGpsLat,
+      proofGpsLng: dto.proofGpsLng,
+      proofSignature: dto.proofSignature,
+    });
+    if (!met) {
+      throw new BadRequestException(
+        "Photo, GPS et signature obligatoires pour un encaissement cash au-delà du seuil de preuve en vigueur pour cette organisation",
+      );
+    }
   }
 
   private async createPaymentAndApply(
