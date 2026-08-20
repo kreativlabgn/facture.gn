@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { InvoiceEventType, type PrismaClient } from "@facture-gn/db";
+import { InvoiceEventType, type CommercialTier, type PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
@@ -361,5 +361,18 @@ export class OrganizationsService {
       }
       throw error;
     }
+  }
+
+  // H2, ADR-049 — "palier commercial gouverne l'accès aux fonctionnalités,
+  // jamais dépendant de DGI" : contrairement à verifyDgi()/velocity_tier, cette
+  // méthode ne lit JAMAIS dgiVerificationStatus. Aucun traitement de paiement
+  // réel pour l'abonnement (aucune infrastructure de facturation récurrente
+  // dans ce repo, même limite déjà acceptée pour H4/K4/K5).
+  async upgradeCommercialTier(organizationId: string, tier: CommercialTier) {
+    await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    return this.prisma.organization.update({
+      where: { id: organizationId },
+      data: { commercialTier: tier },
+    });
   }
 }
