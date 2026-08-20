@@ -1,3 +1,4 @@
+import { ConflictException } from "@nestjs/common";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrganizationSigningKeyService } from "./organization-signing-key.service";
 
@@ -9,6 +10,7 @@ function createFakePrisma(overrides: { signingKey?: any } = {}) {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "key-1", ...data })),
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
+      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "key-1", ...data })),
       ...overrides.signingKey,
     },
   };
@@ -115,6 +117,70 @@ describe("OrganizationSigningKeyService", () => {
           previousHash: "GENESIS",
         }),
       ).rejects.toThrow();
+    });
+
+    it("certifyForOrganization refuse (ConflictException) de signer avec une clé révoquée (A4, ADR-025)", async () => {
+      const prisma = createFakePrisma({
+        signingKey: {
+          findUniqueOrThrow: vi.fn().mockResolvedValue({
+            id: "key-1",
+            organizationId: "org-1",
+            encryptedPrivateKey: "peu-importe",
+            revokedAt: new Date("2026-08-15T00:00:00.000Z"),
+          }),
+        },
+      });
+      const service = new OrganizationSigningKeyService(prisma as any);
+
+      await expect(
+        service.certifyForOrganization("org-1", {
+          invoiceId: "inv-1",
+          organizationNif: "GN12345678",
+          number: "FG-2026-000001",
+          totalTtc: 1_500_000n,
+          issuedAt: "2026-08-20T10:00:00.000Z",
+          previousHash: "GENESIS",
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe("revoke (A4, ADR-025)", () => {
+    it("pose revokedAt sur la clé de l'organisation", async () => {
+      const prisma = createFakePrisma({
+        signingKey: {
+          findUniqueOrThrow: vi
+            .fn()
+            .mockResolvedValue({ id: "key-1", organizationId: "org-1", revokedAt: null }),
+        },
+      });
+      const service = new OrganizationSigningKeyService(prisma as any);
+
+      const before = Date.now();
+      const result = await service.revoke("org-1");
+
+      expect(prisma.organizationSigningKey.update).toHaveBeenCalledWith({
+        where: { organizationId: "org-1" },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(result.revokedAt.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it("est idempotent — un second appel sur une clé déjà révoquée ne réécrit pas revokedAt", async () => {
+      const alreadyRevokedAt = new Date("2026-08-15T00:00:00.000Z");
+      const prisma = createFakePrisma({
+        signingKey: {
+          findUniqueOrThrow: vi
+            .fn()
+            .mockResolvedValue({ id: "key-1", organizationId: "org-1", revokedAt: alreadyRevokedAt }),
+        },
+      });
+      const service = new OrganizationSigningKeyService(prisma as any);
+
+      const result = await service.revoke("org-1");
+
+      expect(prisma.organizationSigningKey.update).not.toHaveBeenCalled();
+      expect(result.revokedAt).toBe(alreadyRevokedAt);
     });
   });
 });
