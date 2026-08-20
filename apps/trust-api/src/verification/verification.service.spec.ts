@@ -6,9 +6,10 @@ import { VerificationService } from "./verification.service";
 // A3, ADR-026 — double de OrganizationSigningKeyService. Ne signe jamais
 // réellement ici : verifyWithKey() délègue à un StubEd25519CertificationService
 // réel (même précédent que le reste de ce fichier, "pas de mock crypto").
-function createFakeSigningKeyService(certification: StubEd25519CertificationService) {
+function createFakeSigningKeyService(certification: StubEd25519CertificationService, revokedAt: Date | null = null) {
   return {
     verifyWithKey: vi.fn(async (_signingKeyId: string, payload: any) => certification.certify(payload)),
+    getRevokedAt: vi.fn().mockResolvedValue(revokedAt),
   };
 }
 
@@ -74,6 +75,9 @@ describe("VerificationService", () => {
     expect(result.validatedByAdministration).toBe(false);
     expect(result.totalTtc).toBe("1500000");
     expect(result.organizationNif).toBe("GN12345678");
+    // A4, ADR-025 — clé légataire globale (signingKeyId null) : aucun registre
+    // de révocation dans ce repo pour ce mécanisme, toujours valide.
+    expect(result.keyValidAtIssuance).toBe(true);
   });
 
   it("détecte une altération en base (hash stocké ne correspond plus aux champs recalculés) sans lever d'erreur HTTP", async () => {
@@ -174,5 +178,75 @@ describe("VerificationService — factures signées par la clé propre de l'orga
     const result = await service.verifyByCertificationId(invoice.certificationId);
 
     expect(result.integrityValid).toBe(false);
+  });
+});
+
+describe("VerificationService — keyValidAtIssuance (A4, ADR-025)", () => {
+  function issueGenuineInvoiceWithOwnKey(organizationKey: StubEd25519CertificationService, issuedAt = "2026-08-08T10:00:00.000Z") {
+    const payload = {
+      invoiceId: "inv-1",
+      organizationNif: "GN12345678",
+      number: "FG-2026-000001",
+      totalTtc: 1_500_000n,
+      issuedAt,
+      previousHash: "GENESIS",
+    };
+    const result = organizationKey.certify(payload);
+
+    return {
+      id: payload.invoiceId,
+      number: payload.number,
+      certificationId: result.certificationId,
+      status: "issued",
+      disputeStatus: "none",
+      validatedByAdministration: false,
+      totalTtc: payload.totalTtc,
+      issuedAt: new Date(issuedAt),
+      previousHash: payload.previousHash,
+      hash: result.hash,
+      signature: Buffer.from(result.signature, "hex"),
+      signingKeyId: "signing-key-1",
+      organization: { name: "Boutique Aissatou", nif: "GN12345678" },
+    };
+  }
+
+  it("keyValidAtIssuance = true quand la clé n'a jamais été révoquée", async () => {
+    const organizationKey = new StubEd25519CertificationService();
+    const invoice = issueGenuineInvoiceWithOwnKey(organizationKey);
+    const prisma = createFakePrisma(invoice);
+    const signingKeyService = createFakeSigningKeyService(organizationKey, null);
+    const service = new VerificationService(prisma as any, new StubEd25519CertificationService(), signingKeyService as any);
+
+    const result = await service.verifyByCertificationId(invoice.certificationId);
+
+    expect(result.keyValidAtIssuance).toBe(true);
+    expect(signingKeyService.getRevokedAt).toHaveBeenCalledWith("signing-key-1");
+  });
+
+  it("keyValidAtIssuance = true quand la clé a été révoquée APRÈS l'émission — révocation jamais rétroactive (ADR-025)", async () => {
+    const organizationKey = new StubEd25519CertificationService();
+    const invoice = issueGenuineInvoiceWithOwnKey(organizationKey, "2026-08-08T10:00:00.000Z");
+    const prisma = createFakePrisma(invoice);
+    const revokedAt = new Date("2026-08-20T00:00:00.000Z"); // après l'émission
+    const signingKeyService = createFakeSigningKeyService(organizationKey, revokedAt);
+    const service = new VerificationService(prisma as any, new StubEd25519CertificationService(), signingKeyService as any);
+
+    const result = await service.verifyByCertificationId(invoice.certificationId);
+
+    expect(result.keyValidAtIssuance).toBe(true);
+    expect(result.integrityValid).toBe(true); // la révocation ne touche jamais l'intégrité
+  });
+
+  it("keyValidAtIssuance = false quand la clé était déjà révoquée AVANT l'émission", async () => {
+    const organizationKey = new StubEd25519CertificationService();
+    const invoice = issueGenuineInvoiceWithOwnKey(organizationKey, "2026-08-20T10:00:00.000Z");
+    const prisma = createFakePrisma(invoice);
+    const revokedAt = new Date("2026-08-15T00:00:00.000Z"); // avant l'émission
+    const signingKeyService = createFakeSigningKeyService(organizationKey, revokedAt);
+    const service = new VerificationService(prisma as any, new StubEd25519CertificationService(), signingKeyService as any);
+
+    const result = await service.verifyByCertificationId(invoice.certificationId);
+
+    expect(result.keyValidAtIssuance).toBe(false);
   });
 });

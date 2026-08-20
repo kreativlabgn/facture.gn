@@ -20,6 +20,11 @@ export interface PublicInvoiceVerification {
   disputeStatus: string;
   validatedByAdministration: boolean;
   integrityValid: boolean;
+  // A4, ADR-025 — distinct de integrityValid (recalcul cryptographique) : ce
+  // champ répond à "la clé était-elle valide AU MOMENT de l'émission", jamais
+  // à l'horloge courante. Toujours true pour la clé légataire globale
+  // (signingKeyId null), qui n'a pas de registre de révocation dans ce repo.
+  keyValidAtIssuance: boolean;
 }
 
 @Injectable()
@@ -71,6 +76,14 @@ export class VerificationService {
       recomputed.certificationId === certificationId &&
       recomputed.signature === invoice.signature.toString("hex");
 
+    // A4, ADR-025 — "révocation jamais rétroactive" : valide si jamais révoquée,
+    // OU révoquée APRÈS issuedAt. Toujours true pour la clé légataire globale
+    // (signingKeyId null), hors scope du registre de révocation.
+    const revokedAt = invoice.signingKeyId
+      ? await this.signingKeyService.getRevokedAt(invoice.signingKeyId)
+      : null;
+    const keyValidAtIssuance = revokedAt === null || invoice.issuedAt < revokedAt;
+
     return {
       certificationId,
       number: invoice.number,
@@ -82,6 +95,7 @@ export class VerificationService {
       disputeStatus: invoice.disputeStatus,
       validatedByAdministration: invoice.validatedByAdministration,
       integrityValid,
+      keyValidAtIssuance,
     };
   }
 }

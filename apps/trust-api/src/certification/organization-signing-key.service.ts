@@ -82,6 +82,14 @@ export class OrganizationSigningKeyService {
     return service.certify(payload);
   }
 
+  // A4, ADR-025 — lookup dédié plutôt qu'étendre verifyWithKey() : garde son
+  // contrat (recalcul cryptographique pur) inchangé pour tous ses appelants,
+  // jamais mêlé au statut du registre de révocation.
+  async getRevokedAt(signingKeyId: string): Promise<Date | null> {
+    const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { id: signingKeyId } });
+    return key.revokedAt;
+  }
+
   private buildServiceFromEncryptedKey(encryptedPrivateKey: string): StubEd25519CertificationService {
     const privateKey = decryptPrivateKey(encryptedPrivateKey, this.masterKey);
     return new StubEd25519CertificationService(privateKey);

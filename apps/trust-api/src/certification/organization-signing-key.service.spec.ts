@@ -163,7 +163,8 @@ describe("OrganizationSigningKeyService", () => {
         where: { organizationId: "org-1" },
         data: { revokedAt: expect.any(Date) },
       });
-      expect(result.revokedAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(result.revokedAt).not.toBeNull();
+      expect(result.revokedAt!.getTime()).toBeGreaterThanOrEqual(before);
     });
 
     it("est idempotent — un second appel sur une clé déjà révoquée ne réécrit pas revokedAt", async () => {
