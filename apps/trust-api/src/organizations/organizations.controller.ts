@@ -16,6 +16,10 @@ import {
   inviteOrganizationMemberSchema,
   type InviteOrganizationMemberDto,
 } from "./dto/invite-organization-member.dto";
+import {
+  upgradeCommercialTierSchema,
+  type UpgradeCommercialTierDto,
+} from "./dto/upgrade-commercial-tier.dto";
 import { OrganizationsService } from "./organizations.service";
 
 @ApiTags("organizations")
@@ -116,5 +120,18 @@ export class OrganizationsController {
     @Body(new ZodValidationPipe(inviteOrganizationMemberSchema)) dto: InviteOrganizationMemberDto,
   ) {
     return this.organizationsService.inviteMember(organizationId, dto);
+  }
+
+  // H2, ADR-049 — même trio owner/admin que les autres routes de gestion
+  // d'organisation ci-dessus. Jamais de DgiVerificationAuthGuard ici (voir
+  // service) : le palier commercial n'est jamais dépendant de DGI.
+  @Post(":id/commercial-tier")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  upgradeCommercialTier(
+    @Param("id") organizationId: string,
+    @Body(new ZodValidationPipe(upgradeCommercialTierSchema)) dto: UpgradeCommercialTierDto,
+  ) {
+    return this.organizationsService.upgradeCommercialTier(organizationId, dto.tier);
   }
 }

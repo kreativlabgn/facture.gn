@@ -54,3 +54,22 @@ describe("OrganizationsController — GET /organizations/:id/audit-log (G4, ADR-
     expect(service.listAuditLog).toHaveBeenCalledWith("org-1", { category: "paiement" });
   });
 });
+
+describe("OrganizationsController — POST /organizations/:id/commercial-tier (H2, ADR-049)", () => {
+  it("restreint la route à owner/admin", () => {
+    const reflector = new Reflector();
+    const roles = reflector.get(ROLES_KEY, OrganizationsController.prototype.upgradeCommercialTier);
+
+    expect(roles).toEqual(["owner", "admin"]);
+  });
+
+  it("délègue au service avec l'id d'organisation du paramètre d'URL et le palier demandé", async () => {
+    const service = { upgradeCommercialTier: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }) };
+    const controller = new OrganizationsController(service as any);
+
+    const result = await controller.upgradeCommercialTier("org-1", { tier: "pro" });
+
+    expect(service.upgradeCommercialTier).toHaveBeenCalledWith("org-1", "pro");
+    expect(result.commercialTier).toBe("pro");
+  });
+});
