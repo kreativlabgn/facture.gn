@@ -26,6 +26,9 @@ export const inviteOrganizationMemberSchema = z.object({
     "tax_controller_readonly",
     "developer_api",
     "inventory_manager",
+    // F3, DAT §3.5 — "proche/assistant", invitable aussi depuis la PWA (même
+    // mécanisme générique), pas seulement *620#.
+    "viewer",
   ]),
 });
 

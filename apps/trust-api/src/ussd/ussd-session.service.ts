@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { VerificationService } from "../verification/verification.service";
@@ -66,14 +66,17 @@ const STATUS_LABELS: Record<string, string> = {
   voided: "Annulée",
 };
 
-// §2.5 Spec USSD — 5.1-5.4. Numérotation d'affichage seulement : l'entrée
-// attendue reste un chiffre simple (1-4), jamais "5.1" littéral (décision
-// utilisateur : chiffres uniquement, aucune lettre).
+// §2.5 Spec USSD — 5.1-5.5. Numérotation d'affichage seulement : l'entrée
+// attendue reste un chiffre simple (1-5), jamais "5.1" littéral (décision
+// utilisateur : chiffres uniquement, aucune lettre). 5.5 (F3, DAT §3.5) ajouté
+// après audit F3 — "invitable depuis *620#" existait déjà dans DAT, jamais
+// construit ni détaillé au niveau menu jusqu'ici.
 const MANAGE_ACCOUNT_MENU = [
   "1. Changer mon PIN",
   "2. Voir mon palier",
   "3. Mandats en attente",
   "4. Mandats actifs",
+  "5. Inviter un proche",
 ].join("\n");
 
 // Toute option autre que 2 (vérifier un reçu, §2.2 — aucune authentification
@@ -154,6 +157,8 @@ export class UssdSessionService {
         return this.handleAccountNewPinConfirm(session, context, input);
       case "account_mandate_select":
         return this.handleAccountMandateSelect(session, context, input);
+      case "account_invite_viewer_phone":
+        return this.handleAccountInviteViewerPhone(session, input);
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -522,7 +527,34 @@ export class UssdSessionService {
       return this.presentMandateSelection(session, "revoke", "Aucun mandat actif.");
     }
 
+    if (input === "5") {
+      await this.setState(session.id, "account_invite_viewer_phone", {});
+      return { continue: true, text: "Numéro du proche à inviter :" };
+    }
+
     return { continue: false, text: "Choix invalide." };
+  }
+
+  // 5.5, F3, DAT §3.5 — délègue entièrement la vérification du rôle du
+  // demandeur (owner/admin) et l'invitation elle-même à
+  // UssdAccountService.inviteViewer() (même mécanisme que la PWA,
+  // OrganizationsService.inviteMember()). Ajout immédiat, aucun flux
+  // d'acceptation — même précédent que F14/F8.
+  private async handleAccountInviteViewerPhone(session: UssdSessionRow, input: string): Promise<UssdResponse> {
+    const phone = input.trim();
+    if (!MSISDN_FORMAT.test(phone)) {
+      return { continue: true, text: "Numéro invalide. Réessayez :" };
+    }
+
+    try {
+      await this.ussdAccount.inviteViewer(session.organizationId as string, session.userId as string, phone);
+      return { continue: false, text: `${phone} peut désormais consulter vos factures.` };
+    } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException || error instanceof ConflictException) {
+        return { continue: false, text: error.message };
+      }
+      throw error;
+    }
   }
 
   // 5.3/5.4 partagent la même mécanique de sélection numérotée — seule la

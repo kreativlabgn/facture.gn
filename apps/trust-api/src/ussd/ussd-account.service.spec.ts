@@ -1,3 +1,4 @@
+import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { UssdAccountService } from "./ussd-account.service";
 
@@ -6,7 +7,7 @@ const ORG_ID = "org-1";
 const MANDATE_ID = "mandate-1";
 const PHONE = "+224622334455";
 
-function createFakePrisma(overrides: { organization?: any } = {}) {
+function createFakePrisma(overrides: { organization?: any; requesterMembership?: any } = {}) {
   return {
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(overrides.organization ?? { id: ORG_ID, phone: null }),
@@ -15,6 +16,19 @@ function createFakePrisma(overrides: { organization?: any } = {}) {
     userPhone: {
       findFirst: vi.fn().mockResolvedValue({ msisdn: PHONE }),
     },
+    organizationMember: {
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.requesterMembership !== undefined
+          ? overrides.requesterMembership
+          : { organizationId: ORG_ID, userId: USER_ID, role: "owner", revokedAt: null },
+      ),
+    },
+  };
+}
+
+function createFakeOrganizationsService(overrides: { inviteMember?: ReturnType<typeof vi.fn> } = {}) {
+  return {
+    inviteMember: overrides.inviteMember ?? vi.fn().mockResolvedValue({ id: "member-1", role: "viewer" }),
   };
 }
 
@@ -55,6 +69,7 @@ describe("UssdAccountService — changer le PIN (5.1, §3.3 Spec USSD)", () => {
       createFakeVelocityTier() as any,
       createFakeMandatesService() as any,
       sms as any,
+      createFakeOrganizationsService() as any,
     );
     const before = Date.now();
 
@@ -79,6 +94,7 @@ describe("UssdAccountService — voir mon palier (5.2)", () => {
       velocityTier as any,
       createFakeMandatesService() as any,
       createFakeSmsProvider() as any,
+      createFakeOrganizationsService() as any,
     );
 
     await expect(service.getTierSummary(ORG_ID)).resolves.toBe("T2");
@@ -94,6 +110,7 @@ describe("UssdAccountService — mandats (5.3/5.4)", () => {
       createFakeVelocityTier() as any,
       mandates as any,
       createFakeSmsProvider() as any,
+      createFakeOrganizationsService() as any,
     );
 
     await expect(service.listPendingMandates(ORG_ID)).resolves.toEqual([{ id: MANDATE_ID }]);
@@ -107,6 +124,7 @@ describe("UssdAccountService — mandats (5.3/5.4)", () => {
       createFakeVelocityTier() as any,
       mandates as any,
       createFakeSmsProvider() as any,
+      createFakeOrganizationsService() as any,
     );
 
     await expect(service.listActiveMandates(ORG_ID)).resolves.toEqual([{ id: MANDATE_ID }]);
@@ -120,6 +138,7 @@ describe("UssdAccountService — mandats (5.3/5.4)", () => {
       createFakeVelocityTier() as any,
       mandates as any,
       createFakeSmsProvider() as any,
+      createFakeOrganizationsService() as any,
     );
 
     await service.acceptMandate(ORG_ID, MANDATE_ID, USER_ID);
@@ -135,10 +154,85 @@ describe("UssdAccountService — mandats (5.3/5.4)", () => {
       createFakeVelocityTier() as any,
       mandates as any,
       createFakeSmsProvider() as any,
+      createFakeOrganizationsService() as any,
     );
 
     await service.revokeMandate(ORG_ID, MANDATE_ID, USER_ID);
 
     expect(mandates.revokeAsOrganization).toHaveBeenCalledWith(ORG_ID, MANDATE_ID, USER_ID);
+  });
+});
+
+describe("UssdAccountService — inviter un proche (F3, 5.5, DAT §3.5)", () => {
+  it("délègue à OrganizationsService.inviteMember avec le rôle viewer quand le demandeur est owner", async () => {
+    const prisma = createFakePrisma();
+    const organizationsService = createFakeOrganizationsService();
+    const service = new UssdAccountService(
+      prisma as any,
+      createFakeUssdAuth() as any,
+      createFakeVelocityTier() as any,
+      createFakeMandatesService() as any,
+      createFakeSmsProvider() as any,
+      organizationsService as any,
+    );
+
+    await service.inviteViewer(ORG_ID, USER_ID, "+224655667788");
+
+    expect(prisma.organizationMember.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: ORG_ID, userId: USER_ID, revokedAt: null },
+    });
+    expect(organizationsService.inviteMember).toHaveBeenCalledWith(ORG_ID, {
+      msisdn: "+224655667788",
+      role: "viewer",
+    });
+  });
+
+  it("délègue également quand le demandeur est admin (pas seulement owner)", async () => {
+    const prisma = createFakePrisma({ requesterMembership: { organizationId: ORG_ID, userId: USER_ID, role: "admin", revokedAt: null } });
+    const organizationsService = createFakeOrganizationsService();
+    const service = new UssdAccountService(
+      prisma as any,
+      createFakeUssdAuth() as any,
+      createFakeVelocityTier() as any,
+      createFakeMandatesService() as any,
+      createFakeSmsProvider() as any,
+      organizationsService as any,
+    );
+
+    await service.inviteViewer(ORG_ID, USER_ID, "+224655667788");
+
+    expect(organizationsService.inviteMember).toHaveBeenCalled();
+  });
+
+  it("refuse si le demandeur n'est ni owner ni admin — RolesGuard ne protège jamais ce chemin USSD", async () => {
+    const prisma = createFakePrisma({ requesterMembership: { organizationId: ORG_ID, userId: USER_ID, role: "cashier", revokedAt: null } });
+    const organizationsService = createFakeOrganizationsService();
+    const service = new UssdAccountService(
+      prisma as any,
+      createFakeUssdAuth() as any,
+      createFakeVelocityTier() as any,
+      createFakeMandatesService() as any,
+      createFakeSmsProvider() as any,
+      organizationsService as any,
+    );
+
+    await expect(service.inviteViewer(ORG_ID, USER_ID, "+224655667788")).rejects.toThrow(ForbiddenException);
+    expect(organizationsService.inviteMember).not.toHaveBeenCalled();
+  });
+
+  it("refuse si le demandeur n'a aucune membership active dans l'organisation", async () => {
+    const prisma = createFakePrisma({ requesterMembership: null });
+    const organizationsService = createFakeOrganizationsService();
+    const service = new UssdAccountService(
+      prisma as any,
+      createFakeUssdAuth() as any,
+      createFakeVelocityTier() as any,
+      createFakeMandatesService() as any,
+      createFakeSmsProvider() as any,
+      organizationsService as any,
+    );
+
+    await expect(service.inviteViewer(ORG_ID, USER_ID, "+224655667788")).rejects.toThrow(ForbiddenException);
+    expect(organizationsService.inviteMember).not.toHaveBeenCalled();
   });
 });

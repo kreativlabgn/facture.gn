@@ -307,6 +307,14 @@ enum OrganizationRole {
   // succursale, jamais le catalogue produit lui-même (réservé owner/admin).
   // Ne voit jamais cost_price (ADR-084, territoire business_manager).
   inventory_manager
+  // F3, DAT §3.5 — "proche/assistant", accès délégué invitable depuis *620#
+  // (OrganizationsService/UssdAccountService.inviteViewer()) ET depuis la PWA
+  // (inviteMember() générique, F14/H1). Lecture seule stricte des factures
+  // (invoices.controller.ts, même trio que tax_controller_readonly) — aucune
+  // autre permission dédiée n'existe pour ce rôle (DAT §3.4, catalogue
+  // inchangé), portée volontairement minimale faute d'acceptance criteria plus
+  // détaillés dans le Backlog.
+  viewer
 }
 
 // F15, ADR-097 — distingue les clés de test (sandbox) des clés live, cohérent

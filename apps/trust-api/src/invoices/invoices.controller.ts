@@ -46,7 +46,11 @@ export class InvoicesController {
   // F14, ADR-104 — tax_controller_readonly ajouté UNIQUEMENT ici et sur findOne()
   // ci-dessous (lecture stricte), jamais sur une route d'écriture (issue/void/...).
   @Get()
-  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly")
+  // F3, DAT §3.5 — viewer ("proche/assistant") ajouté ici et sur findOne()
+  // ci-dessous UNIQUEMENT, même portée stricte que tax_controller_readonly
+  // (lecture seule des factures) — jamais sur customers/audit-log/trust-score
+  // ni sur FEC_ELIGIBLE_ROLES (export fiscal, hors périmètre d'un proche).
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
   findAll(@Query(new ZodValidationPipe(organizationScopedListQuerySchema)) query: OrganizationScopedListQueryDto) {
     return this.invoicesService.findAllByOrganization(query.organizationId, {
       take: query.take,
@@ -58,7 +62,11 @@ export class InvoicesController {
   // lien) d'une facture déjà créée. idSource "invoice" par défaut (RolesGuard).
   // F14, ADR-104 — tax_controller_readonly, même remarque que findAll() ci-dessus.
   @Get(":id")
-  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly")
+  // F3, DAT §3.5 — viewer ("proche/assistant") ajouté ici et sur findOne()
+  // ci-dessous UNIQUEMENT, même portée stricte que tax_controller_readonly
+  // (lecture seule des factures) — jamais sur customers/audit-log/trust-score
+  // ni sur FEC_ELIGIBLE_ROLES (export fiscal, hors périmètre d'un proche).
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
   findOne(@Param("id") id: string) {
     return this.invoicesService.findOne(id);
   }
