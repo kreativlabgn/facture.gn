@@ -53,7 +53,7 @@ Séquence complète < 90 secondes. Signature serveur immédiate. Idempotence str
 
 ### 2.5 Option 5 — Gérer mon compte
 
-5.1 Changer mon PIN · 5.2 Voir mon palier · 5.3 Mandats en attente · 5.4 Mandats actifs.
+5.1 Changer mon PIN · 5.2 Voir mon palier · 5.3 Mandats en attente · 5.4 Mandats actifs · 5.5 Inviter un proche.
 
 **5.3 — Mandats en attente**
 
@@ -62,6 +62,10 @@ Le cabinet ou le CGA demandeur s'affiche par son nom. Acceptation via PIN → ma
 **5.4 — Mandats actifs**
 
 Liste des cabinets/CGA ayant accès, révocation possible avec PIN requis. L'acceptation et la révocation de mandat via USSD garantissent que les marchands feature phone (Mariama, Fanta) ne sont pas exclus de l'écosystème cabinet/CGA.
+
+**5.5 — Inviter un proche (F3, DAT §3.5)**
+
+Saisie du numéro du proche/assistant à inviter. Ajout immédiat au rôle `viewer` (lecture seule des factures) — aucun flux d'acceptation, même précédent que l'invitation d'un collaborateur (F8) ou d'un contrôleur fiscal (F14). Réservé à l'owner ou un admin de l'organisation — un cashier ou field_agent authentifié par ce même canal ne peut pas inviter. Contrairement aux autres rôles V1 fantômes listés en §6 (réservés PWA), ce rôle est délibérément accessible aussi depuis *620# : son persona cible (Mariama, Fanta) n'a justement pas de PWA — l'exclure de ce canal aurait vidé la story de son sens. Également invitable depuis la PWA par le mécanisme générique (F14/H1) pour les organisations qui l'utilisent.
 
 ### 2.6 Option 6 — Commande Publique (V1, ADR-086)
 

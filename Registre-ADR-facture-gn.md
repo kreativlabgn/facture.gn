@@ -637,5 +637,21 @@ Conséquences : Backlog B5 corrigé (Agent commercial terrain / Sékou, plus « 
 
 ---
 
-*facture.gn — Registre ADR — Document confidentiel — 17 août 2026*
+## Partie 23 — client_portal : vérification par canal, OTP réservé à la PWA (ADR-108)
+
+Décision actée le 20 août 2026, en cours d'audit F13 (client_portal) : ADR-096 (Partie 11) décrit la vérification comme « même flux PIN que le canal USSD » — formulation trop littérale une fois confrontée à l'usage réel. Un client PWA revient rarement et de façon irrégulière (contrairement à un marchand qui compose *620# fréquemment) ; lui imposer un PIN mémorisé de façon persistante dégrade l'expérience après une longue déconnexion, sans bénéfice de sécurité proportionné pour une identité en lecture seule (consultation de factures, jamais un paiement engagé sans étape de confirmation propre).
+
+**ADR-108 — client_portal : OTP par SMS en PWA, PIN direct inchangé sur *620#**
+
+Décision : Le mécanisme de **résolution d'identité** d'ADR-096 (`USER_PHONE.msisdn` → `CUSTOMER.phone`, toutes organisations confondues) ne change pas. Seul le **challenge de vérification** diverge désormais explicitement par canal :
+- **PWA (client_portal web)** : code OTP à 4 chiffres envoyé par SMS à chaque connexion (ou après une session expirée) — jamais un PIN mémorisé à saisir de mémoire. Aucun `pinHash` n'est requis ni consulté pour ce canal.
+- **USSD *620#** : inchangé, PIN direct si le téléphone est reconnu (Spec USSD §3.1, ADR-087) — l'infrastructure PIN existante (`UssdAuthService`) n'est pas concernée par cette décision, qui ne s'applique qu'au canal PWA.
+
+Les deux canaux convergent vers la même identité `User`/`UserPhone` et donc vers le même client résolu à travers toutes les organisations — seul le mode de preuve de possession du numéro diffère, pas le résultat.
+
+Conséquences : Backlog F13 corrigé — « Vérification par PIN via USER_PHONE, même flux que le canal USSD » devient « Vérification par OTP SMS en PWA (canal web) ; le canal *620# continue d'utiliser le PIN direct existant, ADR-087, inchangé ». ADR-096 (Partie 11) reste valide sur la résolution d'identité, amendée par ce document sur le seul point du mécanisme de vérification PWA. Aucun impact sur le schéma exposé par F13 (factures, running_balance/credit_limit) ni sur le périmètre RBAC. Implémentation future : nouveau mécanisme d'émission/vérification de code OTP à construire (aucun précédent réutilisable dans code/ — le seul autre OTP du produit est le `/confirm_otp` du provider Djomy, côté paiement, sans rapport). Maquette (shell 4, Portail client) déjà conforme à cette décision — aucune correction requise, c'est la lecture littérale d'ADR-096 qui était en retard sur l'intention produit.
+
+---
+
+*facture.gn — Registre ADR — Document confidentiel — 20 août 2026*
 

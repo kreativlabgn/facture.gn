@@ -301,7 +301,7 @@ En tant que propriétaire d'organisation, je veux accorder l'accès via un manda
 Réf : ADR-068, ADR-069
 
 **F2 — Assister une organisation sans accès permanent `[MUST]`** — Réf : ADR-045
-**F3 — Inviter un proche/assistant depuis *620# `[SHOULD]`**
+**F3 — Inviter un proche/assistant depuis *620# `[SHOULD]`** — Réf : DAT §3.5, Spec USSD §2.5 (5.5)
 
 **F4 — Créer un cabinet comptable ou un CGA `[MUST]`**
 En tant que comptable agréé (Mamadou) ou responsable CGA, je veux créer mon entité sur facture.gn, afin de gérer tous mes clients depuis un point d'entrée.
@@ -348,12 +348,13 @@ Réf : ADR-078
 
 **F13 — Consulter mes factures reçues, tous émetteurs confondus `[MUST]`**
 En tant que client d'une ou plusieurs organisations facture.gn, je veux vérifier mon numéro de téléphone une fois et voir toutes mes factures reçues, afin de suivre mes paiements sans dépendre d'un accès accordé par chaque organisation.
-- Vérification par PIN via USER_PHONE (même flux que le canal USSD, ADR-087) — aucune invitation préalable requise
+- Résolution d'identité via USER_PHONE (`USER_PHONE.msisdn` → `CUSTOMER.phone`, toutes organisations) — aucune invitation préalable requise
+- Vérification par canal (ADR-108) : **OTP par SMS** en PWA (canal web, à chaque connexion/après expiration de session) ; **PIN direct** inchangé sur *620# (Spec USSD §3.1, ADR-087) — deux challenges distincts, une seule identité résolue
 - Résolution automatique de `CUSTOMER.phone` sur l'ensemble des organisations, à la volée, sans nouveau champ de schéma
 - Par organisation : liste de factures (statut, montant, lien de paiement si impayée, certification_id), running_balance/credit_limit propres à ce client — jamais les données d'un autre client
 - F10 (inviter un client non inscrit) reste un mécanisme de découverte complémentaire, jamais une condition d'accès
 
-Réf : ADR-096
+Réf : ADR-096, ADR-108
 
 ### Nouvelles stories — Rôles V1 sans story malgré leur permission (ADR-097/104) (17/08)
 
