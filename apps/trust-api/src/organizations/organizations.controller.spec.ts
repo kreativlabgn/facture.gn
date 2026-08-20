@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { IS_PUBLIC_KEY } from "../auth/public.decorator";
 import { DgiVerificationAuthGuard } from "../common/dgi-verification-auth.guard";
 import { ROLES_KEY } from "../common/rbac/roles.decorator";
+import { ORGANIZATION_ID_SOURCE_KEY } from "../common/rbac/organization-id-source.decorator";
 import { OrganizationsController } from "./organizations.controller";
 
 // '__guards__' est la clé interne @nestjs/common (GUARDS_METADATA, non exportée
@@ -71,5 +72,31 @@ describe("OrganizationsController — POST /organizations/:id/commercial-tier (H
 
     expect(service.upgradeCommercialTier).toHaveBeenCalledWith("org-1", "pro");
     expect(result.commercialTier).toBe("pro");
+  });
+});
+
+describe("OrganizationsController — POST /organizations/:id/signing-key/revoke (A4, ADR-025)", () => {
+  it("restreint la route à owner/admin", () => {
+    const reflector = new Reflector();
+    const roles = reflector.get(ROLES_KEY, OrganizationsController.prototype.revokeSigningKey);
+
+    expect(roles).toEqual(["owner", "admin"]);
+  });
+
+  it("résout l'organisation via idSource \"organization\"", () => {
+    const reflector = new Reflector();
+    const idSource = reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.revokeSigningKey);
+
+    expect(idSource).toBe("organization");
+  });
+
+  it("délègue au service avec l'id d'organisation du paramètre d'URL", async () => {
+    const service = { revokeSigningKey: vi.fn().mockResolvedValue({ id: "signing-key-1", revokedAt: new Date() }) };
+    const controller = new OrganizationsController(service as any);
+
+    const result = await controller.revokeSigningKey("org-1");
+
+    expect(service.revokeSigningKey).toHaveBeenCalledWith("org-1");
+    expect(result.id).toBe("signing-key-1");
   });
 });

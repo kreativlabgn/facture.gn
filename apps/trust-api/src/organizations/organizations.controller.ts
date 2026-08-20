@@ -135,4 +135,13 @@ export class OrganizationsController {
   ) {
     return this.organizationsService.upgradeCommercialTier(organizationId, dto.tier);
   }
+
+  // A4, ADR-025 — self-service owner/admin, jamais un workflow d'approbation
+  // (une clé compromise doit pouvoir être révoquée immédiatement).
+  @Post(":id/signing-key/revoke")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  revokeSigningKey(@Param("id") organizationId: string) {
+    return this.organizationsService.revokeSigningKey(organizationId);
+  }
 }
