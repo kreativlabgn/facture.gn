@@ -75,19 +75,18 @@ export class OrganizationSigningKeyService {
     });
   }
 
-  async verifyWithKey(signingKeyId: string, payload: CertifiablePayload): Promise<CertificationResult> {
+  // A4, ADR-025 — revokedAt inclus dans le résultat (jamais un second lookup
+  // séparé, revue dev-code-reviewer) : verifyWithKey() a déjà la ligne
+  // OrganizationSigningKey en main, un getRevokedAt() dédié aurait requêté la
+  // MÊME ligne une seconde fois sur le endpoint public de vérification.
+  async verifyWithKey(
+    signingKeyId: string,
+    payload: CertifiablePayload,
+  ): Promise<CertificationResult & { revokedAt: Date | null }> {
     const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { id: signingKeyId } });
     const service = this.buildServiceFromEncryptedKey(key.encryptedPrivateKey);
 
-    return service.certify(payload);
-  }
-
-  // A4, ADR-025 — lookup dédié plutôt qu'étendre verifyWithKey() : garde son
-  // contrat (recalcul cryptographique pur) inchangé pour tous ses appelants,
-  // jamais mêlé au statut du registre de révocation.
-  async getRevokedAt(signingKeyId: string): Promise<Date | null> {
-    const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { id: signingKeyId } });
-    return key.revokedAt;
+    return { ...service.certify(payload), revokedAt: key.revokedAt };
   }
 
   private buildServiceFromEncryptedKey(encryptedPrivateKey: string): StubEd25519CertificationService {

@@ -8,8 +8,10 @@ import { VerificationService } from "./verification.service";
 // réel (même précédent que le reste de ce fichier, "pas de mock crypto").
 function createFakeSigningKeyService(certification: StubEd25519CertificationService, revokedAt: Date | null = null) {
   return {
-    verifyWithKey: vi.fn(async (_signingKeyId: string, payload: any) => certification.certify(payload)),
-    getRevokedAt: vi.fn().mockResolvedValue(revokedAt),
+    verifyWithKey: vi.fn(async (_signingKeyId: string, payload: any) => ({
+      ...certification.certify(payload),
+      revokedAt,
+    })),
   };
 }
 
@@ -220,7 +222,7 @@ describe("VerificationService — keyValidAtIssuance (A4, ADR-025)", () => {
     const result = await service.verifyByCertificationId(invoice.certificationId);
 
     expect(result.keyValidAtIssuance).toBe(true);
-    expect(signingKeyService.getRevokedAt).toHaveBeenCalledWith("signing-key-1");
+    expect(signingKeyService.verifyWithKey).toHaveBeenCalledWith("signing-key-1", expect.anything());
   });
 
   it("keyValidAtIssuance = true quand la clé a été révoquée APRÈS l'émission — révocation jamais rétroactive (ADR-025)", async () => {
@@ -235,6 +237,18 @@ describe("VerificationService — keyValidAtIssuance (A4, ADR-025)", () => {
 
     expect(result.keyValidAtIssuance).toBe(true);
     expect(result.integrityValid).toBe(true); // la révocation ne touche jamais l'intégrité
+  });
+
+  it("récupère le statut de révocation via verifyWithKey() uniquement — jamais un second aller-retour DB redondant sur ce endpoint public", async () => {
+    const organizationKey = new StubEd25519CertificationService();
+    const invoice = issueGenuineInvoiceWithOwnKey(organizationKey);
+    const prisma = createFakePrisma(invoice);
+    const signingKeyService = createFakeSigningKeyService(organizationKey, null);
+    const service = new VerificationService(prisma as any, new StubEd25519CertificationService(), signingKeyService as any);
+
+    await service.verifyByCertificationId(invoice.certificationId);
+
+    expect(signingKeyService.verifyWithKey).toHaveBeenCalledTimes(1);
   });
 
   it("keyValidAtIssuance = false quand la clé était déjà révoquée AVANT l'émission", async () => {
