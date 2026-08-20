@@ -3,7 +3,11 @@ import { z } from "zod";
 // taxRateBps n'est plus un champ client (C4) — le taux de TVA est dérivé
 // exclusivement de organization.regimeFiscal côté serveur (resolveTaxRateBps),
 // jamais une valeur de confiance externe (ADR-033).
-const invoiceLineSchema = z.object({
+// Exporté (I1) pour être réutilisé tel quel par
+// recurring-templates/dto/create-recurring-template.dto.ts — jamais une copie
+// séparée qui pourrait diverger (ex. un futur champ ajouté ici sans l'ajouter
+// là-bas).
+export const invoiceLineSchema = z.object({
   description: z.string().min(1),
   quantity: z.number().int().positive(),
   unitPrice: z.coerce.bigint().positive(),
