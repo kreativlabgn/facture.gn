@@ -434,6 +434,128 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
   });
 });
 
+// dev-test-quality-analyzer : le mock payment.count() partagé (createFakePrisma
+// ci-dessus) renvoie une valeur fixe quelle que soit la forme de la requête — il
+// ne peut donc jamais prouver que computeNonCashRatio() est câblé correctement
+// (total vs non-cash, fenêtre récente vs antérieure). Mock dédié ici, capable de
+// distinguer les requêtes par leur clause where, pour ce seul scénario.
+describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
+  function createFakePrismaForRatioDrop(paymentCounts: {
+    recentTotal: number;
+    recentNonCash: number;
+    priorTotal: number;
+    priorNonCash: number;
+  }) {
+    let invoiceState: any = {
+      id: "inv-1",
+      status: "issued",
+      amountPaid: 0n,
+      amountDue: 500_000n,
+      overpaymentAmount: 0n,
+      organizationId: "org-1",
+      customerId: null,
+    };
+
+    const prisma: any = {
+      payment: {
+        findUnique: vi.fn(() => Promise.resolve(null)),
+        create: vi.fn(({ data }: any) => Promise.resolve({ id: "payment-1", ...data })),
+        // Distingue les 4 requêtes org-wide par la présence de where.amount (band
+        // sous-seuil, non pertinent ici — toujours 0) et where.method (total vs
+        // non-cash), puis par la fenêtre temporelle (récente = la plus proche de
+        // maintenant, testée par comparaison de windowStart).
+        count: vi.fn(({ where }: any) => {
+          if (where.amount !== undefined) {
+            return Promise.resolve(0); // sub_threshold_recurrence : hors scope de ce test
+          }
+          const isRecentWindow = where.collectedAt.gte.getTime() > Date.now() - 31 * 24 * 60 * 60 * 1000;
+          const isNonCashQuery = where.method?.not === "cash";
+          if (isRecentWindow) {
+            return Promise.resolve(isNonCashQuery ? paymentCounts.recentNonCash : paymentCounts.recentTotal);
+          }
+          return Promise.resolve(isNonCashQuery ? paymentCounts.priorNonCash : paymentCounts.priorTotal);
+        }),
+      },
+      invoice: {
+        findUnique: vi.fn(() => Promise.resolve(invoiceState)),
+        update: vi.fn(({ data }: any) => {
+          invoiceState = { ...invoiceState, ...data, status: "partially_paid" };
+          return Promise.resolve(invoiceState);
+        }),
+        updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
+      },
+      invoiceEvent: { create: vi.fn(({ data }: any) => Promise.resolve({ id: "event-1", ...data })) },
+      organization: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue({ id: "org-1", commercialTier: "freemium", commissionBypassProofThresholdOverrideGnf: null }),
+      },
+      $transaction: vi.fn((callback: any) => callback(prisma)),
+    };
+    return prisma;
+  }
+
+  it("détecte et journalise une chute brutale du ratio non-cash (org déjà convertie, chute ≥ 50%)", async () => {
+    const prisma = createFakePrismaForRatioDrop({
+      priorTotal: 10,
+      priorNonCash: 8, // 80% non-cash antérieur — organisation "convertie"
+      recentTotal: 10,
+      recentNonCash: 3, // 30% récent — chute relative de 62,5%, ≥ seuil 50%
+    });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-drop");
+
+    expect(prisma.invoiceEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ metadata: { patterns: ["non_cash_ratio_drop"] } }),
+      }),
+    );
+  });
+
+  it("ignore une chute légère du ratio non-cash (< 50% relatif)", async () => {
+    const prisma = createFakePrismaForRatioDrop({
+      priorTotal: 10,
+      priorNonCash: 8,
+      recentTotal: 10,
+      recentNonCash: 6, // chute relative de 25%, sous le seuil 50%
+    });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-no-drop");
+
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("ignore une organisation jamais convertie (ratio antérieur sous le plancher), même si le ratio récent est nul", async () => {
+    const prisma = createFakePrismaForRatioDrop({
+      priorTotal: 10,
+      priorNonCash: 2, // 20% — jamais "convertie" (plancher 40%)
+      recentTotal: 10,
+      recentNonCash: 0,
+    });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-never-converted");
+
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("ignore le signal quand une fenêtre n'a aucun paiement (organisation neuve) — jamais de faux positif sur 0/0", async () => {
+    const prisma = createFakePrismaForRatioDrop({
+      priorTotal: 0,
+      priorNonCash: 0,
+      recentTotal: 10,
+      recentNonCash: 0,
+    });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-no-prior");
+
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+});
+
 function createFakePrismaForDeposit(
   invoiceOverrides: Record<string, unknown> = {},
   existingDeposit: any = null,
