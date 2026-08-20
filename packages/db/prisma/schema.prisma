@@ -180,6 +180,25 @@ enum PaymentStatus {
   failed
 }
 
+// G3, ADR-091 — échelle de conséquences à 4 niveaux, jamais punitive au premier
+// signal. none→level_1→level_2 : escalade automatique meilleur-effort (voir
+// CommissionBypassEscalationService). level_3/level_4 : exigent une action
+// explicite Squad Money (aucun OrganizationRole ne représente ce périmètre,
+// même précédent que DgiVerificationAuthGuard) — jamais posés automatiquement.
+enum CommissionBypassLevel {
+  none
+  level_1_nudged
+  level_2_proof_threshold_lowered
+  level_3_under_review
+  level_4_restricted
+}
+
+enum CommissionBypassCaseStatus {
+  pending
+  dismissed
+  restricted
+}
+
 enum InvoiceEventType {
   cancellation_indemnity
   no_show_forfeited
@@ -464,20 +483,29 @@ model Organization {
   // DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD (credit-limit-approval.ts).
   creditLimitApprovalThreshold BigInt?               @map("credit_limit_approval_threshold")
 
-  invoices            Invoice[]
-  sequences           InvoiceSequence[]
-  members             OrganizationMember[]
-  recoveryRequests    AccountRecoveryRequest[]
-  assistedSessions    AssistedSession[]
-  mandates            Mandate[]
-  customers           Customer[]
-  branches            Branch[]
-  signingKey          OrganizationSigningKey?
-  creditLimitRequests CreditLimitChangeRequest[]
-  apiKeys             ApiKey[]
-  products            Product[]
-  revenueShareCredits RevenueShareCredit[]
-  recurringTemplates  RecurringInvoiceTemplate[]
+  // G3, ADR-091 — état d'escalade courant, jamais recalculé rétroactivement.
+  commissionBypassLevel CommissionBypassLevel @default(none) @map("commission_bypass_level")
+  // G3, ADR-091 — Niveau 2 : seuil de preuve photo/GPS/signature abaissé pour
+  // CETTE organisation uniquement. Nullable : null = pas d'override, retombe
+  // sur CASH_PROOF_THRESHOLD_GNF_CENTIMES (même précédent que
+  // creditLimitApprovalThreshold ci-dessus, pas de CONFIG_PARAMETER générique).
+  commissionBypassProofThresholdOverrideGnf BigInt? @map("commission_bypass_proof_threshold_override_gnf")
+
+  invoices              Invoice[]
+  sequences             InvoiceSequence[]
+  members               OrganizationMember[]
+  recoveryRequests      AccountRecoveryRequest[]
+  assistedSessions      AssistedSession[]
+  mandates              Mandate[]
+  customers             Customer[]
+  branches              Branch[]
+  signingKey            OrganizationSigningKey?
+  creditLimitRequests   CreditLimitChangeRequest[]
+  apiKeys               ApiKey[]
+  products              Product[]
+  revenueShareCredits   RevenueShareCredit[]
+  recurringTemplates    RecurringInvoiceTemplate[]
+  commissionBypassCases CommissionBypassCase[]
 
   @@map("organization")
 }
@@ -862,6 +890,35 @@ model Payment {
   invoice Invoice @relation(fields: [invoiceId], references: [id])
 
   @@map("payment")
+}
+
+// G3, ADR-091 — trace auditable de la revue manuelle Squad Money (Niveau 3/4),
+// même pattern que CreditLimitChangeRequest (E5). Pas de resolvedByUserId :
+// Squad Money n'est représenté par aucun User dans ce schéma (même limite déjà
+// acceptée pour OrganizationsService.verifyDgi(), B2 — aucun acteur tracé pour
+// une action "système"/interne). detectedPatterns : snapshot des patterns lus
+// par l'opérateur au moment de l'ouverture (journal d'audit G4), jamais
+// recalculé après coup.
+model CommissionBypassCase {
+  id               String                     @id @default(uuid())
+  organizationId   String                     @map("organization_id")
+  status           CommissionBypassCaseStatus @default(pending)
+  detectedPatterns Json                       @map("detected_patterns")
+  createdAt        DateTime                   @default(now()) @map("created_at")
+  resolvedAt       DateTime?                  @map("resolved_at")
+  // Revue dev-domain-model-reviewer : resolveCase() est une décision humaine
+  // discrétionnaire (dismiss/restrict) sur un dossier de fraude potentielle —
+  // même nature que CreditLimitChangeRequest.resolvedByUserId (E5), jamais
+  // verifyDgi() (B2, déclenchement automatisé sans nuance). Pas de FK vers
+  // User (Squad Money n'y est représenté par aucune ligne) : chaîne libre
+  // fournie par l'outil interne appelant, jamais validée contre une table —
+  // traçabilité "qui" en plus du "pourquoi" (detectedPatterns), sans les
+  // garanties d'intégrité référentielle qu'une vraie FK offrirait.
+  resolvedByOperatorId String? @map("resolved_by_operator_id")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("commission_bypass_case")
 }
 
 // E7, ADR-084 — productId devient une vraie relation FK : la condition qui

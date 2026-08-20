@@ -1,14 +1,17 @@
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { computePlatformFee } from "../common/commission-grid";
-import { detectCashAnomalyPatterns } from "./cash-anomaly-detection";
-import type { CreatePaymentDto } from "./dto/create-payment.dto";
+import { detectCashAnomalyPatterns, type CashAnomalyPattern } from "./cash-anomaly-detection";
+import { isCashProofRequirementMet } from "./cash-proof-requirement";
+import { detectNonCashRatioDrop, RATIO_WINDOW_DAYS } from "./non-cash-ratio-drop";
+import { CASH_PROOF_THRESHOLD_GNF_CENTIMES, type CreatePaymentDto } from "./dto/create-payment.dto";
 import type { ConfirmProviderPaymentDto } from "./dto/confirm-provider-payment.dto";
 import type { RecordDepositDto } from "./dto/record-deposit.dto";
 import type { CreateBankTransferPaymentDto } from "./dto/create-bank-transfer-payment.dto";
+import { CommissionBypassEscalationService } from "../commission-bypass/commission-bypass-escalation.service";
 
 const PAYABLE_STATUSES = new Set(["issued", "partially_paid"]);
 
@@ -22,6 +25,7 @@ export class PaymentsService {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly paymentLinkClient: PaymentLinkClient,
+    private readonly commissionBypassEscalation: CommissionBypassEscalationService,
   ) {}
 
   async recordCashPayment(invoiceId: string, dto: CreatePaymentDto, idempotencyKey: string) {
@@ -33,6 +37,7 @@ export class PaymentsService {
     // allowOverpayment: true — trop-perçu cash uniquement (C14, backlog explicite),
     // jamais pour recordProviderPayment() (lien généré pour un montant exact).
     const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amount, true);
+    await this.assertCashProofRequirement(invoice.organizationId, dto);
 
     const payment = await this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
       amount: dto.amount,
@@ -54,10 +59,13 @@ export class PaymentsService {
 
   // Appelé exclusivement par money-api après confirmation webhook (ADR-075) —
   // providerRef sert déjà de clé d'idempotence naturelle, pas de header client.
-  // Aucune détection d'anomalie ici (G1, ADR-032) : les patterns actuels
-  // (montant rond, boucle client) sont spécifiques au cash — le 3e pattern
-  // d'ADR-032 ("écart MM vs facturé") couvrirait ce chemin mais est hors scope,
-  // réservé à une extension future du même moteur (G3, ADR-091).
+  // Aucune détection d'anomalie ici (G1/G3) : le moteur (détecté et étendu par
+  // G3, ADR-091, voir detectAndRecordCashAnomaly()) reste strictement cash-only.
+  // Gap toujours ouvert (non traité par G3) : "écart MM vs facturé" nécessiterait
+  // une corrélation avec le Money Context (confirmation webhook réelle vs montant
+  // facturé), jamais construite dans ce repo — signal distinct de ceux ajoutés
+  // par G3 (récurrence sous seuil, chute du ratio non-cash), qui restent tous les
+  // deux calculables à partir des seules données Trust déjà en base.
   // ADR-074, grille 5 paliers : dto.amountGnf (ce que le payeur a réglé) inclut
   // désormais structurellement la commission majorée au moment de la génération
   // du lien (voir invoices.service.ts:issue()/regeneratePaymentLink(),
@@ -151,6 +159,8 @@ export class PaymentsService {
       throw new ConflictException(`Proforma ${proformaId} a déjà une arrhes enregistrée`);
     }
 
+    await this.assertCashProofRequirement(proforma.organizationId, dto);
+
     try {
       return await this.prisma.payment.create({
         data: {
@@ -205,6 +215,42 @@ export class PaymentsService {
     return invoice;
   }
 
+  // G3, ADR-091 — la règle vivait dans le refine() Zod de create-payment.dto.ts/
+  // record-deposit.dto.ts (seuil global figé) ; elle vit ici désormais pour
+  // pouvoir lire un seuil abaissé par organisation (Niveau 2 de l'escalade,
+  // Organization.commissionBypassProofThresholdOverrideGnf). Comportement HTTP
+  // légèrement changé (documenté, pas une régression silencieuse) : le corps
+  // d'erreur passe d'un objet Zod flatten() à un message plat, le code 400 est
+  // préservé.
+  private async assertCashProofRequirement(
+    organizationId: string,
+    dto: {
+      amount: bigint;
+      proofPhotoUrl?: string;
+      proofGpsLat?: number;
+      proofGpsLng?: number;
+      proofSignature?: string;
+    },
+  ) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const effectiveThresholdGnfCentimes =
+      organization.commissionBypassProofThresholdOverrideGnf ?? CASH_PROOF_THRESHOLD_GNF_CENTIMES;
+
+    const met = isCashProofRequirementMet({
+      amount: dto.amount,
+      effectiveThresholdGnfCentimes,
+      proofPhotoUrl: dto.proofPhotoUrl,
+      proofGpsLat: dto.proofGpsLat,
+      proofGpsLng: dto.proofGpsLng,
+      proofSignature: dto.proofSignature,
+    });
+    if (!met) {
+      throw new BadRequestException(
+        "Photo, GPS et signature obligatoires pour un encaissement cash au-delà du seuil de preuve en vigueur pour cette organisation",
+      );
+    }
+  }
+
   private async createPaymentAndApply(
     invoiceId: string,
     idempotencyKey: string,
@@ -231,14 +277,14 @@ export class PaymentsService {
     }
   }
 
-  // G1, ADR-032 — "revue humaine systématique", jamais un rejet automatique.
-  // Meilleur effort, HORS de la transaction de paiement (revue sécurité) : même
-  // principe que PaymentLinkClient.tryGenerate() / le try/catch autour du lien de
-  // paiement dans invoices.service.ts:issue() — un bug dans cette détection annexe
-  // ne doit jamais faire échouer un encaissement cash déjà légitimement committé.
-  // Écart MM vs facturé (3e pattern d'ADR-032) hors scope : nécessiterait une
-  // corrélation Money Context, réservé à une extension future du même moteur (G3,
-  // ADR-091).
+  // G1/G3, ADR-032/ADR-091 — "revue humaine systématique", jamais un rejet
+  // automatique. Meilleur effort, HORS de la transaction de paiement (revue
+  // sécurité) : même principe que PaymentLinkClient.tryGenerate() / le try/catch
+  // autour du lien de paiement dans invoices.service.ts:issue() — un bug dans
+  // cette détection annexe ne doit jamais faire échouer un encaissement cash déjà
+  // légitimement committé. Gap toujours ouvert (non traité) : signal sectoriel/
+  // quartier d'ADR-091, aucune donnée de secteur/quartier n'existe dans ce repo —
+  // voir PLAN "Alternatives écartées".
   private async detectAndRecordCashAnomaly(
     invoice: { id: string; organizationId: string; customerId: string | null },
     amount: bigint,
@@ -259,7 +305,66 @@ export class PaymentsService {
         });
       }
 
-      const patterns = detectCashAnomalyPatterns({ amount, sameAmountRecentCount });
+      // G3, ADR-091 — seuil effectif de l'organisation (même résolution
+      // qu'assertCashProofRequirement, volontairement dupliquée : les deux
+      // méthodes restent découplées, voir blueprint Décision C).
+      const organization = await this.prisma.organization.findUniqueOrThrow({
+        where: { id: invoice.organizationId },
+      });
+      const effectiveProofThreshold =
+        organization.commissionBypassProofThresholdOverrideGnf ?? CASH_PROOF_THRESHOLD_GNF_CENTIMES;
+
+      // Récurrence org-wide (jamais par client, contrairement à sameAmountRecentCount
+      // ci-dessus) de montants cash juste sous le seuil effectif — ne vaut la peine
+      // d'être interrogée que si CE paiement est lui-même dans la bande.
+      const band = (effectiveProofThreshold * 10n) / 100n;
+      const bandFloor = effectiveProofThreshold - band;
+      let sameOrgSubThresholdRecentCount = 0;
+      if (amount >= bandFloor && amount < effectiveProofThreshold) {
+        // Compte CE paiement (déjà committé par createPaymentAndApply() ci-dessus,
+        // donc déjà dans la fenêtre) — même précédent que sameAmountRecentCount
+        // au-dessus ("ce paiement inclus", G1) : le seuil de récurrence (3) reste
+        // cohérent avec cette convention déjà établie.
+        sameOrgSubThresholdRecentCount = await this.prisma.payment.count({
+          where: {
+            method: "cash",
+            amount: { gte: bandFloor, lt: effectiveProofThreshold },
+            collectedAt: { gte: new Date(Date.now() - STRUCTURING_LOOP_WINDOW_MS) },
+            invoice: { organizationId: invoice.organizationId },
+          },
+        });
+      }
+
+      const patterns: (CashAnomalyPattern | "non_cash_ratio_drop")[] = detectCashAnomalyPatterns({
+        amount,
+        sameAmountRecentCount,
+        effectiveProofThreshold,
+        sameOrgSubThresholdRecentCount,
+      });
+
+      // G3, ADR-091 — chute brutale du ratio non-cash, org-wide, deux fenêtres
+      // glissantes consécutives de RATIO_WINDOW_DAYS. null (aucun paiement sur une
+      // fenêtre) = signal ignoré, jamais un faux positif sur une organisation neuve.
+      const now = Date.now();
+      const windowMs = RATIO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+      const recentNonCashRatio = await this.computeNonCashRatio(
+        invoice.organizationId,
+        new Date(now - windowMs),
+        new Date(now),
+      );
+      const priorNonCashRatio = await this.computeNonCashRatio(
+        invoice.organizationId,
+        new Date(now - 2 * windowMs),
+        new Date(now - windowMs),
+      );
+      if (
+        recentNonCashRatio !== null &&
+        priorNonCashRatio !== null &&
+        detectNonCashRatioDrop({ priorNonCashRatio, recentNonCashRatio })
+      ) {
+        patterns.push("non_cash_ratio_drop");
+      }
+
       if (patterns.length === 0) {
         return;
       }
@@ -273,11 +378,37 @@ export class PaymentsService {
           metadata: { patterns },
         },
       });
+
+      await this.commissionBypassEscalation.evaluateAndEscalate(invoice.organizationId, patterns);
     } catch (error) {
       this.logger.warn(
         `Paiement cash sur la facture ${invoice.id} enregistré, mais la détection d'anomalie a échoué : ${(error as Error).message}`,
       );
     }
+  }
+
+  // G3, ADR-091 — null si aucun paiement sur la fenêtre (organisation neuve ou
+  // inactive), jamais 0/0 : le signal de chute doit rester silencieux plutôt que
+  // de produire un ratio artificiel.
+  private async computeNonCashRatio(
+    organizationId: string,
+    windowStart: Date,
+    windowEnd: Date,
+  ): Promise<number | null> {
+    const total = await this.prisma.payment.count({
+      where: { invoice: { organizationId }, collectedAt: { gte: windowStart, lt: windowEnd } },
+    });
+    if (total === 0) {
+      return null;
+    }
+    const nonCash = await this.prisma.payment.count({
+      where: {
+        invoice: { organizationId },
+        collectedAt: { gte: windowStart, lt: windowEnd },
+        method: { not: "cash" },
+      },
+    });
+    return nonCash / total;
   }
 
   // C11, ADR-062 — "nouveau lien pour le solde restant". Meilleur effort, HORS de
