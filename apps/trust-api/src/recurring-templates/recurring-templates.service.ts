@@ -25,7 +25,10 @@ export class RecurringTemplatesService {
         organizationId,
         customerId: dto.customerId,
         branchId: dto.branchId,
-        lines: dto.lines,
+        // JSON.stringify ne sait pas sérialiser un bigint (colonne Json) —
+        // unitPrice converti en string, reconverti en bigint par generate()
+        // avant l'appel à InvoicesService.createDraft().
+        lines: dto.lines.map((line) => ({ ...line, unitPrice: line.unitPrice.toString() })),
         discountPct: dto.discountPct,
         intervalDays: dto.intervalDays,
         lastGeneratedAt: null,

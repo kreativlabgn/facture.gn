@@ -31,7 +31,7 @@ describe("RecurringTemplatesService.create (I1, ADR-056)", () => {
         organizationId: "org-1",
         customerId: undefined,
         branchId: undefined,
-        lines: SAMPLE_LINES,
+        lines: [{ description: "Abonnement mensuel maintenance", quantity: 1, unitPrice: "150000" }],
         discountPct: 0,
         intervalDays: 30,
         lastGeneratedAt: null,
@@ -39,6 +39,17 @@ describe("RecurringTemplatesService.create (I1, ADR-056)", () => {
       },
     });
     expect(result.id).toBe("template-1");
+  });
+
+  it("convertit unitPrice (bigint) en string avant écriture — un bigint brut fait planter JSON.stringify sur une colonne Json", async () => {
+    const prisma = createFakePrisma();
+    const service = new RecurringTemplatesService(prisma as any, {} as any);
+
+    await service.create("org-1", { lines: SAMPLE_LINES, intervalDays: 30, discountPct: 0 } as any);
+
+    const writtenLines = prisma.recurringInvoiceTemplate.create.mock.calls[0][0].data.lines;
+    expect(typeof writtenLines[0].unitPrice).toBe("string");
+    expect(() => JSON.stringify(writtenLines)).not.toThrow();
   });
 
   it("accepte customerId et branchId optionnels", async () => {
