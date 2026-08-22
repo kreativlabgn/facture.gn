@@ -138,6 +138,73 @@ describe("PracticesService — inviter un collaborateur (F8, ADR-068)", () => {
   });
 });
 
+function createFakePrismaForUpgrade(requesterRole: string | null) {
+  const prisma: any = {
+    practiceMember: {
+      findFirst: vi.fn().mockResolvedValue(requesterRole ? { id: "member-admin", role: requesterRole } : null),
+    },
+    professionalPractice: {
+      update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
+    },
+  };
+  return prisma;
+}
+
+describe("PracticesService.upgradePartnerTier (H3, ADR-071)", () => {
+  it("un practice_admin peut poser le palier Partner", async () => {
+    const prisma = createFakePrismaForUpgrade("practice_admin");
+    const service = new PracticesService(prisma as any);
+
+    const result = await service.upgradePartnerTier(PRACTICE_ID, "partner_starter", ADMIN_ID);
+
+    expect(prisma.professionalPractice.update).toHaveBeenCalledWith({
+      where: { id: PRACTICE_ID },
+      data: { tier: "partner_starter" },
+    });
+    expect(result.tier).toBe("partner_starter");
+  });
+
+  it("refuse un membre non practice_admin (ForbiddenException)", async () => {
+    const prisma = createFakePrismaForUpgrade("accountant_external");
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.upgradePartnerTier(PRACTICE_ID, "partner_pro", ADMIN_ID)).rejects.toThrow(/practice_admin/);
+    expect(prisma.professionalPractice.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse un non-membre (ForbiddenException)", async () => {
+    const prisma = createFakePrismaForUpgrade(null);
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.upgradePartnerTier(PRACTICE_ID, "partner_pro", ADMIN_ID)).rejects.toThrow(/practice_admin/);
+  });
+});
+
+describe("PracticesService.upgradeRevenueShareSettlementMode (H3, ADR-071)", () => {
+  it("un practice_admin peut changer le mode de règlement", async () => {
+    const prisma = createFakePrismaForUpgrade("practice_admin");
+    const service = new PracticesService(prisma as any);
+
+    const result = await service.upgradeRevenueShareSettlementMode(PRACTICE_ID, "subscription_deduction", ADMIN_ID);
+
+    expect(prisma.professionalPractice.update).toHaveBeenCalledWith({
+      where: { id: PRACTICE_ID },
+      data: { revenueShareSettlementMode: "subscription_deduction" },
+    });
+    expect(result.revenueShareSettlementMode).toBe("subscription_deduction");
+  });
+
+  it("refuse un membre non practice_admin (ForbiddenException)", async () => {
+    const prisma = createFakePrismaForUpgrade("accountant_external");
+    const service = new PracticesService(prisma as any);
+
+    await expect(
+      service.upgradeRevenueShareSettlementMode(PRACTICE_ID, "payout", ADMIN_ID),
+    ).rejects.toThrow(/practice_admin/);
+    expect(prisma.professionalPractice.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("PracticesService — lister les practices dont je suis membre", () => {
   it("retourne les practices dont l'utilisateur est membre actif, avec son rôle sur chacune", async () => {
     const prisma: any = {
