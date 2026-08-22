@@ -1123,6 +1123,11 @@ enum ProfessionalPracticeType {
   cga
 }
 
+enum RevenueShareSettlementMode {
+  payout
+  subscription_deduction
+}
+
 enum ProfessionalPracticeTier {
   partner_free
   partner_starter
@@ -1159,6 +1164,14 @@ model ProfessionalPractice {
   phone              String
   email              String?
   createdAt          DateTime                 @default(now()) @map("created_at")
+
+  // H3, ADR-071, Grille-Offres §5.2 — mode de règlement de l'abonnement Partner
+  // face aux crédits de revenue share (H4) : payout (défaut, comportement H4
+  // inchangé — le crédit est encaissable séparément) ou subscription_deduction
+  // (le crédit vient en déduction du prix du palier, voir
+  // RevenueShareService.getPartnerSubscriptionStatus()). Ne touche JAMAIS
+  // RevenueShareCredit existant, oriente seulement le calcul à la lecture.
+  revenueShareSettlementMode RevenueShareSettlementMode @default(payout) @map("revenue_share_settlement_mode")
 
   members             PracticeMember[]
   mandates            Mandate[]
