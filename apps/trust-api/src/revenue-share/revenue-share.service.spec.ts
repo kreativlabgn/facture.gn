@@ -9,6 +9,8 @@ function createFakePrisma(
     platformFeeSum?: bigint | null;
     credits?: any[];
     existingCredit?: any;
+    practice?: any;
+    creditedSum?: bigint | null;
   } = {},
 ) {
   return {
@@ -29,6 +31,12 @@ function createFakePrisma(
       findUnique: vi.fn().mockResolvedValue(overrides.existingCredit ?? null),
       upsert: vi.fn().mockImplementation(({ create }: any) => Promise.resolve({ id: "credit-1", ...create })),
       findMany: vi.fn().mockResolvedValue(overrides.credits ?? []),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { creditedAmountCentimes: overrides.creditedSum ?? null } }),
+    },
+    professionalPractice: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(
+        overrides.practice ?? { id: "practice-1", tier: "partner_starter", revenueShareSettlementMode: "payout" },
+      ),
     },
   };
 }
@@ -195,5 +203,78 @@ describe("RevenueShareService.listByPractice (H4, ADR-071)", () => {
     const result = await service.listByPractice("practice-1", "user-1");
 
     expect(result).toHaveLength(1);
+  });
+});
+
+describe("RevenueShareService.getPartnerSubscriptionStatus (H3, ADR-071, Grille-Offres §5.2)", () => {
+  it("mode payout : amountDueCentimes = prix plein du palier, indépendant des crédits générés", async () => {
+    const prisma = createFakePrisma({
+      practice: { id: "practice-1", tier: "partner_starter", revenueShareSettlementMode: "payout" },
+      creditedSum: 30_000_000n,
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    const result = await service.getPartnerSubscriptionStatus("practice-1", "user-1", "2026-08");
+
+    expect(result.amountDueCentimes).toBe(50_000_000n);
+  });
+
+  it("mode subscription_deduction : amountDueCentimes = prix - total crédité, quand total < prix", async () => {
+    const prisma = createFakePrisma({
+      practice: { id: "practice-1", tier: "partner_starter", revenueShareSettlementMode: "subscription_deduction" },
+      creditedSum: 30_000_000n,
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    const result = await service.getPartnerSubscriptionStatus("practice-1", "user-1", "2026-08");
+
+    expect(result.amountDueCentimes).toBe(20_000_000n);
+  });
+
+  it("mode subscription_deduction : amountDueCentimes = 0n (jamais négatif) quand total crédité ≥ prix", async () => {
+    const prisma = createFakePrisma({
+      practice: { id: "practice-1", tier: "partner_starter", revenueShareSettlementMode: "subscription_deduction" },
+      creditedSum: 90_000_000n,
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    const result = await service.getPartnerSubscriptionStatus("practice-1", "user-1", "2026-08");
+
+    expect(result.amountDueCentimes).toBe(0n);
+  });
+
+  it("palier partner_institutional : amountDueCentimes toujours null, quel que soit le mode", async () => {
+    const prisma = createFakePrisma({
+      practice: {
+        id: "practice-1",
+        tier: "partner_institutional",
+        revenueShareSettlementMode: "subscription_deduction",
+      },
+      creditedSum: 0n,
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    const result = await service.getPartnerSubscriptionStatus("practice-1", "user-1", "2026-08");
+
+    expect(result.amountDueCentimes).toBeNull();
+  });
+
+  it("refuse un non-membre de la practice (ForbiddenException)", async () => {
+    const prisma = createFakePrisma({ requesterMembership: null });
+    const service = new RevenueShareService(prisma as any);
+
+    await expect(service.getPartnerSubscriptionStatus("practice-1", "user-1", "2026-08")).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it("accepte tout membre actif, pas seulement practice_admin (consultation)", async () => {
+    const prisma = createFakePrisma({
+      requesterMembership: { role: "accountant_external", leftAt: null },
+      practice: { id: "practice-1", tier: "partner_free", revenueShareSettlementMode: "payout" },
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    await expect(service.getPartnerSubscriptionStatus("practice-1", "user-1", "2026-08")).resolves.toBeDefined();
   });
 });
