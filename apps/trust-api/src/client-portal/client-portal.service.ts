@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { OUTSTANDING_INVOICE_STATUSES } from "../customers/customers.service";
+import { OUTSTANDING_INVOICE_STATUSES } from "../invoices/invoice-status";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
