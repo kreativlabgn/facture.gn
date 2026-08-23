@@ -2,6 +2,7 @@ import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF, REVENUE_SHARE_RATE_BPS } from "./revenue-share-grid";
+import { getPartnerTierPrice } from "../practices/partner-tier-grid";
 
 const BPS_DENOMINATOR = 10_000n;
 
@@ -91,6 +92,41 @@ export class RevenueShareService {
     }
 
     return this.prisma.revenueShareCredit.findMany({ where: { practiceId } });
+  }
+
+  // H3, ADR-071, Grille-Offres §5.2 — vue calculée à la demande, jamais
+  // d'entité persistée pour la "facture" d'abonnement (décision utilisateur,
+  // voir PLAN "Alternatives écartées"). Tout membre actif suffit (consultation,
+  // même discipline que listByPractice()). N'affecte JAMAIS un
+  // RevenueShareCredit existant — lecture seule, oriente uniquement le calcul.
+  async getPartnerSubscriptionStatus(practiceId: string, requesterUserId: string, periodMonth: string) {
+    const membership = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!membership) {
+      throw new ForbiddenException("Seul un membre du cabinet peut consulter son abonnement Partner");
+    }
+
+    const practice = await this.prisma.professionalPractice.findUniqueOrThrow({ where: { id: practiceId } });
+    const price = getPartnerTierPrice(practice.tier);
+
+    if (price.kind === "quote_required") {
+      return { practiceId, periodMonth, tier: practice.tier, amountDueCentimes: null as bigint | null };
+    }
+
+    if (practice.revenueShareSettlementMode === "payout") {
+      return { practiceId, periodMonth, tier: practice.tier, amountDueCentimes: price.amountCentimes };
+    }
+
+    const aggregate = await this.prisma.revenueShareCredit.aggregate({
+      where: { practiceId, periodMonth },
+      _sum: { creditedAmountCentimes: true },
+    });
+    const totalCreditedCentimes = aggregate._sum.creditedAmountCentimes ?? 0n;
+    const remaining = price.amountCentimes - totalCreditedCentimes;
+    const amountDueCentimes = remaining > 0n ? remaining : 0n;
+
+    return { practiceId, periodMonth, tier: practice.tier, amountDueCentimes };
   }
 
   private async assertPracticeAdmin(practiceId: string, requesterUserId: string): Promise<void> {

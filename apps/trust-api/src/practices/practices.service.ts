@@ -1,5 +1,10 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PrismaClient, ProfessionalPracticeType } from "@facture-gn/db";
+import type {
+  PrismaClient,
+  ProfessionalPracticeTier,
+  ProfessionalPracticeType,
+  RevenueShareSettlementMode,
+} from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreatePracticeDto } from "./dto/create-practice.dto";
 import type { InviteMemberDto } from "./dto/invite-member.dto";
@@ -101,5 +106,36 @@ export class PracticesService {
       include: { practice: true },
     });
     return memberships.map((membership) => ({ ...membership.practice, role: membership.role }));
+  }
+
+  // H3, ADR-071 — symétrique à OrganizationsService.upgradeCommercialTier()
+  // (H2) : self-service, jamais un workflow d'approbation. tier jamais accepté
+  // à create() (voir schema.prisma) mais changeable ici après coup.
+  async upgradePartnerTier(practiceId: string, tier: ProfessionalPracticeTier, requesterUserId: string) {
+    await this.assertPracticeAdmin(practiceId, requesterUserId);
+    return this.prisma.professionalPractice.update({ where: { id: practiceId }, data: { tier } });
+  }
+
+  // H3, ADR-071 — n'affecte JAMAIS un RevenueShareCredit déjà généré, oriente
+  // seulement RevenueShareService.getPartnerSubscriptionStatus() à la lecture.
+  async upgradeRevenueShareSettlementMode(
+    practiceId: string,
+    mode: RevenueShareSettlementMode,
+    requesterUserId: string,
+  ) {
+    await this.assertPracticeAdmin(practiceId, requesterUserId);
+    return this.prisma.professionalPractice.update({
+      where: { id: practiceId },
+      data: { revenueShareSettlementMode: mode },
+    });
+  }
+
+  private async assertPracticeAdmin(practiceId: string, requesterUserId: string): Promise<void> {
+    const membership = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: requesterUserId, leftAt: null },
+    });
+    if (!membership || membership.role !== "practice_admin") {
+      throw new ForbiddenException("Seul un practice_admin du cabinet peut effectuer cette action");
+    }
   }
 }

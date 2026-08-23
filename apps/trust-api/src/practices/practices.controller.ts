@@ -5,6 +5,11 @@ import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decor
 import { MandatesService } from "../mandates/mandates.service";
 import { createPracticeSchema, type CreatePracticeDto } from "./dto/create-practice.dto";
 import { inviteMemberSchema, type InviteMemberDto } from "./dto/invite-member.dto";
+import { upgradePartnerTierSchema, type UpgradePartnerTierDto } from "./dto/upgrade-partner-tier.dto";
+import {
+  upgradeRevenueShareSettlementModeSchema,
+  type UpgradeRevenueShareSettlementModeDto,
+} from "./dto/upgrade-revenue-share-settlement-mode.dto";
 import { PracticesService } from "./practices.service";
 
 @ApiTags("practices")
@@ -81,5 +86,27 @@ export class PracticesController {
   @Get()
   findAllByType() {
     return this.practicesService.findAllByType("cga");
+  }
+
+  // H3, ADR-071 — même style que POST :id/members : aucun @Roles(), garde
+  // practice_admin inline dans le service.
+  @Post(":id/partner-tier")
+  upgradePartnerTier(
+    @Param("id") practiceId: string,
+    @Body(new ZodValidationPipe(upgradePartnerTierSchema)) dto: UpgradePartnerTierDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.practicesService.upgradePartnerTier(practiceId, dto.tier, user.id);
+  }
+
+  // H3, ADR-071 — même garde practice_admin, jamais rétroactif sur les
+  // RevenueShareCredit déjà générés (voir service).
+  @Post(":id/revenue-share-settlement-mode")
+  upgradeRevenueShareSettlementMode(
+    @Param("id") practiceId: string,
+    @Body(new ZodValidationPipe(upgradeRevenueShareSettlementModeSchema)) dto: UpgradeRevenueShareSettlementModeDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.practicesService.upgradeRevenueShareSettlementMode(practiceId, dto.mode, user.id);
   }
 }
