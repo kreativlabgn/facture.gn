@@ -689,16 +689,25 @@ model Branch {
 // "la création du produit n'est jamais bloquée en son absence" (E6, ADR-084) —
 // cette story ne construit AUCUN endpoint qui le renseigne (territoire E6),
 // seulement le champ pour compatibilité de schéma future.
+// E3, ADR-038 — possibleDuplicateOf : même pattern que Customer.possibleDuplicateOf
+// (auto-relation nullable, jamais une contrainte bloquante). Posé par
+// ProductsService.create() (dédoublonnage par nom, exact match insensible à la
+// casse, contre l'organisation) — jamais de fusion automatique, juste un signal
+// informatif pour une résolution manuelle éventuelle (aucun ProductsService.merge()
+// n'existe : le Backlog ne demande la fusion QUE pour les clients, E4).
 model Product {
   id                   String  @id @default(uuid())
   organizationId       String  @map("organization_id")
   name                 String
   taxExemptionCategory String? @map("tax_exemption_category")
   costPrice            BigInt? @map("cost_price")
+  possibleDuplicateOf  String? @map("possible_duplicate_of")
 
-  organization Organization   @relation(fields: [organizationId], references: [id])
-  stocks       ProductStock[]
-  invoiceLines InvoiceLine[]
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  stocks        ProductStock[]
+  invoiceLines  InvoiceLine[]
+  duplicateOf   Product?       @relation("ProductDuplicate", fields: [possibleDuplicateOf], references: [id])
+  possibleDupes Product[]      @relation("ProductDuplicate")
 
   @@map("product")
 }

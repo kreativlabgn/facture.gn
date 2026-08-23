@@ -32,7 +32,20 @@ export class CustomersService {
     });
   }
 
+  // E3, ADR-038 — même filet de sécurité qu'importCustomers() (E9), appliqué ici au chemin
+  // unitaire : peu importe qu'une création soit "en direct" ou rejouée après une coupure
+  // réseau (le scénario offline concret de cette story), les deux traversent ce même
+  // endpoint et doivent recevoir le même dédoublonnage par téléphone. Contre la base
+  // existante de l'organisation uniquement (pas de "lot en cours" ici, une seule ligne)
+  // — jamais de fusion automatique, juste le signal possibleDuplicateOf pour résolution
+  // manuelle ultérieure (merge(), E4).
   async create(dto: CreateCustomerDto) {
+    const existingMatch = dto.phone
+      ? await this.prisma.customer.findFirst({
+          where: { organizationId: dto.organizationId, phone: dto.phone },
+        })
+      : null;
+
     return this.prisma.customer.create({
       data: {
         organizationId: dto.organizationId,
@@ -42,6 +55,7 @@ export class CustomersService {
         creditLimit: dto.creditLimit,
         // undefined → Prisma applique le défaut schema ("sms"), jamais dupliqué ici.
         notificationChannel: dto.notificationChannel,
+        possibleDuplicateOf: existingMatch?.id ?? null,
       },
     });
   }

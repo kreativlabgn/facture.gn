@@ -62,6 +62,7 @@ describe("CustomersService — création (C6, ADR-039)", () => {
         nif: undefined,
         creditLimit: undefined,
         notificationChannel: undefined,
+        possibleDuplicateOf: null,
       },
     });
     expect(result.id).toBe("cust-1");
@@ -74,6 +75,118 @@ describe("CustomersService — création (C6, ADR-039)", () => {
     const result = await service.create({ organizationId: "org-1", name: "Épicerie Sory" } as any);
 
     expect(result.creditLimit).toBeNull();
+  });
+});
+
+describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-038)", () => {
+  function createFakePrismaForCreate(opts: { existingMatch?: any } = {}) {
+    let createCallCount = 0;
+    return {
+      customer: {
+        // findFirst simule fidèlement le filtrage Prisma réel sur organizationId : un
+        // existingMatch configuré pour une AUTRE organisation que celle demandée dans le
+        // `where` n'est jamais retourné — preuve du scoping organizationId (voir test
+        // dédié "AUTRE organisation" ci-dessous). Rétrocompatible : un existingMatch sans
+        // organizationId n'est jamais filtré (comportement des tests existants inchangé).
+        findFirst: vi.fn().mockImplementation(({ where }: any) => {
+          const match = opts.existingMatch;
+          if (!match) return Promise.resolve(null);
+          if (match.organizationId && match.organizationId !== where.organizationId) {
+            return Promise.resolve(null);
+          }
+          return Promise.resolve(match);
+        }),
+        create: vi.fn().mockImplementation(({ data }: any) => {
+          createCallCount += 1;
+          return Promise.resolve({ id: `cust-new-${createCallCount}`, ...data });
+        }),
+        // Déclarés explicitement (pas juste absents) pour que les assertions
+        // `.not.toHaveBeenCalled()` ci-dessous protègent vraiment ADR-038 au lieu de
+        // reposer "par accident" sur l'absence de la méthode sur le mock.
+        update: vi.fn(),
+        delete: vi.fn(),
+      },
+    };
+  }
+
+  it("pose possibleDuplicateOf quand le téléphone matche un client déjà en base de l'organisation", async () => {
+    const prisma = createFakePrismaForCreate({ existingMatch: { id: "cust-existant", phone: "+224622334455" } });
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({
+      organizationId: "org-1",
+      name: "Boutique Fanta (ressaisie après coupure)",
+      phone: "+224622334455",
+    } as any);
+
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", phone: "+224622334455" },
+    });
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: "cust-existant" }),
+    });
+    expect(result.possibleDuplicateOf).toBe("cust-existant");
+  });
+
+  it("laisse possibleDuplicateOf null quand aucun client de l'organisation ne partage ce téléphone", async () => {
+    const prisma = createFakePrismaForCreate();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({
+      organizationId: "org-1",
+      name: "Boutique Sory",
+      phone: "+224622334455",
+    } as any);
+
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: null }),
+    });
+    expect(result.possibleDuplicateOf).toBeNull();
+  });
+
+  it("laisse possibleDuplicateOf null quand le seul client partageant ce téléphone appartient à une AUTRE organisation", async () => {
+    const prisma = createFakePrismaForCreate({
+      existingMatch: { id: "cust-autre-org", organizationId: "org-2", phone: "+224622334455" },
+    });
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({
+      organizationId: "org-1",
+      name: "Boutique Fanta",
+      phone: "+224622334455",
+    } as any);
+
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: null }),
+    });
+    expect(result.possibleDuplicateOf).toBeNull();
+  });
+
+  it("ne modifie ni ne supprime jamais l'enregistrement existant trouvé (ADR-038)", async () => {
+    const prisma = createFakePrismaForCreate({ existingMatch: { id: "cust-existant", phone: "+224622334455" } });
+    const service = new CustomersService(prisma as any);
+
+    await service.create({
+      organizationId: "org-1",
+      name: "Boutique Fanta (ressaisie après coupure)",
+      phone: "+224622334455",
+    } as any);
+
+    expect(prisma.customer.update).not.toHaveBeenCalled();
+    expect(prisma.customer.delete).not.toHaveBeenCalled();
+  });
+
+  it("ne fait aucune recherche de doublon quand le téléphone est absent — reste null", async () => {
+    const prisma = createFakePrismaForCreate();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({ organizationId: "org-1", name: "Boutique Sory" } as any);
+
+    expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: null }),
+    });
+    expect(result.possibleDuplicateOf).toBeNull();
   });
 });
 

@@ -11,9 +11,37 @@ export class ProductsService {
   // PRODUCT, voir PLAN "Clarifications"). costPrice jamais renseigné ici :
   // territoire d'E6, laissé undefined pour que Prisma applique le défaut
   // schema (null), jamais dupliqué en dur ici.
+  //
+  // E3, ADR-038 — dédoublonnage par nom (exact match insensible à la casse), contre
+  // la base existante de l'organisation. Même logique que
+  // CustomersService.create() (téléphone) : jamais de fusion automatique, juste le
+  // signal possibleDuplicateOf. Aucun ProductsService.merge() : le Backlog ne
+  // demande la fusion QUE pour les clients (E4).
+  //
+  // Revue post-fix — trim() ici au niveau du SERVICE (pas dans le DTO Zod, contrairement
+  // au téléphone client via msisdnSchema) : une ressaisie après coupure réseau produit
+  // souvent des variations d'espacement de début/fin ("Riz 25kg " vs "Riz 25kg"), pas
+  // seulement de casse — sans ce trim, ces deux saisies ne seraient jamais détectées comme
+  // doublons. Choix service plutôt que DTO : garde l'invariant testable directement dans
+  // products.service.spec.ts (comme le reste du dédoublonnage E3), sans dépendre du
+  // comportement de transformation Zod ni faire dépendre les tests de service du DTO.
+  // Un seul trim, réutilisé pour la comparaison ET la création (jamais deux normalisations
+  // divergentes).
   async create(dto: CreateProductDto) {
+    const name = dto.name.trim();
+    const existingMatch = await this.prisma.product.findFirst({
+      where: {
+        organizationId: dto.organizationId,
+        name: { equals: name, mode: "insensitive" },
+      },
+    });
+
     return this.prisma.product.create({
-      data: { organizationId: dto.organizationId, name: dto.name },
+      data: {
+        organizationId: dto.organizationId,
+        name,
+        possibleDuplicateOf: existingMatch?.id ?? null,
+      },
     });
   }
 
