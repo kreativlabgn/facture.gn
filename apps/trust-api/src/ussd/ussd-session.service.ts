@@ -95,14 +95,19 @@ type UssdState =
   // éliminer.
   | "authenticated_stub";
 
-// F13, ADR-096/ADR-108 — "6. Factures reçues" est délibérément distinct de
+// F13, ADR-096/ADR-108 — "7. Factures reçues" est délibérément distinct de
 // "3. Mes factures" : l'option 3 liste les factures ÉMISES par l'organisation
 // du collaborateur authentifié (ussdInvoiceList.listRecent, une seule org),
-// l'option 6 liste les factures REÇUES par ce numéro en tant que CLIENT, tous
+// l'option 7 liste les factures REÇUES par ce numéro en tant que CLIENT, tous
 // émetteurs confondus (ClientPortalService.listOrganizations, identité
 // client_portal). Même sous-flux d'authentification PIN que les autres
 // options (ADR-108 : *620# reste inchangé, aucun OTP côté USSD) — seule la
 // question posée à la base diffère.
+// Renumérotée de 6 vers 7 (fix/renumber-f13-ussd-option) : le premier
+// implémenteur de F13 a choisi "6" sans consulter la spec canonique
+// (V/Spec USSD facture-gn.md §1/§2.6), qui réserve explicitement l'option 6
+// à "Commande Publique" (K3, ADR-086, structure 6.1/6.2 déjà documentée,
+// pas encore construite au moment de F13).
 const ROOT_MENU = [
   "facture.gn *620#",
   "",
@@ -111,7 +116,7 @@ const ROOT_MENU = [
   "3. Mes factures",
   "4. Émettre une facture",
   "5. Gérer mon compte",
-  "6. Factures reçues",
+  "7. Factures reçues",
 ].join("\n");
 
 // §2.3 Spec USSD — libellés exacts du texte spec.
@@ -138,7 +143,7 @@ const MANAGE_ACCOUNT_MENU = [
 // Toute option autre que 2 (vérifier un reçu, §2.2 — aucune authentification
 // requise) exige le sous-flux d'authentification ci-dessous avant sa logique
 // propre — construite tâche par tâche par la suite de la feuille de route USSD.
-const AUTHENTICATED_OPTIONS = new Set(["1", "3", "4", "5", "6"]);
+const AUTHENTICATED_OPTIONS = new Set(["1", "3", "4", "5", "7"]);
 
 // §1 Spec USSD — menu canonique, point d'entrée unique. Machine à états pilotée
 // par UssdSession.state (même style que la "machine à états" déjà pratiquée dans
@@ -350,7 +355,7 @@ export class UssdSessionService {
 
     // F13, revue post-fix #2 — PIN vérifié = possession du numéro prouvée,
     // même garantie qu'un OTP (ADR-108). Sans ça, ClientPortalService (option
-    // 6, "Factures reçues") ne verrait jamais un utilisateur authentifié
+    // 7, "Factures reçues") ne verrait jamais un utilisateur authentifié
     // uniquement par *620#.
     await this.ussdAuth.confirmPhoneOwnership(session.phone);
 
@@ -501,7 +506,7 @@ export class UssdSessionService {
     // sous-flux PIN que les autres options (authUserId), aucune organisation à
     // résoudre ici (contrairement à 1/3/4/5) : ClientPortalService.listOrganizations
     // traverse TOUTES les organisations où ce numéro correspond à un Customer.phone.
-    if (context.pendingOption === "6") {
+    if (context.pendingOption === "7") {
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
         data: {

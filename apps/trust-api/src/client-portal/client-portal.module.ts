@@ -9,7 +9,7 @@ import { ClientPortalService } from "./client-portal.service";
 @Module({
   controllers: [ClientPortalAuthController, ClientPortalController],
   providers: [ClientPortalAuthService, ClientPortalService],
-  // ClientPortalService exporté — réutilisé par UssdModule pour l'option 6
+  // ClientPortalService exporté — réutilisé par UssdModule pour l'option 7
   // (*620#, résolution PIN déjà authentifiée, même service que la PWA plutôt
   // qu'une seconde implémentation de la résolution cross-organisation).
   exports: [ClientPortalService],
