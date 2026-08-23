@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { InternalAuthGuard } from "../common/internal-auth.guard";
+import { IS_PUBLIC_KEY } from "../common/public.decorator";
 import { PaymentLinksController } from "./payment-links.controller";
 
 // '__guards__' est la clé interne @nestjs/common (GUARDS_METADATA, non exportée
@@ -20,6 +21,11 @@ describe("PaymentLinksController — placement des guards (C19)", () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA_KEY, PaymentLinksController.prototype.getPublicCheckout);
 
     expect(guards).toBeUndefined();
+  });
+
+  it("les deux routes portent @Public() — passent le tripwire RequireExplicitAuthGuard (Security Audit 2026-08-23, finding #16)", () => {
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, PaymentLinksController.prototype.create)).toBe(true);
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, PaymentLinksController.prototype.getPublicCheckout)).toBe(true);
   });
 
   it("délègue getPublicCheckout au service avec l'invoiceId du paramètre d'URL", async () => {
