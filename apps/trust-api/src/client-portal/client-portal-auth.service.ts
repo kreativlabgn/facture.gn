@@ -39,6 +39,17 @@ export class ClientPortalAuthService {
     const code = generateOtpCode();
     const codeHash = await this.passwordService.hash(code);
 
+    // F13, revue post-fix #4 — sans ceci, un attaquant pouvait épuiser les 3
+    // tentatives d'un OTP puis retomber sur un OTP plus ancien encore valide
+    // pour ce même numéro (TTL 5 min chevauchant plusieurs `requestOtp()`),
+    // contournant l'invariant "3 tentatives max avant qu'un nouveau code soit
+    // nécessaire". Un seul OTP valide à la fois par numéro : toute demande
+    // invalide immédiatement les précédentes encore non consommées.
+    await this.prisma.clientPortalOtp.updateMany({
+      where: { msisdn, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+
     await this.prisma.clientPortalOtp.create({
       data: { msisdn, codeHash, expiresAt: new Date(Date.now() + OTP_TTL_MS) },
     });

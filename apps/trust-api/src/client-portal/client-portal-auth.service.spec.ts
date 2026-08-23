@@ -25,6 +25,37 @@ function createFakePrisma(overrides: { otp?: unknown; userPhone?: unknown } = {}
   return prisma;
 }
 
+// F13, revue post-fix #5 — état de consommation partagé par closure, comme le
+// mutex déjà établi dans ussd-session.service.spec.ts (Security Audit
+// 2026-08-23, revue post-fix #2) : deux verifyOtp() partageant CETTE instance
+// exercent le vrai comportement conditionnel updateMany(where:{consumedAt:null}),
+// une seule des deux peut réussir — pas un count:0 forcé qui ne prouve rien.
+function createFakeStatefulPrisma(otp: { id: string; codeHash: string; attempts: number }) {
+  let consumedAt: Date | null = null;
+  const prisma: any = {
+    clientPortalOtp: {
+      create: vi.fn().mockResolvedValue({ id: "otp-1" }),
+      findFirst: vi.fn().mockImplementation(() => Promise.resolve(consumedAt === null ? { ...otp } : null)),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockImplementation(({ where }: any) => {
+        if (where.id === otp.id && consumedAt === null) {
+          consumedAt = new Date();
+          return Promise.resolve({ count: 1 });
+        }
+        return Promise.resolve({ count: 0 });
+      }),
+    },
+    userPhone: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    user: { create: vi.fn().mockResolvedValue({ id: "user-new" }) },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
 function createFakePasswordService(verifyResult = true) {
   return {
     hash: vi.fn().mockResolvedValue("$argon2id$otp-hash"),
@@ -76,6 +107,28 @@ describe("ClientPortalAuthService", () => {
 
       const result = await service.requestOtp(MSISDN);
       expect(result).toEqual({ message: expect.any(String) });
+    });
+
+    it("F13, revue post-fix #4 — invalide tout OTP précédent non consommé du même numéro avant d'en créer un nouveau", async () => {
+      const prisma = createFakePrisma();
+      const service = new ClientPortalAuthService(
+        prisma,
+        createFakePasswordService() as any,
+        createFakeTokenService() as any,
+        createFakeSmsProvider() as any,
+      );
+
+      await service.requestOtp(MSISDN);
+
+      expect(prisma.clientPortalOtp.updateMany).toHaveBeenCalledWith({
+        where: { msisdn: MSISDN, consumedAt: null },
+        data: { consumedAt: expect.any(Date) },
+      });
+      // Invalidation AVANT création — un attaquant ne peut jamais se retrouver
+      // avec deux OTP valides simultanément pour le même numéro.
+      const invalidateOrder = prisma.clientPortalOtp.updateMany.mock.invocationCallOrder[0];
+      const createOrder = prisma.clientPortalOtp.create.mock.invocationCallOrder[0];
+      expect(invalidateOrder).toBeLessThan(createOrder);
     });
   });
 
@@ -139,10 +192,9 @@ describe("ClientPortalAuthService", () => {
       });
     });
 
-    it("rejette si la consommation atomique perd la course (count:0, déjà consommé par une requête concurrente)", async () => {
+    it("F13, revue post-fix #5 — deux verifyOtp() réellement concurrents avec le même code ne produisent qu'UN SEUL succès", async () => {
       const otp = { id: "otp-1", codeHash: "$argon2id$otp-hash", attempts: 0 };
-      const prisma = createFakePrisma({ otp });
-      prisma.clientPortalOtp.updateMany.mockResolvedValue({ count: 0 });
+      const prisma = createFakeStatefulPrisma(otp);
       const service = new ClientPortalAuthService(
         prisma,
         createFakePasswordService(true) as any,
@@ -150,7 +202,16 @@ describe("ClientPortalAuthService", () => {
         createFakeSmsProvider() as any,
       );
 
-      await expect(service.verifyOtp(MSISDN, "1234")).rejects.toThrow(UnauthorizedException);
+      const results = await Promise.allSettled([service.verifyOtp(MSISDN, "1234"), service.verifyOtp(MSISDN, "1234")]);
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(UnauthorizedException);
+      // La consommation gagnante n'a jamais laissé passer une seconde
+      // auto-inscription pour le même numéro — un seul User créé.
+      expect(prisma.user.create).toHaveBeenCalledTimes(1);
     });
 
     it("réutilise l'User/UserPhone existant si le numéro est déjà connu (ex. collaborateur ailleurs) — jamais une double identité", async () => {
