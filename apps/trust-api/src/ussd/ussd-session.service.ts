@@ -348,6 +348,12 @@ export class UssdSessionService {
       return { continue: true, text: "PIN incorrect. Réessayez :" };
     }
 
+    // F13, revue post-fix #2 — PIN vérifié = possession du numéro prouvée,
+    // même garantie qu'un OTP (ADR-108). Sans ça, ClientPortalService (option
+    // 6, "Factures reçues") ne verrait jamais un utilisateur authentifié
+    // uniquement par *620#.
+    await this.ussdAuth.confirmPhoneOwnership(session.phone);
+
     return this.completeAuthentication(session.id, context, session.state);
   }
 

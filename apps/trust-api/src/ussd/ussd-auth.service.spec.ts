@@ -17,6 +17,7 @@ function createFakePrisma(overrides: { userPhone?: any; organization?: any; memb
   return {
     userPhone: {
       findUnique: vi.fn().mockResolvedValue(overrides.userPhone ?? null),
+      update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
     },
     organization: {
       findUnique: vi.fn().mockResolvedValue(overrides.organization ?? null),
@@ -191,5 +192,38 @@ describe("UssdAuthService — vérification du PIN et blocage (§3.3)", () => {
     const result = await service.verifyPin(USER_ID, "1234");
 
     expect(result).toEqual({ success: true, locked: false });
+  });
+});
+
+describe("UssdAuthService.confirmPhoneOwnership (F13, revue post-fix #2)", () => {
+  it("marque le UserPhone vérifié quand il ne l'était pas encore", async () => {
+    const prisma = createFakePrisma({ userPhone: { id: "phone-1", userId: USER_ID, msisdn: PHONE, verifiedAt: null } });
+    const service = new UssdAuthService(prisma as any, createFakePasswordService() as any);
+
+    await service.confirmPhoneOwnership(PHONE);
+
+    expect(prisma.userPhone.update).toHaveBeenCalledWith({
+      where: { id: "phone-1" },
+      data: { verifiedAt: expect.any(Date) },
+    });
+  });
+
+  it("idempotent — ne réécrit rien si déjà vérifié", async () => {
+    const prisma = createFakePrisma({
+      userPhone: { id: "phone-1", userId: USER_ID, msisdn: PHONE, verifiedAt: new Date("2026-01-01") },
+    });
+    const service = new UssdAuthService(prisma as any, createFakePasswordService() as any);
+
+    await service.confirmPhoneOwnership(PHONE);
+
+    expect(prisma.userPhone.update).not.toHaveBeenCalled();
+  });
+
+  it("numéro inconnu du repo — no-op silencieux, jamais une erreur", async () => {
+    const prisma = createFakePrisma({ userPhone: null });
+    const service = new UssdAuthService(prisma as any, createFakePasswordService() as any);
+
+    await expect(service.confirmPhoneOwnership(PHONE)).resolves.toBeUndefined();
+    expect(prisma.userPhone.update).not.toHaveBeenCalled();
   });
 });

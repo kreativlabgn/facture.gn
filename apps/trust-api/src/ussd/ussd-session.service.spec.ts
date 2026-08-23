@@ -40,12 +40,14 @@ function createFakeUssdAuth(overrides: {
   resolveByAccountCode?: ReturnType<typeof vi.fn>;
   verifyPin?: ReturnType<typeof vi.fn>;
   createPin?: ReturnType<typeof vi.fn>;
+  confirmPhoneOwnership?: ReturnType<typeof vi.fn>;
 } = {}) {
   return {
     resolveByPhone: overrides.resolveByPhone ?? vi.fn().mockResolvedValue(null),
     resolveByAccountCode: overrides.resolveByAccountCode ?? vi.fn().mockResolvedValue(null),
     verifyPin: overrides.verifyPin ?? vi.fn().mockResolvedValue({ success: true, locked: false }),
     createPin: overrides.createPin ?? vi.fn().mockResolvedValue(undefined),
+    confirmPhoneOwnership: overrides.confirmPhoneOwnership ?? vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -820,6 +822,31 @@ describe("UssdSessionService — option 6, factures reçues (F13, ADR-096/ADR-10
     expect(result.text).toContain("Atelier Sekou");
     expect(result.text).toContain("Aucun solde dû");
     expect(clientPortal.listOrganizations).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("revue post-fix #2 — une authentification PIN réussie (jamais d'OTP) confirme la possession du numéro AVANT d'afficher les factures reçues, sinon listOrganizations() ne verrait jamais ce numéro (verifiedAt requis)", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "6", authUserId: USER_ID } }),
+    });
+    const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
+    const clientPortal = createFakeClientPortal({ listOrganizations: vi.fn().mockResolvedValue([]) });
+    const service = new UssdSessionService(
+      prisma as any,
+      ussdAuth as any,
+      createFakeVerification() as any,
+      createFakeUssdInvoice() as any,
+      createFakeUssdPayment() as any,
+      createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, clientPortal as any);
+
+    await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+    // confirmPhoneOwnership doit être appelé AVANT listOrganizations (ordre
+    // significatif : sans ça, la première consultation d'un utilisateur
+    // fraîchement PIN-authentifié verrait encore verifiedAt=null).
+    expect(ussdAuth.confirmPhoneOwnership).toHaveBeenCalledWith(PHONE);
+    const confirmOrder = ussdAuth.confirmPhoneOwnership.mock.invocationCallOrder[0];
+    const listOrder = clientPortal.listOrganizations.mock.invocationCallOrder[0];
+    expect(confirmOrder).toBeLessThan(listOrder);
   });
 
   it("aucune organisation trouvée → message explicite, jamais un écran vide", async () => {
