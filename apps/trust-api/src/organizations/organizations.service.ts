@@ -320,7 +320,22 @@ export class OrganizationsService {
   // résolution par UserPhone, aucun flux d'acceptation, ajout immédiat.
   // L'invité doit déjà avoir un compte facture.gn — inviter un utilisateur sans
   // compte est un mécanisme distinct (F10/ADR-096), hors scope ici.
-  async inviteMember(organizationId: string, dto: InviteOrganizationMemberDto) {
+  async inviteMember(organizationId: string, dto: InviteOrganizationMemberDto, requesterUserId: string) {
+    // Security Audit 2026-08-23, finding #12 — @Roles("owner","admin") sur la
+    // route (RolesGuard) autorise un simple admin à appeler cet endpoint, mais
+    // seul le owner peut inviter un pair admin ou approver (rôle de contrôle
+    // financier — E5, seul habilité à résoudre les hausses de limite de crédit) :
+    // décision produit actée, pas seulement une restriction technique. Vérifié
+    // avant tout le reste (moins coûteux, échoue au plus tôt).
+    if (dto.role === "admin" || dto.role === "approver") {
+      const requesterMembership = await this.prisma.organizationMember.findUnique({
+        where: { organizationId_userId: { organizationId, userId: requesterUserId } },
+      });
+      if (requesterMembership?.role !== "owner") {
+        throw new ForbiddenException(`Seul le owner peut inviter un membre avec le rôle ${dto.role}`);
+      }
+    }
+
     const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
     // H1, Grille §2 — vérifié avant le comptage des collaborateurs (moins
     // coûteux) : un rôle non débloqué par le palier ne doit jamais consommer

@@ -119,8 +119,9 @@ export class OrganizationsController {
   inviteMember(
     @Param("id") organizationId: string,
     @Body(new ZodValidationPipe(inviteOrganizationMemberSchema)) dto: InviteOrganizationMemberDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.organizationsService.inviteMember(organizationId, dto);
+    return this.organizationsService.inviteMember(organizationId, dto, user.id);
   }
 
   // H2, ADR-049 — même trio owner/admin que les autres routes de gestion
