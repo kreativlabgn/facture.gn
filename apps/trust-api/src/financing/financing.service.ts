@@ -19,6 +19,8 @@ export class FinancingService {
     const financeable = isFinanceable({
       ...invoice,
       publicBuyerAccountVerified: invoice.customer?.publicBuyerAccount?.verificationStatus === "verified",
+      // Security Audit 2026-08-23, revue post-fix #1 — voir is-financeable.ts.
+      publicEntityConfirmed: invoice.customer?.isPublicEntityConfirmed === true,
     });
     const partners = financeable
       ? await this.prisma.financialPartner.findMany({ where: { status: "active" } })
@@ -40,6 +42,8 @@ export class FinancingService {
     const financeable = isFinanceable({
       ...invoice,
       publicBuyerAccountVerified: invoice.customer?.publicBuyerAccount?.verificationStatus === "verified",
+      // Security Audit 2026-08-23, revue post-fix #1 — voir is-financeable.ts.
+      publicEntityConfirmed: invoice.customer?.isPublicEntityConfirmed === true,
     });
     if (!financeable) {
       throw new ConflictException(`Facture ${invoiceId} non finançable`);

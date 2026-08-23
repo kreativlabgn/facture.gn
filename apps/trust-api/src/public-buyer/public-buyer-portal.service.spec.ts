@@ -9,6 +9,7 @@ function createFakePrisma(
     publicBuyerAccountMember?: any;
     invoice?: any;
     customer?: any;
+    publicBuyerAccount?: any;
   } = {},
 ) {
   const tx = {
@@ -47,6 +48,13 @@ function createFakePrisma(
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
       update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
       ...overrides.customer,
+    },
+    // Security Audit 2026-08-23, revue post-fix #1 — verified par défaut ici
+    // (compte institutionnel légitime) ; voir le test dédié plus bas pour le cas
+    // "pending" (finding #1 CRITIQUE, auto-attestation frauduleuse).
+    publicBuyerAccount: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "pba-1", verificationStatus: "verified" }),
+      ...overrides.publicBuyerAccount,
     },
     $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
     __tx: tx,
@@ -157,6 +165,21 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
     const service = new PublicBuyerPortalService(prisma as any);
 
     await expect(service.validateLiquidation("inv-1", REQUESTER_USER_ID)).rejects.toThrow(/confirmé/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse de valider la liquidation via un PublicBuyerAccount non vérifié (Security Audit 2026-08-23, revue post-fix #1, finding #1 CRITIQUE) — l'auto-attestation frauduleuse elle-même", async () => {
+    // Scénario d'attaque du finding critique : un attaquant crée son propre
+    // PublicBuyerAccount (pending par défaut, self-service), en devient membre,
+    // rattache son propre client, confirme le lien lui-même (membre du compte
+    // ciblé), puis tente de valider la liquidation de sa propre facture SANS
+    // qu'aucune vraie administration n'ait jamais rien vérifié.
+    const prisma = createFakePrisma({
+      publicBuyerAccount: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "pba-1", verificationStatus: "pending" }) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(service.validateLiquidation("inv-1", REQUESTER_USER_ID)).rejects.toThrow(/vérifié/i);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 

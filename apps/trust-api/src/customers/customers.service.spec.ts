@@ -181,14 +181,41 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
 });
 
 describe("CustomersService — marquage entité publique (F16, ADR-105)", () => {
+  // Security Audit 2026-08-23, revue post-fix #1 (finding #1 CRITIQUE) —
+  // flagPublicEntity() passe désormais par $transaction (réinitialise aussi
+  // Invoice.validatedByAdministration en plus du customer), même pattern que
+  // createFakePrismaForMerge() ci-dessus.
+  function createFakePrismaForFlag(overrides: { publicBuyerAccount?: any } = {}) {
+    const tx = {
+      customer: {
+        update: vi.fn().mockResolvedValue({
+          id: "cust-1",
+          organizationId: "org-1",
+          isPublicEntity: true,
+          publicBuyerAccountId: "pba-1",
+        }),
+      },
+      invoice: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    };
+    return {
+      publicBuyerAccount: {
+        findUnique: vi.fn().mockResolvedValue({ id: "pba-1", name: "Ministère des Finances" }),
+        ...overrides.publicBuyerAccount,
+      },
+      customer: { update: vi.fn() }, // jamais appelé directement — uniquement via tx, voir assertions ci-dessous
+      $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
+      __tx: tx,
+    };
+  }
+
   it("pose isPublicEntity=true et publicBuyerAccountId sur un client existant", async () => {
-    const prisma = createFakePrisma();
+    const prisma = createFakePrismaForFlag();
     const service = new CustomersService(prisma as any);
 
     const result = await service.flagPublicEntity("cust-1", "pba-1");
 
     expect(prisma.publicBuyerAccount.findUnique).toHaveBeenCalledWith({ where: { id: "pba-1" } });
-    expect(prisma.customer.update).toHaveBeenCalledWith({
+    expect(prisma.__tx.customer.update).toHaveBeenCalledWith({
       where: { id: "cust-1" },
       data: { isPublicEntity: true, publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false },
     });
@@ -196,12 +223,24 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
     expect(result.publicBuyerAccountId).toBe("pba-1");
   });
 
+  it("réinitialise validatedByAdministration sur les factures déjà validées lors d'un repointage (Security Audit 2026-08-23, revue post-fix #1, finding #1 CRITIQUE) — ferme le contournement par repointage post-validation", async () => {
+    const prisma = createFakePrismaForFlag();
+    const service = new CustomersService(prisma as any);
+
+    await service.flagPublicEntity("cust-1", "pba-1");
+
+    expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith({
+      where: { customerId: "cust-1", validatedByAdministration: true },
+      data: { validatedByAdministration: false },
+    });
+  });
+
   it("rejette un publicBuyerAccountId qui ne correspond à aucun compte", async () => {
-    const prisma = createFakePrisma({ publicBuyerAccount: { findUnique: vi.fn().mockResolvedValue(null) } });
+    const prisma = createFakePrismaForFlag({ publicBuyerAccount: { findUnique: vi.fn().mockResolvedValue(null) } });
     const service = new CustomersService(prisma as any);
 
     await expect(service.flagPublicEntity("cust-1", "pba-inconnu")).rejects.toThrow(/introuvable/);
-    expect(prisma.customer.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
 

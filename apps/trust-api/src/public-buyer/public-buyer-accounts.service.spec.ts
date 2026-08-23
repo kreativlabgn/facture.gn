@@ -52,13 +52,16 @@ describe("PublicBuyerAccountsService — création self-service (ADR-098, même 
 });
 
 describe("PublicBuyerAccountsService — liste des comptes actifs (F16, sélecteur PME)", () => {
-  it("liste tous les comptes acheteurs publics existants", async () => {
+  it("liste tous les comptes acheteurs publics existants, avec un select restreint à {id, name} (Security Audit 2026-08-23, revue post-fix #1) — jamais verificationStatus, exposé sans @Roles() à tout utilisateur authentifié", async () => {
     const prisma = createFakePrisma();
     const service = new PublicBuyerAccountsService(prisma as any);
 
     const result = await service.listActive();
 
-    expect(prisma.publicBuyerAccount.findMany).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
+    expect(prisma.publicBuyerAccount.findMany).toHaveBeenCalledWith({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    });
     expect(result).toEqual([{ id: "pba-1", name: "Ministère des Finances" }]);
   });
 });

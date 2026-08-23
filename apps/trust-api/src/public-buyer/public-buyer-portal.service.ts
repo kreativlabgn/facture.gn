@@ -39,6 +39,22 @@ export class PublicBuyerPortalService {
       throw new ForbiddenException("Aucun accès à ce compte acheteur public");
     }
 
+    // Security Audit 2026-08-23, revue post-fix #1 (finding #1 CRITIQUE) — sans
+    // cette garde, N'IMPORTE QUEL PublicBuyerAccount auto-créé en self-service
+    // (statut "pending" par défaut, PublicBuyerAccountsService.create()) pouvait
+    // valider sa propre liquidation : rien ne distinguait un compte réellement
+    // institutionnel d'un faux compte créé par l'attaquant lui-même. Seul un
+    // compte "verified" (bascule opérationnelle hors code, voir schema.prisma)
+    // peut désormais produire une validation.
+    const publicBuyerAccount = await this.prisma.publicBuyerAccount.findUniqueOrThrow({
+      where: { id: publicBuyerAccountId },
+    });
+    if (publicBuyerAccount.verificationStatus !== "verified") {
+      throw new ForbiddenException(
+        `Compte acheteur public ${publicBuyerAccountId} non vérifié — impossible de valider une liquidation`,
+      );
+    }
+
     // Security Audit 2026-08-23, finding #13 — une PME peut rattacher un client à
     // N'IMPORTE QUEL compte acheteur public existant (flagPublicEntity() ne
     // vérifie que l'existence du compte, jamais son consentement). Sans cette
