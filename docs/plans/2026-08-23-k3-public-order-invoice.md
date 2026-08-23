@@ -49,46 +49,49 @@ Le choix du rail de financement (K4, ADR-088) reste hors scope K3 — non touch�
 ## Découpage en tâches bite-sized
 
 ### Groupe 1 — Combler le gap `referenceMarche` (fondation, réutilisé USSD + PWA)
-- [ ] Tâche 1 : Test — `invoices.service.spec.ts` : `createDraft()` persiste `referenceMarche` quand fourni
-- [ ] Tâche 2 : Test — `invoices.service.spec.ts` : `createDraft()` sans `referenceMarche` → comportement inchangé (non-régression)
-- [ ] Tâche 3 : `create-invoice.dto.ts` — ajoute `referenceMarche` optionnel au schéma Zod
-- [ ] Tâche 4 : `invoices.service.ts` `createDraft()` — persiste `referenceMarche: dto.referenceMarche`
+- [x] Tâche 1 : Test — `invoices.service.spec.ts` : `createDraft()` persiste `referenceMarche` quand fourni
+- [x] Tâche 2 : Test — `invoices.service.spec.ts` : `createDraft()` sans `referenceMarche` → comportement inchangé (non-régression)
+- [x] Tâche 3 : `create-invoice.dto.ts` — ajoute `referenceMarche` optionnel au schéma Zod
+- [x] Tâche 4 : `invoices.service.ts` `createDraft()` — persiste `referenceMarche: dto.referenceMarche`
 
 ### Groupe 2 — `UssdInvoiceService` : résolution client public + émission avec référence [dépend Groupe 1]
-- [ ] Tâche 5 : Test — `ussd-invoice.service.spec.ts` : `listPublicEntityCustomers()` filtre par `organizationId` + `isPublicEntity: true`
-- [ ] Tâche 6 : Test — `ussd-invoice.service.spec.ts` : `emitInvoice()` transmet `referenceMarche` à `createDraft()` quand fourni
-- [ ] Tâche 7 : Test — `ussd-invoice.service.spec.ts` : `emitInvoice()` sans `referenceMarche` → comportement inchangé (non-régression stricte des tests existants)
-- [ ] Tâche 8 : `ussd-invoice.service.ts` — `listPublicEntityCustomers(organizationId)`
-- [ ] Tâche 9 : `ussd-invoice.service.ts` — `emitInvoice()` gagne le 4e paramètre optionnel `referenceMarche`
+- [x] Tâche 5 : Test — `ussd-invoice.service.spec.ts` : `listPublicEntityCustomers()` filtre par `organizationId` + `isPublicEntity: true`
+- [x] Tâche 6 : Test — `ussd-invoice.service.spec.ts` : `emitInvoice()` transmet `referenceMarche` à `createDraft()` quand fourni
+- [x] Tâche 7 : Test — `ussd-invoice.service.spec.ts` : `emitInvoice()` sans `referenceMarche` → comportement inchangé (non-régression stricte des tests existants)
+- [x] Tâche 8 : `ussd-invoice.service.ts` — `listPublicEntityCustomers(organizationId)`
+- [x] Tâche 9 : `ussd-invoice.service.ts` — `emitInvoice()` gagne le 4e paramètre optionnel `referenceMarche`
 
 ### Groupe 3 — `UssdInvoiceListService` : statut de validation (6.2) [indépendant du Groupe 2]
-- [ ] Tâche 10 : Test — `ussd-invoice-list.service.spec.ts` : `listPublicOrderStatus()` filtre `documentType: invoice`, `customer.isPublicEntity: true`, exclut `draft`
-- [ ] Tâche 11 : `ussd-invoice-list.service.ts` — `listPublicOrderStatus(organizationId)`
+- [x] Tâche 10 : Test — `ussd-invoice-list.service.spec.ts` : `listPublicOrderStatus()` filtre `documentType: invoice`, `customer.isPublicEntity: true`, exclut `draft`
+- [x] Tâche 11 : `ussd-invoice-list.service.ts` — `listPublicOrderStatus(organizationId)`
 
 ### Groupe 4 — `UssdSessionService` : sous-menu Option 6 (6.1 + 6.2) [dépend Groupes 2, 3]
-- [ ] Tâche 12 : Test — authentification réussie sur l'option 6 → affiche le sous-menu "1. Émettre une facture / 2. Statut de validation"
-- [ ] Tâche 13 : Test — 6.1, un seul client public → sélection automatique, demande le montant directement
-- [ ] Tâche 14 : Test — 6.1, aucun client public → message explicite renvoyant vers l'application, session terminée
-- [ ] Tâche 15 : Test — 6.1, plusieurs clients publics → liste numérotée, sélection puis montant
-- [ ] Tâche 16 : Test — montant invalide → reprompt sans avancer d'état
-- [ ] Tâche 17 : Test — montant valide → demande la référence marché (optionnelle)
-- [ ] Tâche 18 : Test — référence renseignée → émission avec `referenceMarche` transmis tel quel
-- [ ] Tâche 19 : Test — référence laissée vide → émission SANS référence, même parcours exact (Backlog K3 : "Facture sans référence suit exactement le même parcours qu'une facture avec référence")
-- [ ] Tâche 20 : Test — plafond de vélocité dépassé (D4, cohérence avec Option 4) → message d'échec explicite, session terminée
-- [ ] Tâche 21 : Test — rejeu concurrent sur l'état `public_order_awaiting_reference` → une seule émission (même garde `tryClaimProcessingState` que l'Option 4/anon_emit)
-- [ ] Tâche 22 : Test — 6.2 → affiche le statut (validée / en attente) de chaque facture Commande Publique
-- [ ] Tâche 23 : Test — 6.2, aucune facture → message explicite, jamais un écran vide
-- [ ] Tâche 24 : `ussd-session.service.ts` — nouveaux états `public_order_menu`/`public_order_customer_select`/`public_order_awaiting_amount`/`public_order_awaiting_reference`, handlers, branche `pendingOption === "6"` dans `completeAuthentication()`, `ROOT_MENU`/`AUTHENTICATED_OPTIONS` mis à jour (le "trou volontaire" entre 5 et 7 se referme)
+- [x] Tâche 12 : Test — authentification réussie sur l'option 6 → affiche le sous-menu "1. Émettre une facture / 2. Statut de validation"
+- [x] Tâche 13 : Test — 6.1, un seul client public → sélection automatique, demande le montant directement
+- [x] Tâche 14 : Test — 6.1, aucun client public → message explicite renvoyant vers l'application, session terminée
+- [x] Tâche 15 : Test — 6.1, plusieurs clients publics → liste numérotée, sélection puis montant
+- [x] Tâche 16 : Test — montant invalide → reprompt sans avancer d'état
+- [x] Tâche 17 : Test — montant valide → demande la référence marché (optionnelle)
+- [x] Tâche 18 : Test — référence renseignée → émission avec `referenceMarche` transmis tel quel
+- [x] Tâche 19 : Test — référence laissée vide → émission SANS référence, même parcours exact (Backlog K3 : "Facture sans référence suit exactement le même parcours qu'une facture avec référence")
+- [x] Tâche 20 : Test — plafond de vélocité dépassé (D4, cohérence avec Option 4) → message d'échec explicite, session terminée
+- [x] Tâche 21 : Test — rejeu concurrent sur l'état `public_order_awaiting_reference` → une seule émission (même garde `tryClaimProcessingState` que l'Option 4/anon_emit)
+- [x] Tâche 22 : Test — 6.2 → affiche le statut (validée / en attente) de chaque facture Commande Publique
+- [x] Tâche 23 : Test — 6.2, aucune facture → message explicite, jamais un écran vide
+- [x] Tâche 24 : `ussd-session.service.ts` — nouveaux états `public_order_menu`/`public_order_customer_select`/`public_order_awaiting_amount`/`public_order_awaiting_reference`, handlers, branche `pendingOption === "6"` dans `completeAuthentication()`, `ROOT_MENU`/`AUTHENTICATED_OPTIONS` mis à jour (le "trou volontaire" entre 5 et 7 se referme)
 
 ### Groupe 5 — PWA : exposer `referenceMarche` [dépend Groupe 1, indépendant des Groupes 2-4]
-- [ ] Tâche 25 : `apps/web/src/lib/trust-api.ts` — `CreateInvoiceInput.referenceMarche?: string`
-- [ ] Tâche 26 : `apps/web/src/app/dashboard/invoices/new/actions.ts` — lit `referenceMarche` du FormData, transmis si non vide
-- [ ] Tâche 27 : `apps/web/src/app/dashboard/invoices/new/InvoiceForm.tsx` — champ texte optionnel "Référence marché (TELEMO)"
+- [x] Tâche 25 : `apps/web/src/lib/trust-api.ts` — `CreateInvoiceInput.referenceMarche?: string`
+- [x] Tâche 26 : `apps/web/src/app/dashboard/invoices/new/actions.ts` — lit `referenceMarche` du FormData, transmis si non vide
+- [x] Tâche 27 : `apps/web/src/app/dashboard/invoices/new/InvoiceForm.tsx` — champ texte optionnel "Référence marché (TELEMO)"
 
 ### Groupe 6 — Clôture
-- [ ] Tâche 28 : `pnpm --filter trust-api typecheck && pnpm --filter trust-api test` — suite complète verte
-- [ ] Tâche 29 : `pnpm --filter trust-api lint` — aucune régression
-- [ ] Tâche 30 : `pnpm --filter web typecheck` (si script disponible) — vérifie la compilation du gap PWA
+- [x] Tâche 28 : `pnpm --filter trust-api typecheck && pnpm --filter trust-api test` — suite complète verte
+- [x] Tâche 29 : `pnpm --filter trust-api lint` — aucune régression
+- [x] Tâche 30 : `pnpm --filter web typecheck` (si script disponible) — vérifie la compilation du gap PWA. Note : `tsc --noEmit` échoue sur `src/app/layout.tsx(43,50): Cannot find name 'LayoutProps'` — confirmé **pré-existant** (même échec sur `git stash` avant les 3 fichiers touchés par K3, aucun rapport avec ce plan, probablement un type généré par `next build`/`.next/types` absent en environnement `--noEmit` seul). Les 3 fichiers modifiés par K3 (`trust-api.ts`, `actions.ts`, `InvoiceForm.tsx`) ne produisent eux-mêmes aucune erreur.
+
+## Clôture
+Toutes les tâches complètes, suite `trust-api` complète verte (1015 tests, 0 échec), `typecheck`/`lint` `trust-api` et `web` propres sur le code K3 (voir note Tâche 30 pour l'échec pré-existant sans rapport). Aucune migration `packages/db` nécessaire (schéma déjà en place).
 
 ## Tests à écrire AVANT le code
 Voir Tâches 1-2 (référence marché DTO/service), 5-7 (UssdInvoiceService), 10 (UssdInvoiceListService), 12-23 (UssdSessionService, sous-menu complet) — tous listés avant leur tâche d'implémentation correspondante, pattern TDD identique à l'historique git existant (`test+feat`).
