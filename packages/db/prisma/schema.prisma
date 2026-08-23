@@ -433,6 +433,26 @@ model UserPhone {
   @@map("user_phone")
 }
 
+// F13, ADR-096/ADR-108 — OTP à 4 chiffres pour le canal PWA du portail client
+// (*620# reste sur le PIN direct existant, UssdAuthService, non concerné). Pas
+// de FK vers User/UserPhone : le numéro peut être totalement inconnu du repo au
+// moment de la demande (auto-inscription, ADR-096 "aucune invitation préalable
+// requise") — la résolution/création d'identité n'a lieu qu'à la vérification
+// réussie. consumedAt marqué via updateMany+where (anti-rejeu, même pattern que
+// les autres transitions d'état à garde de concurrence de ce repo).
+model ClientPortalOtp {
+  id         String    @id @default(uuid())
+  msisdn     String
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([msisdn])
+  @@map("client_portal_otp")
+}
+
 enum RecoveryStatus {
   pending
   approved

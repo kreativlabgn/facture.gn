@@ -10,7 +10,10 @@ type ImportRowResult =
   | { index: number; status: "created"; customerId: string; possibleDuplicateOf: string | null }
   | { index: number; status: "error"; reason: string; input: unknown };
 
-const OUTSTANDING_INVOICE_STATUSES = ["issued", "partially_paid"] as const;
+// F13 — exporté pour réutilisation par ClientPortalService (même définition de
+// "solde dû" que findOneWithBalance ci-dessous, jamais une seconde source de
+// vérité pour ce qu'est une facture "outstanding").
+export const OUTSTANDING_INVOICE_STATUSES = ["issued", "partially_paid"] as const;
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
 
