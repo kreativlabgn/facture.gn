@@ -1,3 +1,4 @@
+import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { MandatesService } from "./mandates.service";
 
@@ -111,7 +112,9 @@ describe("MandatesService", () => {
 const MANDATE_ID = "mandate-1";
 const ACCEPTOR_ID = "owner-1";
 
-function createFakePrismaForAccept(overrides: { mandate?: any; updateImpl?: ReturnType<typeof vi.fn> } = {}) {
+function createFakePrismaForAccept(
+  overrides: { mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
+) {
   const prisma: any = {
     mandate: {
       findUnique: vi.fn().mockResolvedValue(
@@ -119,7 +122,10 @@ function createFakePrismaForAccept(overrides: { mandate?: any; updateImpl?: Retu
           ? overrides.mandate
           : { id: MANDATE_ID, organizationId: ORG_ID, status: "pending", initiatedBy: "practice" },
       ),
-      update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
+      // Quality Audit 2026-08-23, finding #4 — accept() réclame désormais la
+      // transition via updateMany+where avant de relire le mandat.
+      updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
     },
   };
   return prisma;
@@ -132,10 +138,17 @@ describe("MandatesService — acceptation (F1, ADR-069)", () => {
 
     await service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID);
 
-    expect(prisma.mandate.update).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID },
+    expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID, status: "pending" },
       data: { status: "active", grantedBy: ACCEPTOR_ID, grantedAt: expect.any(Date) },
     });
+  });
+
+  it("refuse (409) si updateMany ne réclame rien — traité entretemps par une autre requête (Quality Audit 2026-08-23, finding #4)", async () => {
+    const prisma = createFakePrismaForAccept({ updateManyImpl: vi.fn().mockResolvedValue({ count: 0 }) });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(ConflictException);
   });
 
   it("refuse (404) si le mandat n'existe pas", async () => {
@@ -252,7 +265,7 @@ describe("MandatesService — adhérer à un CGA, initié par l'organisation (F1
 });
 
 function createFakePrismaForAcceptAsPractice(
-  overrides: { member?: any; mandate?: any; updateImpl?: ReturnType<typeof vi.fn> } = {},
+  overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
 ) {
   const prisma: any = {
     practiceMember: {
@@ -266,7 +279,9 @@ function createFakePrismaForAcceptAsPractice(
           ? overrides.mandate
           : { id: MANDATE_ID, practiceId: CGA_PRACTICE_ID, status: "pending", initiatedBy: "organization" },
       ),
-      update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
+      // Quality Audit 2026-08-23, finding #4 — voir createFakePrismaForAccept().
+      updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
     },
   };
   return prisma;
@@ -279,10 +294,21 @@ describe("MandatesService — accepter une adhésion, côté CGA (F12, ADR-078)"
 
     await service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID);
 
-    expect(prisma.mandate.update).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID },
+    expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID, status: "pending" },
       data: { status: "active", grantedBy: ACCEPTOR_ID, grantedAt: expect.any(Date) },
     });
+  });
+
+  it("refuse (409) si updateMany ne réclame rien — traité entretemps par une autre requête (Quality Audit 2026-08-23, finding #4)", async () => {
+    const prisma = createFakePrismaForAcceptAsPractice({
+      updateManyImpl: vi.fn().mockResolvedValue({ count: 0 }),
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(
+      ConflictException,
+    );
   });
 
   // LE test qui prouve que le contournement de consentement identifié à la
@@ -334,7 +360,7 @@ describe("MandatesService — accepter une adhésion, côté CGA (F12, ADR-078)"
 });
 
 function createFakePrismaForRevoke(
-  overrides: { member?: any; mandate?: any; updateImpl?: ReturnType<typeof vi.fn> } = {},
+  overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
 ) {
   const prisma: any = {
     practiceMember: {
@@ -348,7 +374,9 @@ function createFakePrismaForRevoke(
           ? overrides.mandate
           : { id: MANDATE_ID, practiceId: PRACTICE_ID, status: "active" },
       ),
-      update: overrides.updateImpl ?? vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
+      // Quality Audit 2026-08-23, finding #4 — voir createFakePrismaForAccept().
+      updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
     },
   };
   return prisma;
@@ -361,10 +389,17 @@ describe("MandatesService — révocation (F6, ADR-069)", () => {
 
     await service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID);
 
-    expect(prisma.mandate.update).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID },
+    expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID, status: "active" },
       data: { status: "revoked", revokedAt: expect.any(Date) },
     });
+  });
+
+  it("refuse (409) si updateMany ne réclame rien — traité entretemps par une autre requête (Quality Audit 2026-08-23, finding #4)", async () => {
+    const prisma = createFakePrismaForRevoke({ updateManyImpl: vi.fn().mockResolvedValue({ count: 0 }) });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID)).rejects.toThrow(ConflictException);
   });
 
   it("refuse si l'appelant n'est pas practice_admin de la practice ciblée", async () => {
@@ -437,7 +472,13 @@ describe("MandatesService — organisations accessibles (F7, ADR-070)", () => {
     const result = await service.listAccessibleOrganizations(PRACTICE_ID, REQUESTER_ID);
 
     expect(prisma.mandate.findMany).toHaveBeenCalledWith({
-      where: { practiceId: PRACTICE_ID, status: "active" },
+      // Quality Audit 2026-08-23, finding #2 — un mandat expiré ne doit
+      // jamais rester accessible au switch d'organisation cabinet.
+      where: {
+        practiceId: PRACTICE_ID,
+        status: "active",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
       include: { organization: { select: { id: true, name: true } } },
     });
     expect(result).toEqual([
@@ -478,7 +519,16 @@ describe("MandatesService — lister tous les mandats d'un cabinet (pending + ac
     const result = await service.listAll(PRACTICE_ID, REQUESTER_ID);
 
     expect(prisma.mandate.findMany).toHaveBeenCalledWith({
-      where: { practiceId: PRACTICE_ID, status: { in: ["pending", "active"] } },
+      // Quality Audit 2026-08-23, finding #2 — pending n'accorde jamais
+      // d'accès (pas de filtre d'expiration pertinent), active reste soumis
+      // à la même garde que partout ailleurs.
+      where: {
+        practiceId: PRACTICE_ID,
+        OR: [
+          { status: "pending" },
+          { status: "active", OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+        ],
+      },
       include: { organization: { select: { id: true, name: true } } },
     });
     expect(result).toHaveLength(2);
@@ -521,13 +571,45 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
     await service.listActiveForOrganization(ORG_ID);
 
     expect(prisma.mandate.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG_ID, status: "active" },
+      // Quality Audit 2026-08-23, finding #2 — même garde d'expiration côté
+      // vue organisation.
+      where: {
+        organizationId: ORG_ID,
+        status: "active",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
       include: { practice: true },
     });
   });
 
+  it("liste les mandats actifs — un mandat expiré (status \"active\" mais expiresAt passé) n'apparaît jamais (Quality Audit 2026-08-23, revue post-fix #2)", async () => {
+    // Contrairement au test précédent (forme du where), simule le comportement
+    // réel du filtre expiresAt côté "DB" plutôt que de toujours renvoyer la
+    // même fixture quel que soit le where.
+    const rows = [
+      { id: "mandate-expired", status: "active", expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      { id: "mandate-valid", status: "active", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+      { id: "mandate-no-expiry", status: "active", expiresAt: null },
+    ];
+    const prisma: any = {
+      mandate: {
+        findMany: vi.fn().mockImplementation(() => {
+          const now = new Date();
+          return Promise.resolve(
+            rows.filter((row) => row.expiresAt === null || row.expiresAt.getTime() > now.getTime()),
+          );
+        }),
+      },
+    };
+    const service = new MandatesService(prisma as any);
+
+    const result = await service.listActiveForOrganization(ORG_ID);
+
+    expect(result.map((mandate: any) => mandate.id)).toEqual(["mandate-valid", "mandate-no-expiry"]);
+  });
+
   function createFakePrismaForRevokeAsOrganization(
-    overrides: { member?: any; mandate?: any } = {},
+    overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
   ) {
     return {
       organizationMember: {
@@ -539,7 +621,9 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
         findUnique: vi.fn().mockResolvedValue(
           overrides.mandate !== undefined ? overrides.mandate : { id: MANDATE_ID, organizationId: ORG_ID, status: "active" },
         ),
-        update: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
+        // Quality Audit 2026-08-23, finding #4 — voir createFakePrismaForAccept().
+        updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
       },
     };
   }
@@ -550,10 +634,21 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
 
     await service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID);
 
-    expect(prisma.mandate.update).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID },
+    expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
+      where: { id: MANDATE_ID, status: "active" },
       data: { status: "revoked", revokedAt: expect.any(Date) },
     });
+  });
+
+  it("refuse (409) si updateMany ne réclame rien — traité entretemps par une autre requête (Quality Audit 2026-08-23, finding #4)", async () => {
+    const prisma = createFakePrismaForRevokeAsOrganization({
+      updateManyImpl: vi.fn().mockResolvedValue({ count: 0 }),
+    });
+    const service = new MandatesService(prisma as any);
+
+    await expect(service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID)).rejects.toThrow(
+      ConflictException,
+    );
   });
 
   it("refuse un membre non owner/admin de l'organisation", async () => {

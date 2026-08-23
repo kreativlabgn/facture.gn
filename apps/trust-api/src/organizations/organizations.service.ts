@@ -275,10 +275,41 @@ export class OrganizationsService {
   // toutes les routes RBAC existantes exigent déjà de connaître l'organisation
   // ciblée. Filtré côté requête (revokedAt: null), jamais côté application —
   // même discipline que RolesGuard.
+  // Quality Audit 2026-08-23, finding #5 — select explicite plutôt que
+  // "organization: true" (l'entité complète) : accessible à TOUT membre actif
+  // quel que soit son rôle (aucun @Roles() sur cette route), alors que
+  // bankAccountDetails/chiffreAffairesBrutDeclare sont explicitement jugés
+  // sensibles ailleurs dans ce même fichier (voir findOneDetail() ci-dessous,
+  // restreint owner/admin pour ces mêmes champs). Exclut aussi
+  // creditLimitApprovalThreshold/commissionBypassLevel/
+  // commissionBypassProofThresholdOverrideGnf — configuration financière/anti-
+  // fraude interne, même niveau de sensibilité, jamais un simple collaborateur.
   async listMine(userId: string) {
     const memberships = await this.prisma.organizationMember.findMany({
       where: { userId, revokedAt: null },
-      include: { organization: true },
+      select: {
+        role: true,
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            regimeFiscal: true,
+            legalForm: true,
+            nif: true,
+            etaxNumber: true,
+            rccm: true,
+            registrationSource: true,
+            dgiVerificationStatus: true,
+            dgiVerifiedAt: true,
+            preferredLanguage: true,
+            paymentLinkAutoSend: true,
+            commercialTier: true,
+            createdAt: true,
+            accountCode: true,
+            paymentsFrozenUntil: true,
+          },
+        },
+      },
     });
     return memberships.map((membership) => ({ ...membership.organization, role: membership.role }));
   }

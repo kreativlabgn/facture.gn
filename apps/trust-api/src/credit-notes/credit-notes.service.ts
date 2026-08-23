@@ -1,11 +1,13 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import type { InvoiceStatus, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCreditNoteDto } from "./dto/create-credit-note.dto";
 
 // ADR-040 : un avoir ne corrige qu'une VRAIE facture déjà émise — jamais un
 // proforma/devis (encore un brouillon), jamais une facture déjà annulée.
-const CREDITABLE_STATUSES = new Set(["issued", "partially_paid", "paid"]);
+// Quality Audit 2026-08-23, finding #12 — Set<InvoiceStatus> explicite, voir
+// payments.service.ts::PAYABLE_STATUSES pour la justification complète.
+const CREDITABLE_STATUSES = new Set<InvoiceStatus>(["issued", "partially_paid", "paid"] as const);
 
 @Injectable()
 export class CreditNotesService {

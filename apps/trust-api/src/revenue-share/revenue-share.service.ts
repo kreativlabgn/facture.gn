@@ -3,6 +3,8 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF, REVENUE_SHARE_RATE_BPS } from "./revenue-share-grid";
 import { getPartnerTierPrice } from "../practices/partner-tier-grid";
+import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
+import { assertPracticeAdmin } from "../common/rbac/practice-access";
 
 const BPS_DENOMINATOR = 10_000n;
 
@@ -15,13 +17,42 @@ export class RevenueShareService {
   // Génération manuelle : aucun cron dans ce repo (voir PLAN "Clarifications"),
   // l'appelant choisit explicitement la période à clôturer.
   async generate(practiceId: string, requesterUserId: string, periodMonth: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId);
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "générer le revenue share");
 
     const { start, end } = resolvePeriodBounds(periodMonth);
 
     const activeMandates = await this.prisma.mandate.findMany({
-      where: { practiceId, status: "active" },
+      where: { practiceId, status: "active", ...mandateNotExpiredWhere() },
     });
+
+    // Quality Audit 2026-08-23, finding #13 — UNE seule requête pour la somme
+    // des commissions de TOUTES les organisations mandantes de la période,
+    // plutôt qu'un payment.aggregate() répété par mandat dans la boucle (3
+    // round-trips DB séquentiels par mandat auparavant : findUnique + aggregate
+    // + upsert). Payment n'a pas de organizationId scalaire propre (seulement
+    // invoiceId) — un vrai groupBy Prisma sur invoice.organizationId n'est donc
+    // pas possible nativement ; on récupère les paiements pertinents en une
+    // fois et on agrège en JS, plutôt que du $queryRaw (pas nécessaire ici,
+    // contrairement au verrou FOR UPDATE du finding #1 — le volume de lignes
+    // reste borné à une période/un portefeuille de mandats, pas à tout
+    // l'historique).
+    const organizationIds = activeMandates.map((mandate) => mandate.organizationId);
+    const relevantPayments = await this.prisma.payment.findMany({
+      where: {
+        invoice: { organizationId: { in: organizationIds } },
+        status: "completed",
+        collectedAt: { gte: start, lt: end },
+      },
+      select: { platformFeeAmount: true, invoice: { select: { organizationId: true } } },
+    });
+    const commissionByOrganization = new Map<string, bigint>();
+    for (const payment of relevantPayments) {
+      const organizationId = payment.invoice.organizationId;
+      commissionByOrganization.set(
+        organizationId,
+        (commissionByOrganization.get(organizationId) ?? 0n) + payment.platformFeeAmount,
+      );
+    }
 
     const credits = [];
     for (const mandate of activeMandates) {
@@ -43,15 +74,7 @@ export class RevenueShareService {
         continue;
       }
 
-      const aggregate = await this.prisma.payment.aggregate({
-        where: {
-          invoice: { organizationId: mandate.organizationId },
-          status: "completed",
-          collectedAt: { gte: start, lt: end },
-        },
-        _sum: { platformFeeAmount: true },
-      });
-      const grossCommissionCentimes = aggregate._sum.platformFeeAmount ?? 0n;
+      const grossCommissionCentimes = commissionByOrganization.get(mandate.organizationId) ?? 0n;
       const rawShare = (grossCommissionCentimes * BigInt(REVENUE_SHARE_RATE_BPS)) / BPS_DENOMINATOR;
       const creditedAmountCentimes =
         rawShare > REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF ? REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF : rawShare;
@@ -127,15 +150,6 @@ export class RevenueShareService {
     const amountDueCentimes = remaining > 0n ? remaining : 0n;
 
     return { practiceId, periodMonth, tier: practice.tier, amountDueCentimes };
-  }
-
-  private async assertPracticeAdmin(practiceId: string, requesterUserId: string): Promise<void> {
-    const membership = await this.prisma.practiceMember.findFirst({
-      where: { practiceId, userId: requesterUserId, leftAt: null },
-    });
-    if (!membership || membership.role !== "practice_admin") {
-      throw new ForbiddenException("Seul un practice_admin du cabinet peut générer le revenue share");
-    }
   }
 }
 

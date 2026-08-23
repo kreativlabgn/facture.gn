@@ -57,6 +57,43 @@ type UssdSessionRow = {
   organizationId?: string | null;
 };
 
+// Quality Audit 2026-08-23, finding #10 — les ~18 états réellement utilisés
+// par dispatch()/setState(), jusqu'ici en string libre : une faute de frappe
+// dans un appel setState(sessionId, "emit_awaiting_amout", ...) compilait sans
+// erreur, l'utilisateur USSD recevait "Session invalide" au tour suivant —
+// panne silencieuse sur *620#, canal d'inclusion critique (budget <90s, sans
+// retry structuré). UssdSession.state reste `String` côté Prisma (colonne DB
+// non typée, jamais un enum) : seule la couche applicative TypeScript se
+// durcit ici, pas de migration nécessaire.
+type UssdState =
+  | "root"
+  | "auth_account_code"
+  | "auth_pin"
+  | "auth_account_pin"
+  | "auth_new_pin"
+  | "auth_new_pin_confirm"
+  | "verify_awaiting_code"
+  | "emit_awaiting_amount"
+  | "emit_awaiting_customer_phone"
+  | "emit_processing"
+  | "emit_terminal"
+  | "pay_awaiting_invoice_number"
+  | "pay_awaiting_confirmation"
+  | "manage_account_menu"
+  | "account_new_pin"
+  | "account_new_pin_confirm"
+  | "account_mandate_select"
+  | "account_invite_viewer_phone"
+  // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — état "stub
+  // générique" pour toute option authentifiée pas encore construite (voir
+  // completeAuthentication()) : manquait de l'union d'origine, ces deux
+  // écritures passaient par un prisma.ussdSession.update() brut jamais typé
+  // contre UssdState, et le switch de dispatch() ci-dessous n'avait aucun case
+  // pour ce state, tombant silencieusement sur "Session invalide" en cas de
+  // rejeu — exactement la classe de panne silencieuse que ce fix visait à
+  // éliminer.
+  | "authenticated_stub";
+
 const ROOT_MENU = [
   "facture.gn *620#",
   "",
@@ -137,7 +174,13 @@ export class UssdSessionService {
   private async dispatch(session: UssdSessionRow, input: string): Promise<UssdResponse> {
     const context = (session.contextData as SessionContext | null) ?? {};
 
-    switch (session.state) {
+    // Cast défensif : UssdSession.state reste `string` côté DB (non typée),
+    // mais toute écriture applicative passe désormais par setState()/
+    // tryClaimProcessingState() (typés UssdState) — ce cast rend les `case`
+    // ci-dessous exhaustivement vérifiés par le compilateur contre UssdState,
+    // tout en gardant le `default` comme filet pour une valeur DB inattendue
+    // (ancienne session, valeur corrompue).
+    switch (session.state as UssdState) {
       case "root":
         return this.handleRoot(session, input);
       case "auth_account_code":
@@ -177,6 +220,12 @@ export class UssdSessionService {
         return this.handleAccountMandateSelect(session, context, input);
       case "account_invite_viewer_phone":
         return this.handleAccountInviteViewerPhone(session, input);
+      // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — même
+      // pattern que emit_terminal ci-dessus : un rejeu (sessionId réutilisé
+      // avant expiresAt) sur une option authentifiée pas encore construite
+      // reçoit un message terminal propre, jamais "Session invalide".
+      case "authenticated_stub":
+        return { continue: false, text: "Cette opération a déjà été traitée." };
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -342,7 +391,9 @@ export class UssdSessionService {
       // intermédiaire AVANT l'appel emitInvoice() : un rejeu USSD réellement
       // concurrent (timeout réseau agrégateur) ne peut plus gagner la ligne deux
       // fois, voir tryClaimProcessingState() pour le détail de la garde.
-      const claimed = await this.tryClaimProcessingState(sessionId, currentState, context);
+      // currentState provient de session.state (string, colonne DB non typée) —
+      // même cast défensif que dispatch(), voir la note UssdState plus haut.
+      const claimed = await this.tryClaimProcessingState(sessionId, currentState as UssdState, context);
       if (!claimed) {
         return { continue: false, text: "Traitement en cours, veuillez patienter." };
       }
@@ -382,7 +433,11 @@ export class UssdSessionService {
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
         data: {
-          state: "authenticated_stub",
+          // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — le
+          // littéral ci-dessous est désormais vérifié contre UssdState via ce
+          // type explicite (Prisma.InputJsonValue/String côté colonne DB
+          // n'aurait rien signalé sur une faute de frappe sans ça).
+          state: "authenticated_stub" satisfies UssdState,
           userId: context.authUserId,
           organizationId: context.authOrganizationId,
           contextData: {},
@@ -441,7 +496,9 @@ export class UssdSessionService {
     await this.prisma.ussdSession.update({
       where: { id: sessionId },
       data: {
-        state: "authenticated_stub",
+        // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — voir
+        // commentaire jumeau plus haut dans ce fichier (pendingOption==="3").
+        state: "authenticated_stub" satisfies UssdState,
         userId: context.authUserId,
         organizationId: context.authOrganizationId,
         contextData: {},
@@ -726,7 +783,7 @@ export class UssdSessionService {
     }
   }
 
-  private async setState(sessionId: string, state: string, context: SessionContext): Promise<void> {
+  private async setState(sessionId: string, state: UssdState, context: SessionContext): Promise<void> {
     await this.prisma.ussdSession.update({
       where: { id: sessionId },
       data: { state, contextData: context as Prisma.InputJsonValue },
@@ -744,7 +801,7 @@ export class UssdSessionService {
   // emitInvoice().
   private async tryClaimProcessingState(
     sessionId: string,
-    expectedState: string,
+    expectedState: UssdState,
     context: SessionContext,
   ): Promise<boolean> {
     const claimed = await this.prisma.ussdSession.updateMany({

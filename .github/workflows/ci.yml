@@ -1,8 +1,13 @@
 name: CI
 
 on:
+  # Quality Audit 2026-08-23, finding #14 — le depot travaille exclusivement
+  # sur `master` (aucune branche `main` n'existe) ; le declencheur push ne
+  # ciblait que `main`, donc aucun push/merge direct sur master ne declenchait
+  # jamais la CI (seul un pull_request la declenchait, quelle que soit sa
+  # branche cible).
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:

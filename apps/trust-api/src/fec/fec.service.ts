@@ -17,11 +17,25 @@ export class FecService {
     private readonly organizationAccess: OrganizationAccessService,
   ) {}
 
-  async export(organizationId: string, requesterUserId: string): Promise<string> {
+  // Quality Audit 2026-08-23, finding #7 — year optionnel, défaut sur l'année
+  // en cours : un export FEC (OHADA/SYSCOHADA) se fait normalement par
+  // exercice fiscal, jamais l'historique complet de l'organisation depuis sa
+  // création (dégradation progressive garantie avec l'ancienneté du compte,
+  // même préoccupation déjà traitée pour margin.listLines(), finding #6).
+  async export(organizationId: string, requesterUserId: string, year?: number): Promise<string> {
     await this.organizationAccess.assertAccess(organizationId, requesterUserId, FEC_ELIGIBLE_ROLES);
 
+    const fiscalYear = year ?? new Date().getFullYear();
+    const start = new Date(Date.UTC(fiscalYear, 0, 1));
+    const end = new Date(Date.UTC(fiscalYear + 1, 0, 1));
+
     const invoices = await this.prisma.invoice.findMany({
-      where: { organizationId, documentType: "invoice", status: { in: ["issued", "partially_paid", "paid"] } },
+      where: {
+        organizationId,
+        documentType: "invoice",
+        status: { in: ["issued", "partially_paid", "paid"] },
+        issuedAt: { gte: start, lt: end },
+      },
       include: { payments: true },
     });
 

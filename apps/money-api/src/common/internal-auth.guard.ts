@@ -11,6 +11,12 @@ const INTERNAL_API_KEY_HEADER = "x-internal-api-key";
 // .env, comme JWT_PRIVATE_KEY/CERTIFICATION_PRIVATE_KEY) ; le trafic inter-service
 // doit transiter sur le réseau privé du cluster (K8s OVH Gravelines, DAT §1),
 // jamais exposé publiquement — TLS interne au cluster à valider avant la prod.
+//
+// Quality Audit 2026-08-23, finding #14 — mirroir de
+// apps/trust-api/src/common/internal-auth.guard.ts, duplication verbatim
+// délibérément conservée (pas de package partagé de code applicatif dans ce
+// monorepo, seulement packages/db) — voir ce fichier pour la justification
+// complète. Si ce guard évolue un jour, modifier les DEUX fichiers.
 @Injectable()
 export class InternalAuthGuard implements CanActivate {
   private readonly expectedKey: string;

@@ -601,6 +601,15 @@ describe("UssdSessionService — option 4, émettre une facture (D1, §2.4 Spec 
     expect(ussdInvoice.emitInvoice).not.toHaveBeenCalled();
   });
 
+  it("un rejeu sur une session authenticated_stub reçoit un message terminal propre, jamais \"Session invalide\" (Quality Audit 2026-08-23, revue post-fix #2, finding #10)", async () => {
+    const prisma = createFakePrisma({ existingSession: existingSession({ state: "authenticated_stub" }) });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "");
+
+    expect(result).toEqual({ continue: false, text: "Cette opération a déjà été traitée." });
+  });
+
   it("plafond de vélocité dépassé (D4) → message d'échec explicite, session terminée", async () => {
     const prisma = createFakePrisma({
       existingSession: existingSession({

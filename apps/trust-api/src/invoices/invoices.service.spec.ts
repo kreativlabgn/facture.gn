@@ -11,7 +11,7 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
   let invoiceState: any = { id: "inv-1", documentType: "invoice" };
   const seedFindUniqueOrThrow = overrides.invoice?.findUniqueOrThrow;
 
-  return {
+  const prisma: any = {
     invoice: {
       create: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft" }),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -19,15 +19,42 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
         invoiceState = { ...invoiceState, ...data };
         return Promise.resolve(invoiceState);
       }),
+      // Quality Audit 2026-08-23, finding #3 — void() réclame désormais la
+      // transition via updateMany+where (compte=1 par défaut) avant de relire
+      // la facture ; comme update() ci-dessus, mute invoiceState pour que le
+      // findUniqueOrThrow() final reflète bien status:"voided".
+      updateMany: vi.fn().mockImplementation(({ data }: any) => {
+        invoiceState = { ...invoiceState, ...data };
+        return Promise.resolve({ count: 1 });
+      }),
       ...overrides.invoice,
       // Toujours la version enveloppée, même si overrides en fournit une — sinon
       // invoiceState ne serait jamais initialisé et les update() suivants perdraient
-      // les champs de la facture chargée au départ.
-      findUniqueOrThrow: vi.fn().mockImplementation(async (...args: any[]) => {
-        const result = seedFindUniqueOrThrow ? await seedFindUniqueOrThrow(...args) : invoiceState;
-        invoiceState = { ...invoiceState, ...result };
-        return result;
-      }),
+      // les champs de la facture chargée au départ. Quality Audit 2026-08-23,
+      // finding #3 — le seed n'est consulté QU'À LA PREMIÈRE lecture : void()
+      // relit désormais l'état APRÈS updateMany() (Prisma ne renvoie pas la ligne
+      // depuis updateMany) — un seed re-consulté à chaque appel écraserait
+      // silencieusement la mutation avec sa valeur statique d'origine.
+      findUniqueOrThrow: (() => {
+        let calls = 0;
+        return vi.fn().mockImplementation(async (...args: any[]) => {
+          calls += 1;
+          // 1er appel : renvoie le seed BRUT (pas la version enveloppée) — un
+          // test comme C10 ("sans transformation") attend une égalité stricte
+          // avec la forme exacte fournie, sans le documentType par défaut de
+          // invoiceState mélangé dedans.
+          if (calls === 1) {
+            const result = seedFindUniqueOrThrow ? await seedFindUniqueOrThrow(...args) : invoiceState;
+            invoiceState = { ...invoiceState, ...result };
+            return result;
+          }
+          // Appels suivants (ex. void(), finding #3, qui relit après
+          // updateMany() puisque Prisma ne renvoie pas la ligne depuis
+          // updateMany) : reflète l'état réellement mutable, jamais le seed
+          // statique d'origine.
+          return invoiceState;
+        });
+      })(),
     },
     organization: {
       // commercialTier: freemium par défaut (grille commission, ADR-074) — reflète
@@ -35,7 +62,15 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: "GN12345678", commercialTier: "freemium" }),
       ...overrides.organization,
     },
+    // Quality Audit 2026-08-23, finding #1 — issue() tourne maintenant sous
+    // $transaction()+$queryRaw (SELECT ... FOR UPDATE) : callback exécuté
+    // directement avec ce même prisma mocké (comme les autres $transaction déjà
+    // mockés ailleurs dans ce fichier), $queryRaw est un no-op côté test (aucune
+    // vraie base, le verrou lui-même n'a rien à vérifier ici).
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+    $queryRaw: vi.fn().mockResolvedValue([]),
   };
+  return prisma;
 }
 
 function createFakeNumbering(number = "FG-2026-000001") {
@@ -612,13 +647,51 @@ describe("InvoicesService — machine à états", () => {
 
     const result = await service.issue("inv-1");
 
-    expect(numbering.nextNumber).toHaveBeenCalledWith("org-1", expect.any(Number));
+    // Quality Audit 2026-08-23, revue post-fix #1 — 3e argument (tx) désormais
+    // passé explicitement, voir invoice-numbering.service.ts/organization-signing-key.service.ts.
+    expect(numbering.nextNumber).toHaveBeenCalledWith("org-1", expect.any(Number), expect.anything());
     expect(certification.certifyForOrganization).toHaveBeenCalledWith(
       "org-1",
       expect.objectContaining({ previousHash: "GENESIS" }),
+      expect.anything(),
     );
     expect(result.status).toBe("issued");
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
+  });
+
+  it("passe le tx de la transaction en cours à nextNumber()/certifyForOrganization(), jamais le client Prisma global (Quality Audit 2026-08-23, revue post-fix #1)", async () => {
+    // Sans ce câblage, nextNumber() écrirait en autocommit sur le client global
+    // — un numéro de séquence serait consommé de façon irréversible même si
+    // l'écriture finale de la transaction échoue ensuite. createFakePrisma()
+    // définit $transaction: (callback) => callback(prisma) — le tx REÇU PAR LE
+    // CALLBACK est donc, par construction, ce même objet `prisma` : si
+    // InvoicesService appelait encore this.prisma au lieu du tx reçu, ce test
+    // resterait identique en valeur mais on vérifie ici précisément l'identité
+    // de l'objet passé en 3e argument, pas simplement sa présence.
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+    });
+    const numbering = createFakeNumbering();
+    const certification = createFakeSigningKeyService();
+    const service = new InvoicesService(
+      prisma as any,
+      numbering as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.issue("inv-1");
+
+    expect(numbering.nextNumber.mock.calls[0][2]).toBe(prisma);
+    expect(certification.certifyForOrganization.mock.calls[0][2]).toBe(prisma);
   });
 
   it("persiste signingKeyId — la facture référence la clé racine de son organisation, jamais la clé globale légataire (A3, ADR-026)", async () => {
@@ -673,6 +746,7 @@ describe("InvoicesService — machine à états", () => {
     expect(certification.certifyForOrganization).toHaveBeenCalledWith(
       "org-1",
       expect.objectContaining({ organizationNif: "UNVERIFI" }),
+      expect.anything(),
     );
   });
 
@@ -710,6 +784,22 @@ describe("InvoicesService — machine à états", () => {
     expect(result.status).toBe("voided");
   });
 
+  it("refuse d'annuler une facture déjà voided (Quality Audit 2026-08-23, revue post-fix #3, cas limite)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "voided", amountPaid: 0n }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.void("inv-1")).rejects.toThrow(/statut voided/);
+  });
+
   it("refuse d'annuler une facture ayant déjà un paiement enregistré", async () => {
     const prisma = createFakePrisma({
       invoice: {
@@ -724,6 +814,27 @@ describe("InvoicesService — machine à états", () => {
     );
 
     await expect(service.void("inv-1")).rejects.toThrow(/avoir/);
+  });
+
+  it("refuse d'annuler si updateMany ne réclame rien (paiement/statut modifié entretemps, Quality Audit 2026-08-23, finding #3)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", amountPaid: 0n }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.void("inv-1")).rejects.toThrow(ConflictException);
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", status: { in: ["draft", "issued"] }, amountPaid: 0n },
+      data: { status: "voided" },
+    });
   });
 
   it("traduit une violation de contrainte unique sur (organization_id, number) en erreur explicite, jamais un 500 brut", async () => {
@@ -778,6 +889,96 @@ describe("InvoicesService — machine à états", () => {
     );
 
     await expect(service.issue("inv-1")).rejects.toThrow(/certification/);
+  });
+
+  it("convertit un timeout de transaction Prisma (P2028, contention sur FOR UPDATE) en 409 explicite, pas un 500 brut (Quality Audit 2026-08-23, revue post-fix #1)", async () => {
+    const p2028 = Object.assign(new Error("Transaction already closed"), { code: "P2028" });
+    const prisma: any = {
+      $transaction: vi.fn().mockRejectedValue(p2028),
+    };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).rejects.toThrow(ConflictException);
+    await expect(service.issue("inv-1")).rejects.toThrow(/réessayer/);
+  });
+
+  it("sous deux appels concurrents réels sur la même facture draft, une seule certification est committée, jamais un trou dans la séquence (Quality Audit 2026-08-23, finding #1)", async () => {
+    // Simule le verrou de ligne Postgres (SELECT ... FOR UPDATE) réel de la
+    // transaction : $queryRaw acquiert un mutex, $transaction le relâche au
+    // finally — un $transaction/$queryRaw naïfs (comme createFakePrisma())
+    // n'exercent aucune vraie section critique et laisseraient ce test passer
+    // même sans le fix (les deux callbacks liraient "draft" avant que l'un des
+    // deux n'écrive), donc ce mock dédié est nécessaire pour prouver la garde.
+    let invoiceState: any = {
+      id: "inv-1",
+      status: "draft",
+      documentType: "invoice",
+      organizationId: "org-1",
+      totalTtc: 1_500_000n,
+    };
+    let lockHeld = false;
+    const lockWaiters: Array<() => void> = [];
+    function acquireLock(): Promise<void> {
+      if (!lockHeld) {
+        lockHeld = true;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => lockWaiters.push(resolve));
+    }
+    function releaseLock() {
+      const next = lockWaiters.shift();
+      if (next) next();
+      else lockHeld = false;
+    }
+
+    const prisma: any = {
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockImplementation(() => Promise.resolve(invoiceState)),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockImplementation(({ data }: any) => {
+          invoiceState = { ...invoiceState, ...data };
+          return Promise.resolve(invoiceState);
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: "GN12345678", commercialTier: "freemium" }),
+      },
+      $queryRaw: vi.fn().mockImplementation(() => acquireLock()),
+      $transaction: vi.fn(async (callback: any) => {
+        try {
+          return await callback(prisma);
+        } finally {
+          releaseLock();
+        }
+      }),
+    };
+
+    const numbering = createFakeNumbering();
+    const certification = createFakeSigningKeyService();
+    const service = new InvoicesService(
+      prisma as any,
+      numbering as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const results = await Promise.allSettled([service.issue("inv-1"), service.issue("inv-1")]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    // La preuve centrale du fix : la requête perdante n'a JAMAIS appelé
+    // nextNumber() ni certifyForOrganization() — jamais de trou dans la
+    // séquence légale OHADA Article 23, jamais de certification gaspillée.
+    expect(numbering.nextNumber).toHaveBeenCalledTimes(1);
+    expect(certification.certifyForOrganization).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1621,7 +1822,7 @@ function createFakePrismaForCreateAssisted(
 ) {
   let invoiceState: any = { id: "inv-1", documentType: "invoice" };
 
-  return {
+  const prisma: any = {
     user: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(
         overrides.user !== undefined ? overrides.user : { id: "agent-1", isCommercialAgent: true },
@@ -1653,7 +1854,12 @@ function createFakePrismaForCreateAssisted(
         return Promise.resolve(invoiceState);
       }),
     },
+    // Quality Audit 2026-08-23, finding #1 — voir createFakePrisma() plus haut
+    // dans ce fichier pour le même ajout et sa justification.
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+    $queryRaw: vi.fn().mockResolvedValue([]),
   };
+  return prisma;
 }
 
 const assistedInvoiceDto = {

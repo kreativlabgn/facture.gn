@@ -1,27 +1,13 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
+import { assertPracticeAdmin } from "../common/rbac/practice-access";
 import type { CreateMandateDto } from "./dto/create-mandate.dto";
 
 @Injectable()
 export class MandatesService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
-
-  // Un mandat est une action PRACTICE-scopée, pas organisation-scopée (ADR-068) —
-  // RolesGuard ne s'applique pas (il résout exclusivement une organisation via
-  // OrganizationMember). Autorisation vérifiée en ligne, même précédent que
-  // OrganizationsService.createAssisted() (isCommercialAgent relu depuis la DB).
-  // Factorisé ici car utilisé par create() (F5) ET revoke() (F6) — même garde,
-  // 2e occurrence identique, seuil "règle de trois" atteint (anticipé lors de la
-  // revue F5).
-  private async assertPracticeAdmin(practiceId: string, userId: string, action: string) {
-    const member = await this.prisma.practiceMember.findFirst({
-      where: { practiceId, userId, leftAt: null },
-    });
-    if (!member || member.role !== "practice_admin") {
-      throw new ForbiddenException(`Seul un practice_admin du cabinet peut ${action}`);
-    }
-  }
 
   // Garde anti-doublon applicative (même précédent que C7/C13) — un mandat
   // revoked/expired ne bloque jamais une nouvelle demande, seuls pending/active
@@ -44,7 +30,7 @@ export class MandatesService {
   // (pending → active) et la révocation (F6) sont des stories séparées, aucune
   // transition de status n'est construite ici.
   async create(practiceId: string, dto: CreateMandateDto, requesterUserId: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId, "demander un mandat au nom de celui-ci");
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "demander un mandat au nom de celui-ci");
 
     const organization = await this.prisma.organization.findUnique({ where: { id: dto.organizationId } });
     if (!organization) {
@@ -90,10 +76,21 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — updateMany+where réclame la
+    // transition atomiquement (au lieu d'un update() inconditionnel) : sous
+    // deux acceptations/révocations concurrentes du même mandat, seule la
+    // requête qui voit encore status="pending" au moment de l'écriture
+    // committe — jamais une perte silencieuse de traçabilité d'audit
+    // (grantedBy/grantedAt) sur un champ de conformité (accès cabinet
+    // comptable aux données financières d'une PME).
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "pending" },
       data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 
   // F6, ADR-069 — "Révocation par cabinet = tous les collaborateurs perdent
@@ -103,7 +100,7 @@ export class MandatesService {
   // revoked/expired sont déjà terminaux. grantedBy/grantedAt ne sont jamais
   // effacés : trace historique de qui avait accepté, conservée après révocation.
   async revoke(practiceId: string, mandateId: string, requesterUserId: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId, "révoquer un mandat au nom de celui-ci");
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "révoquer un mandat au nom de celui-ci");
 
     const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
     // Même mandat introuvable si le mandat existe mais est détenu par une autre
@@ -118,10 +115,16 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — voir accept() ci-dessus pour la
+    // justification complète du pattern.
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "active" },
       data: { status: "revoked", revokedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 
   // F7, ADR-070 — "Scope MVP réduit (consultation + FEC + switch)" exige
@@ -138,7 +141,7 @@ export class MandatesService {
     }
 
     return this.prisma.mandate.findMany({
-      where: { practiceId, status: "active" },
+      where: { practiceId, status: "active", ...mandateNotExpiredWhere() },
       include: { organization: { select: { id: true, name: true } } },
     });
   }
@@ -158,7 +161,14 @@ export class MandatesService {
     }
 
     return this.prisma.mandate.findMany({
-      where: { practiceId, status: { in: ["pending", "active"] } },
+      // Quality Audit 2026-08-23, finding #2 — pending n'a jamais accordé
+      // d'accès (expiresAt n'est pertinent qu'une fois actif), donc pas de
+      // filtre d'expiration sur cette branche ; active en revanche doit
+      // rester soumis à la même garde que partout ailleurs.
+      where: {
+        practiceId,
+        OR: [{ status: "pending" }, { status: "active", ...mandateNotExpiredWhere() }],
+      },
       include: { organization: { select: { id: true, name: true } } },
     });
   }
@@ -191,7 +201,7 @@ export class MandatesService {
   // elle-même créé via create() (F5), ce qui contournerait le consentement
   // organisationnel qu'ADR-069 est censé garantir.
   async acceptAsPractice(practiceId: string, mandateId: string, actorUserId: string) {
-    await this.assertPracticeAdmin(practiceId, actorUserId, "accepter une adhésion au nom de celui-ci");
+    await assertPracticeAdmin(this.prisma, practiceId, actorUserId, "accepter une adhésion au nom de celui-ci");
 
     const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
     if (!mandate || mandate.practiceId !== practiceId) {
@@ -210,10 +220,16 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — voir accept() plus haut pour la
+    // justification complète du pattern.
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "pending" },
       data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 
   // Option 5 USSD (§2.5 Spec USSD) — pendant que create()/accept()/revoke()
@@ -231,7 +247,7 @@ export class MandatesService {
 
   async listActiveForOrganization(organizationId: string) {
     return this.prisma.mandate.findMany({
-      where: { organizationId, status: "active" },
+      where: { organizationId, status: "active", ...mandateNotExpiredWhere() },
       include: { practice: true },
     });
   }
@@ -258,9 +274,15 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — voir accept() plus haut pour la
+    // justification complète du pattern.
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "active" },
       data: { status: "revoked", revokedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 }

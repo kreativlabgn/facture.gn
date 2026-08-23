@@ -57,6 +57,41 @@ describe("MarginService.listLines (E7, ADR-084)", () => {
     expect(result[0].marginGnf).toBeNull();
     expect(result[0].marginPct).toBeNull();
   });
+
+  it("pagine avec DEFAULT_LIST_PAGE_SIZE=50 par défaut (Quality Audit 2026-08-23, finding #6)", async () => {
+    const prisma = createFakePrisma([SALE_LINE]);
+    const service = new MarginService(prisma as any);
+
+    await service.listLines("org-1");
+
+    expect(prisma.invoiceLine.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 50, skip: 0 }),
+    );
+  });
+
+  it("plafonne take à MAX_LIST_PAGE_SIZE=100, jamais une réponse non bornée", async () => {
+    const prisma = createFakePrisma([SALE_LINE]);
+    const service = new MarginService(prisma as any);
+
+    await service.listLines("org-1", { take: 10_000, skip: 20 });
+
+    expect(prisma.invoiceLine.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 100, skip: 20 }),
+    );
+  });
+
+  it("un skip au-delà du nombre total de lignes retourne [] proprement, jamais une erreur (Quality Audit 2026-08-23, revue post-fix #6, cas limite)", async () => {
+    // Prisma renvoie [] pour un skip hors bornes (comportement standard SQL
+    // OFFSET) — ce test vérifie que MarginService ne fait aucune hypothèse sur
+    // un résultat non-vide (pas d'accès direct à result[0] ni de division par
+    // un total supposé positif) et propage simplement le tableau vide.
+    const prisma = createFakePrisma([]);
+    const service = new MarginService(prisma as any);
+
+    const result = await service.listLines("org-1", { take: 50, skip: 1000 });
+
+    expect(result).toEqual([]);
+  });
 });
 
 describe("MarginService.listByProduct (E7, ADR-084)", () => {

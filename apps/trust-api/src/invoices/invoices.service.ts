@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
 import { resolveNifForCertification } from "../certification/certification.service";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
@@ -15,6 +15,35 @@ import { isOverdue } from "./overdue";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
+
+// Quality Audit 2026-08-23, finding #9 — sous-ensemble explicite des champs
+// qu'un brouillon peut légitimement recevoir en correction. Exclut
+// délibérément tout ce qui appartient au chemin de certification (status,
+// number, hash, previousHash, signature, signingKeyId, certificationId,
+// issuedAt) et tout champ dérivé/serveur (amountPaid, amountDue,
+// validatedByAdministration, paymentLinkUrl/Id/ExpiresAt, organizationId).
+// InvoiceUncheckedUpdateInput (pas InvoiceUpdateInput) : customerId/branchId
+// n'existent qu'en tant que scalaires FK directs sur la variante "unchecked"
+// de Prisma, jamais sur la variante "checked" (relation connect/disconnect).
+// Quality Audit 2026-08-23, revue post-fix #9 — quoteValidUntil/referenceMarche
+// ajoutés : légitimement éditables sur un brouillon de devis (documentType
+// "quote") ou de facture destinée à une commande publique B2G, omis par la
+// première itération de cette whitelist faute d'avoir revu le modèle Invoice
+// complet plutôt que seulement les champs de calcul.
+type DraftInvoicePatch = Pick<
+  Prisma.InvoiceUncheckedUpdateInput,
+  | "customerId"
+  | "branchId"
+  | "discountPct"
+  | "totalHt"
+  | "totalTva"
+  | "totalTtc"
+  | "referenceCurrency"
+  | "referenceAmount"
+  | "fxRate"
+  | "quoteValidUntil"
+  | "referenceMarche"
+>;
 
 @Injectable()
 export class InvoicesService {
@@ -167,7 +196,14 @@ export class InvoicesService {
   }
 
   // Une facture issued est immuable — toute correction passe par un avoir (DAT §5.4).
-  async updateDraft(invoiceId: string, patch: Prisma.InvoiceUpdateInput) {
+  // Quality Audit 2026-08-23, finding #9 — patch restreint à un sous-ensemble
+  // explicite de champs de brouillon légitimes (whitelist), plutôt que
+  // Prisma.InvoiceUpdateInput complet : ce dernier acceptait n'importe quel
+  // champ, y compris status/hash/certificationId/signature/number — cette
+  // méthode n'est câblée sur AUCUNE route aujourd'hui, mais rien n'empêchait
+  // qu'un futur PATCH /invoices/:id mal branché contourne totalement issue()
+  // (poser status:"issued" sans jamais passer par la certification réelle).
+  async updateDraft(invoiceId: string, patch: DraftInvoicePatch) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     if (invoice.status !== "draft") {
       throw new ConflictException(
@@ -178,89 +214,134 @@ export class InvoicesService {
   }
 
   async issue(invoiceId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    if (invoice.status !== "draft") {
-      throw new ConflictException(
-        `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,
-      );
-    }
-    // ADR-064 : un proforma (prix indicatif, jamais engageant) ou un devis ne peuvent
-    // jamais être émis directement comme facture certifiée — seule la conversion
-    // (convertToInvoice) produit une vraie facture à partir d'un proforma.
-    if (invoice.documentType !== "invoice") {
-      throw new ConflictException(
-        `Seule une facture peut être émise, pas un document de type ${invoice.documentType}`,
-      );
-    }
-
-    const organization = await this.prisma.organization.findUniqueOrThrow({
-      where: { id: invoice.organizationId },
-    });
-
-    // G2 (réinterprété, voir plan freeze-after-account-recovery) — fenêtre de
-    // vigilance posée par AuthService.resolveRecovery() sur une récupération de
-    // compte owner approuvée. paymentsFrozenUntil expiré (passé) est déjà
-    // inoffensif, aucune comparaison de statut nécessaire.
-    if (organization.paymentsFrozenUntil && organization.paymentsFrozenUntil > new Date()) {
-      throw new ForbiddenException(
-        `Émission gelée temporairement suite à une récupération de compte récente (jusqu'au ${organization.paymentsFrozenUntil.toISOString()})`,
-      );
-    }
-
-    const issuedAt = new Date();
-    const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear());
-
-    const previousInvoice = await this.prisma.invoice.findFirst({
-      where: { organizationId: invoice.organizationId, status: { not: "draft" } },
-      orderBy: { issuedAt: "desc" },
-    });
-
-    const certification = await this.certification.certifyForOrganization(invoice.organizationId, {
-      invoiceId: invoice.id,
-      organizationNif: resolveNifForCertification(organization.nif),
-      number,
-      totalTtc: invoice.totalTtc,
-      issuedAt: issuedAt.toISOString(),
-      previousHash: previousInvoice?.hash ?? "GENESIS",
-    });
-
-    let issuedInvoice;
+    // Quality Audit 2026-08-23, finding #1 (CRITIQUE) — tout le bloc critique
+    // (vérification de statut → nextNumber() → certification Ed25519 → écriture)
+    // tourne désormais sous un verrou de ligne Postgres réel (SELECT ... FOR
+    // UPDATE), pas seulement un updateMany+where comme convertToInvoice() :
+    // contrairement à convertToInvoice(), issue() DOIT appeler
+    // InvoiceNumberingService.nextNumber() (upsert atomique "sans trou", Article
+    // 23 OHADA) avant de savoir si l'écriture finale va réussir — un simple
+    // updateMany en fin de méthode aurait laissé les DEUX requêtes concurrentes
+    // consommer chacune un numéro de séquence, créant un trou légal même si une
+    // seule facture est effectivement émise. Le FOR UPDATE sérialise les deux
+    // transactions sur CETTE facture : la perdante ne voit le statut "issued"
+    // qu'une fois la gagnante COMMITÉE, et n'appelle donc jamais nextNumber() ni
+    // certifyForOrganization() — jamais de trou, jamais de certification Ed25519
+    // signée puis silencieusement écrasée.
+    let transactionResult: {
+      issuedInvoice: Awaited<ReturnType<PrismaClient["invoice"]["update"]>>;
+      organization: Awaited<ReturnType<PrismaClient["organization"]["findUniqueOrThrow"]>>;
+    };
     try {
-      issuedInvoice = await this.prisma.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          number,
-          certificationId: certification.certificationId,
-          hash: certification.hash,
-          previousHash: certification.previousHash,
-          signature: Buffer.from(certification.signature, "hex"),
-          signingKeyId: certification.signingKeyId,
-          status: "issued",
-          issuedAt,
-          amountDue: invoice.totalTtc,
-        },
-      });
-    } catch (error) {
-      // Filet de sécurité : InvoiceNumberingService (upsert atomique par organisation/
-      // année) ne devrait jamais produire ce conflit, mais un 409 explicite vaut mieux
-      // qu'un 500 brut si la séquence dérivait un jour sous concurrence extrême.
-      if (isUniqueConstraintViolation(error, "number")) {
+      transactionResult = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM invoice WHERE id = ${invoiceId} FOR UPDATE`;
+
+      const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      if (invoice.status !== "draft") {
         throw new ConflictException(
-          `Le numéro ${number} existe déjà pour cette organisation — réémission impossible`,
+          `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,
         );
       }
-      // Filet de sécurité : certification_id est unique globalement (GN-{NIF8}-{YYYY}-
-      // {HASH6}). Les organisations sans NIF (B1/B4) partagent toutes le même segment
-      // NIF8 (UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER), ce qui réduit l'espace de
-      // collision de HASH6 à l'échelle de toute la plateforme pour une année donnée —
-      // un 409 explicite vaut mieux qu'un 500 brut si deux hash coïncident.
-      if (isUniqueConstraintViolation(error, "certification_id")) {
+      // ADR-064 : un proforma (prix indicatif, jamais engageant) ou un devis ne
+      // peuvent jamais être émis directement comme facture certifiée — seule la
+      // conversion (convertToInvoice) produit une vraie facture à partir d'un
+      // proforma.
+      if (invoice.documentType !== "invoice") {
         throw new ConflictException(
-          "Collision d'identifiant de certification — réémission impossible, réessayer",
+          `Seule une facture peut être émise, pas un document de type ${invoice.documentType}`,
+        );
+      }
+
+      const organization = await tx.organization.findUniqueOrThrow({
+        where: { id: invoice.organizationId },
+      });
+
+      // G2 (réinterprété, voir plan freeze-after-account-recovery) — fenêtre de
+      // vigilance posée par AuthService.resolveRecovery() sur une récupération de
+      // compte owner approuvée. paymentsFrozenUntil expiré (passé) est déjà
+      // inoffensif, aucune comparaison de statut nécessaire.
+      if (organization.paymentsFrozenUntil && organization.paymentsFrozenUntil > new Date()) {
+        throw new ForbiddenException(
+          `Émission gelée temporairement suite à une récupération de compte récente (jusqu'au ${organization.paymentsFrozenUntil.toISOString()})`,
+        );
+      }
+
+      const issuedAt = new Date();
+      // Quality Audit 2026-08-23, revue post-fix #1 — tx passé explicitement :
+      // sans lui, nextNumber() écrit sur le client Prisma global (autocommit,
+      // hors du SELECT...FOR UPDATE ci-dessus), donc un numéro de séquence
+      // légal serait consommé de façon irréversible même si tx.invoice.update()
+      // échoue plus loin — exactement le trou Article 23 OHADA que ce verrou
+      // est censé éliminer.
+      const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear(), tx);
+
+      const previousInvoice = await tx.invoice.findFirst({
+        where: { organizationId: invoice.organizationId, status: { not: "draft" } },
+        orderBy: { issuedAt: "desc" },
+      });
+
+      const certification = await this.certification.certifyForOrganization(
+        invoice.organizationId,
+        {
+          invoiceId: invoice.id,
+          organizationNif: resolveNifForCertification(organization.nif),
+          number,
+          totalTtc: invoice.totalTtc,
+          issuedAt: issuedAt.toISOString(),
+          previousHash: previousInvoice?.hash ?? "GENESIS",
+        },
+        tx,
+      );
+
+      let issuedInvoice;
+      try {
+        issuedInvoice = await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            number,
+            certificationId: certification.certificationId,
+            hash: certification.hash,
+            previousHash: certification.previousHash,
+            signature: Buffer.from(certification.signature, "hex"),
+            signingKeyId: certification.signingKeyId,
+            status: "issued",
+            issuedAt,
+            amountDue: invoice.totalTtc,
+          },
+        });
+      } catch (error) {
+        // Filet de sécurité : InvoiceNumberingService (upsert atomique par organisation/
+        // année) ne devrait jamais produire ce conflit, mais un 409 explicite vaut mieux
+        // qu'un 500 brut si la séquence dérivait un jour sous concurrence extrême.
+        if (isUniqueConstraintViolation(error, "number")) {
+          throw new ConflictException(
+            `Le numéro ${number} existe déjà pour cette organisation — réémission impossible`,
+          );
+        }
+        // Filet de sécurité : certification_id est unique globalement (GN-{NIF8}-{YYYY}-
+        // {HASH6}). Les organisations sans NIF (B1/B4) partagent toutes le même segment
+        // NIF8 (UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER), ce qui réduit l'espace de
+        // collision de HASH6 à l'échelle de toute la plateforme pour une année donnée —
+        // un 409 explicite vaut mieux qu'un 500 brut si deux hash coïncident.
+        if (isUniqueConstraintViolation(error, "certification_id")) {
+          throw new ConflictException(
+            "Collision d'identifiant de certification — réémission impossible, réessayer",
+          );
+        }
+        throw error;
+      }
+
+      return { issuedInvoice, organization };
+      });
+    } catch (error) {
+      if (isTransactionTimeout(error)) {
+        throw new ConflictException(
+          `Émission de la facture ${invoiceId} en cours sur une autre requête — réessayer`,
         );
       }
       throw error;
     }
+    const { issuedInvoice, organization } = transactionResult;
 
     // Meilleur effort, jamais couplé à la certification (déjà committée ci-dessus) :
     // DAT §12 fixe deux SLA distinctes ("Émission facture < 2s" / "Génération lien
@@ -613,6 +694,22 @@ export class InvoicesService {
       throw new ConflictException(`Facture ${invoiceId} ne peut être annulée depuis le statut ${invoice.status}`);
     }
 
-    return this.prisma.invoice.update({ where: { id: invoiceId }, data: { status: "voided" } });
+    // Quality Audit 2026-08-23, finding #3 — amountPaid/status relus puis
+    // vérifiés à nouveau DANS la clause where de l'écriture (pas seulement en
+    // lecture ci-dessus) : un paiement qui s'enregistre entre la lecture et
+    // l'écriture ne doit jamais laisser une facture payée passer à voided
+    // (PRD §4.2). Message d'erreur générique en cas de count=0 — la lecture
+    // initiale a déjà distingué la cause probable (paiement vs statut) pour
+    // l'appelant qui vient de la voir il y a quelques millisecondes.
+    const claimed = await this.prisma.invoice.updateMany({
+      where: { id: invoiceId, status: { in: ["draft", "issued"] }, amountPaid: 0n },
+      data: { status: "voided" },
+    });
+    if (claimed.count === 0) {
+      throw new ConflictException(
+        `Facture ${invoiceId} ne peut être annulée — statut ou paiement modifié entretemps, réessayer`,
+      );
+    }
+    return this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
   }
 }

@@ -451,14 +451,74 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
       const result = await service.listMine("user-1");
 
-      expect(prisma.organizationMember.findMany).toHaveBeenCalledWith({
-        where: { userId: "user-1", revokedAt: null },
-        include: { organization: true },
-      });
+      expect(prisma.organizationMember.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: "user-1", revokedAt: null } }),
+      );
       expect(result).toEqual([
         { id: "org-1", name: "Boutique Aissatou", role: "owner" },
         { id: "org-2", name: "Restaurant Le Damier", role: "cashier" },
       ]);
+    });
+
+    it("ne sélectionne jamais bankAccountDetails/chiffreAffairesBrutDeclare ni la config anti-fraude interne (Quality Audit 2026-08-23, finding #5)", async () => {
+      const prisma: any = {
+        organizationMember: {
+          findMany: vi.fn().mockResolvedValue([
+            { role: "cashier", organization: { id: "org-1", name: "Boutique Aissatou" } },
+          ]),
+        },
+      };
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listMine("user-1");
+
+      const call = prisma.organizationMember.findMany.mock.calls[0][0];
+      const orgSelect = call.select.organization.select;
+      expect(orgSelect).not.toHaveProperty("bankAccountDetails");
+      expect(orgSelect).not.toHaveProperty("chiffreAffairesBrutDeclare");
+      expect(orgSelect).not.toHaveProperty("creditLimitApprovalThreshold");
+      expect(orgSelect).not.toHaveProperty("commissionBypassLevel");
+      expect(orgSelect).not.toHaveProperty("commissionBypassProofThresholdOverrideGnf");
+    });
+
+    it("la RÉPONSE réelle de listMine() ne contient jamais bankAccountDetails/chiffreAffairesBrutDeclare, pas seulement la requête (Quality Audit 2026-08-23, revue post-fix #5)", async () => {
+      // Contrairement au test précédent (qui n'inspecte que l'argument select
+      // passé au mock), celui-ci simule le comportement RÉEL de Prisma : le
+      // mock ne renvoie que les champs listés dans select.organization.select,
+      // à partir d'une fixture volontairement "complète" (avec les champs
+      // sensibles). Si un futur refactor de listMine() élargissait le select
+      // ou fusionnait une autre source après la requête, ce test échouerait —
+      // contrairement à un test qui n'inspecte que l'argument de l'appel.
+      const fullOrganizationRow = {
+        id: "org-1",
+        name: "Boutique Aissatou",
+        bankAccountDetails: "GN00 0000 0000 0000 0000 00",
+        chiffreAffairesBrutDeclare: 50_000_000n,
+        creditLimitApprovalThreshold: 10_000_000n,
+        commissionBypassLevel: "level_1_flagged",
+        commissionBypassProofThresholdOverrideGnf: null,
+      };
+      const prisma: any = {
+        organizationMember: {
+          findMany: vi.fn().mockImplementation(({ select }: any) => {
+            const orgSelect = select.organization.select;
+            const filteredOrganization = Object.fromEntries(
+              Object.entries(fullOrganizationRow).filter(([key]) => orgSelect[key] === true),
+            );
+            return Promise.resolve([{ role: "cashier", organization: filteredOrganization }]);
+          }),
+        },
+      };
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      const result = await service.listMine("user-1");
+
+      expect(result[0]).not.toHaveProperty("bankAccountDetails");
+      expect(result[0]).not.toHaveProperty("chiffreAffairesBrutDeclare");
+      expect(result[0]).not.toHaveProperty("creditLimitApprovalThreshold");
+      expect(result[0]).not.toHaveProperty("commissionBypassLevel");
+      expect(result[0]).not.toHaveProperty("commissionBypassProofThresholdOverrideGnf");
+      expect(result[0]).toMatchObject({ id: "org-1", name: "Boutique Aissatou", role: "cashier" });
     });
 
     it("ne retourne jamais un membership révoqué (filtré côté requête, pas côté application)", async () => {
