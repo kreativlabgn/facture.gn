@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { UnauthorizedException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { ClientPortalAuthService } from "./client-portal-auth.service";
@@ -244,5 +246,23 @@ describe("ClientPortalAuthService", () => {
       });
       expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-new" });
     });
+  });
+
+  // F10, revue post-fix #5 — la décision de NE JAMAIS résoudre PendingMemberInvite
+  // depuis ce chemin (commentaire détaillé sur resolveOrCreateUser : un User
+  // créé ici n'a ni passwordHash ni pinHash, un membership y serait fantôme et
+  // inutilisable) n'avait aucun test de garde. Un test comportemental classique
+  // ne peut pas la couvrir : PendingMemberInviteService n'est pas injecté dans
+  // ce service, il n'y a donc rien à espionner à l'exécution — ce test
+  // structurel vérifie directement que le fichier source ne l'importe/l'appelle
+  // pas, pour qu'un futur "par cohérence avec AuthService.register()" soit
+  // détecté au lieu de passer inaperçu.
+  it("n'importe/n'appelle jamais PendingMemberInviteService (décision F10 délibérée)", () => {
+    const source = readFileSync(join(__dirname, "client-portal-auth.service.ts"), "utf-8");
+    // Le commentaire documentant CETTE décision mentionne légitimement
+    // "PendingMemberInvite" en toutes lettres — seuls un import du module ou un
+    // appel réel à resolveForNewUser() seraient une régression.
+    expect(source).not.toMatch(/from\s+["'].*pending-member-invite/);
+    expect(source).not.toMatch(/\.resolveForNewUser\(/);
   });
 });
