@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import type { Prisma, PrismaClient } from "@facture-gn/db";
+import type { InvoiceStatus, Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
@@ -13,7 +13,13 @@ import type { RecordDepositDto } from "./dto/record-deposit.dto";
 import type { CreateBankTransferPaymentDto } from "./dto/create-bank-transfer-payment.dto";
 import { CommissionBypassEscalationService } from "../commission-bypass/commission-bypass-escalation.service";
 
-const PAYABLE_STATUSES = new Set(["issued", "partially_paid"]);
+// Quality Audit 2026-08-23, finding #12 — Set<InvoiceStatus> explicite (pas
+// Set<string> inféré) : une faute de frappe ici (ex. "partialy_paid") compilait
+// sans erreur, rejetant silencieusement un paiement légitime sur une facture
+// réellement partially_paid — bug détectable seulement par un test explicite
+// couvrant cette valeur précise. `as const` requis pour que TS infère un tuple
+// de littéraux plutôt que string[] avant de vérifier contre InvoiceStatus.
+const PAYABLE_STATUSES = new Set<InvoiceStatus>(["issued", "partially_paid"] as const);
 
 // Fenêtre glissante pour la détection de boucle client/montant (G1, ADR-032).
 const STRUCTURING_LOOP_WINDOW_MS = 24 * 60 * 60 * 1000;
