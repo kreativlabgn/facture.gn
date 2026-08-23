@@ -1945,3 +1945,128 @@ describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-
     expect(createCall.data.lines.create[1].costPriceAtTime).toBe(20_000n);
   });
 });
+
+function daysAgo(days: number): Date {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+function createFakePrismaForSendReminder(invoice: any) {
+  const prisma: any = {
+    invoice: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(invoice),
+    },
+    invoiceEvent: {
+      create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
+    },
+    $transaction: vi.fn((callback: any) => callback(prisma)),
+  };
+  return prisma;
+}
+
+function createFakePaymentReminderService() {
+  return { send: vi.fn().mockResolvedValue(undefined) };
+}
+
+const OVERDUE_INVOICE_BASE = {
+  id: "inv-1",
+  organizationId: "org-1",
+  number: "FG-2026-000001",
+  status: "issued",
+  issuedAt: daysAgo(31),
+  amountDue: 150_000n,
+  customerId: "cust-1",
+  customer: { id: "cust-1", phone: "+224622334455", notificationChannel: "sms" },
+};
+
+describe("InvoicesService — rappel de paiement après échéance (I2)", () => {
+  it("envoie le rappel et émet payment_reminder_sent tracé à l'auteur de la demande", async () => {
+    const prisma = createFakePrismaForSendReminder(OVERDUE_INVOICE_BASE);
+    const reminderService = createFakePaymentReminderService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      reminderService as any,
+    );
+
+    await service.sendReminder("inv-1", "user-djenabou");
+
+    expect(reminderService.send).toHaveBeenCalledWith(
+      { phone: "+224622334455", notificationChannel: "sms" },
+      "FG-2026-000001",
+      1_500n,
+    );
+    expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
+      data: { invoiceId: "inv-1", type: "payment_reminder_sent", actorId: "user-djenabou" },
+    });
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it("rejette (ConflictException) une facture pas encore en retard", async () => {
+    const prisma = createFakePrismaForSendReminder({ ...OVERDUE_INVOICE_BASE, issuedAt: daysAgo(5) });
+    const reminderService = createFakePaymentReminderService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      reminderService as any,
+    );
+
+    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    expect(reminderService.send).not.toHaveBeenCalled();
+  });
+
+  it("rejette (ConflictException) une facture draft/paid/voided même émise il y a longtemps", async () => {
+    const prisma = createFakePrismaForSendReminder({ ...OVERDUE_INVOICE_BASE, status: "paid" });
+    const reminderService = createFakePaymentReminderService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      reminderService as any,
+    );
+
+    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+  });
+
+  it("rejette (ConflictException) une facture sans client associé", async () => {
+    const prisma = createFakePrismaForSendReminder({ ...OVERDUE_INVOICE_BASE, customerId: null, customer: null });
+    const reminderService = createFakePaymentReminderService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      reminderService as any,
+    );
+
+    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    expect(reminderService.send).not.toHaveBeenCalled();
+  });
+
+  it("rejette (ConflictException) un client sans téléphone renseigné", async () => {
+    const prisma = createFakePrismaForSendReminder({
+      ...OVERDUE_INVOICE_BASE,
+      customer: { id: "cust-1", phone: null, notificationChannel: "sms" },
+    });
+    const reminderService = createFakePaymentReminderService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      reminderService as any,
+    );
+
+    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    expect(reminderService.send).not.toHaveBeenCalled();
+  });
+});

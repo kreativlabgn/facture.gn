@@ -10,6 +10,8 @@ import { InvoiceNumberingService } from "./invoice-numbering.service";
 import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
 import type { PaymentLinkNotificationService } from "../notifications/payment-link-notification.service";
+import type { PaymentReminderService } from "../notifications/payment-reminder.service";
+import { isOverdue } from "./overdue";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
@@ -33,6 +35,10 @@ export class InvoicesService {
     // (voir plan payment-link-notifications, risque de rayon d'impact déjà
     // documenté pour ce fichier dans le plan organization-root-key, A3).
     private readonly notificationService?: PaymentLinkNotificationService,
+    // I2 — même précédent que notificationService ci-dessus (optionnel, en
+    // dernière position) : jamais forcer les 65+ tests existants de ce fichier
+    // à fournir un paramètre sans rapport avec leur comportement testé.
+    private readonly paymentReminderService?: PaymentReminderService,
   ) {}
 
   async createDraft(dto: CreateInvoiceDto) {
@@ -524,6 +530,49 @@ export class InvoicesService {
       });
 
       return tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    });
+  }
+
+  // I2 — action explicite déclenchée par un humain (owner/admin/cashier),
+  // jamais un envoi silencieux : contrairement à notificationService (best
+  // effort pendant issue(), voir constructeur), toute impossibilité d'envoyer
+  // ici lève une ConflictException claire plutôt qu'un no-op. Aucun throttle
+  // anti-spam (même absence de garde que regeneratePaymentLink, "à la
+  // demande" ADR-066) — l'humain qui déclenche contrôle déjà la cadence.
+  async sendReminder(invoiceId: string, actorId: string) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: { customer: true },
+    });
+
+    if (!isOverdue(invoice)) {
+      throw new ConflictException(
+        `Facture ${invoiceId} n'est pas en retard de paiement — aucun rappel à envoyer`,
+      );
+    }
+    if (!invoice.customer) {
+      throw new ConflictException(`Facture ${invoiceId} n'a aucun client associé — impossible d'envoyer un rappel`);
+    }
+    if (!invoice.customer.phone) {
+      throw new ConflictException(
+        `Client de la facture ${invoiceId} n'a pas de numéro de téléphone renseigné — impossible d'envoyer un rappel`,
+      );
+    }
+    if (!this.paymentReminderService) {
+      throw new ConflictException("Service de rappel de paiement indisponible");
+    }
+
+    await this.paymentReminderService.send(
+      { phone: invoice.customer.phone, notificationChannel: invoice.customer.notificationChannel },
+      invoice.number as string,
+      invoice.amountDue / 100n,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.invoiceEvent.create({
+        data: { invoiceId, type: "payment_reminder_sent", actorId },
+      });
+      return invoice;
     });
   }
 

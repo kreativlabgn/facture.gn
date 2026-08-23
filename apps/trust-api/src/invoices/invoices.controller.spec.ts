@@ -28,3 +28,15 @@ describe("InvoicesController — POST /invoices/:id/forfeit-deposit (C5)", () =>
     expect(result).toEqual({ id: "event-1", type: "no_show_forfeited" });
   });
 });
+
+describe("InvoicesController — POST /invoices/:id/send-reminder (I2)", () => {
+  it("délègue au service avec l'id de la facture et l'utilisateur courant", async () => {
+    const service = { sendReminder: vi.fn().mockResolvedValue({ id: "inv-1", status: "issued" }) };
+    const controller = new InvoicesController(service as any);
+
+    const result = await controller.sendReminder("inv-1", { id: "user-djenabou" });
+
+    expect(service.sendReminder).toHaveBeenCalledWith("inv-1", "user-djenabou");
+    expect(result).toEqual({ id: "inv-1", status: "issued" });
+  });
+});

@@ -110,4 +110,11 @@ export class InvoicesController {
   regeneratePaymentLink(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
     return this.invoicesService.regeneratePaymentLink(id, user.id);
   }
+
+  // Même trio que /regenerate-payment-link — action de relance à la demande (I2).
+  @Post(":id/send-reminder")
+  @Roles("owner", "admin", "cashier")
+  sendReminder(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.invoicesService.sendReminder(id, user.id);
+  }
 }

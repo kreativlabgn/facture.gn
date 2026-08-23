@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { NotificationChannel } from "@facture-gn/db";
 import type { NotificationProvider } from "./notification-provider.interface";
 import { SMS_PROVIDER, WHATSAPP_PROVIDER } from "./notifications.tokens";
+import { resolveNotificationProviders } from "./notification-dispatch";
 
 export interface NotifiableCustomer {
   phone: string | null;
@@ -29,12 +30,7 @@ export class PaymentLinkNotificationService {
     const amountGnf = totalGnf / 100n;
     const message = `Votre facture de ${amountGnf.toLocaleString("fr-FR")} GNF est prête : ${paymentLinkUrl}`;
 
-    const providers: NotificationProvider[] =
-      customer.notificationChannel === "both"
-        ? [this.smsProvider, this.whatsappProvider]
-        : customer.notificationChannel === "whatsapp"
-          ? [this.whatsappProvider]
-          : [this.smsProvider];
+    const providers = resolveNotificationProviders(customer.notificationChannel, this.smsProvider, this.whatsappProvider);
 
     await Promise.all(
       providers.map(async (provider) => {
