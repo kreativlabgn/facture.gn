@@ -109,6 +109,17 @@ export class ClientPortalAuthService {
   // l'auto-inscription : User sans passwordHash/pinHash (jamais utilisable pour
   // /auth/login ni *620#, seule la session client_portal issue de cet OTP y
   // donne accès) + UserPhone déjà vérifié.
+  //
+  // F10 — décision délibérée de NE PAS résoudre PendingMemberInvite ici,
+  // contrairement à AuthService.register()/OrganizationsService.createAssisted() :
+  // un User créé par ce chemin n'a ni passwordHash ni pinHash, donc ne pourrait
+  // jamais réellement se servir d'un accès OrganizationMember/PracticeMember
+  // (aucun moyen de login PWA/*620# pour l'utiliser). Résoudre l'invitation ici
+  // créerait un membership fantôme, inutilisable, et bloquerait en plus toute
+  // inscription "réelle" ultérieure sur ce numéro (AuthService.register()
+  // rejette déjà un msisdn existant avec ConflictException). Une invitation
+  // reçue par quelqu'un qui commence par le portail client doit d'abord passer
+  // par une inscription PWA classique pour être résolue.
   private async resolveOrCreateUser(msisdn: string): Promise<string> {
     const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn } });
     if (existingPhone) {

@@ -13,6 +13,15 @@ function createFakeSigningKeyService() {
   };
 }
 
+// F10 — double par défaut minimal, même discipline que createFakeSigningKeyService()
+// ci-dessus : la plupart des tests existants de ce fichier ne portent pas sur la
+// résolution de PendingMemberInvite.
+function createFakePendingMemberInviteService() {
+  return {
+    resolveForNewUser: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
   const prisma: any = {
     organization: {
@@ -29,7 +38,7 @@ function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
 describe("OrganizationsService", () => {
   it("persiste le régime fiscal fourni par le client, jamais un défaut serveur", async () => {
     const prisma = createFakePrisma();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.create(
       { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
@@ -43,7 +52,7 @@ describe("OrganizationsService", () => {
 
   it("crée automatiquement le créateur comme owner de la nouvelle organisation", async () => {
     const prisma = createFakePrisma();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.create(
       { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
@@ -61,7 +70,7 @@ describe("OrganizationsService", () => {
       meta: { target: ["nif"] },
     });
     const prisma = createFakePrisma(vi.fn().mockRejectedValue(uniqueViolation));
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.create(
@@ -73,7 +82,7 @@ describe("OrganizationsService", () => {
 
   it("crée une organisation sans NIF ni eTax — inscription self-service jamais bloquée (B1/B4)", async () => {
     const prisma = createFakePrisma();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.create({ name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial" }, "user-1");
 
@@ -85,7 +94,7 @@ describe("OrganizationsService", () => {
   it("provisionne une clé racine Ed25519 pour la nouvelle organisation, dans la même transaction (A3, ADR-026)", async () => {
     const prisma = createFakePrisma();
     const signingKeyService = createFakeSigningKeyService();
-    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+    const service = new OrganizationsService(prisma as any, signingKeyService as any, createFakePendingMemberInviteService() as any);
 
     await service.create(
       { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
@@ -113,7 +122,7 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
       etaxNumber: null,
       dgiVerificationStatus: "unverified",
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(service.verifyDgi("org-1")).rejects.toThrow(/NIF/);
     expect(prisma.organization.update).not.toHaveBeenCalled();
@@ -126,7 +135,7 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
       etaxNumber: "ETAX-001",
       dgiVerificationStatus: "unverified",
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const before = Date.now();
     const result = await service.verifyDgi("org-1");
@@ -146,7 +155,7 @@ describe("OrganizationsService — vérification DGI (B2)", () => {
       etaxNumber: "ETAX-001",
       dgiVerificationStatus: "verified",
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.verifyDgi("org-1");
 
@@ -201,7 +210,7 @@ const ASSISTED_DTO = {
 describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
   it("refuse si l'appelant n'a pas le statut agent terrain (isCommercialAgent=false)", async () => {
     const prisma = createFakePrismaForAssisted({ isCommercialAgent: false });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(service.createAssisted("agent-1", ASSISTED_DTO)).rejects.toThrow(/agent terrain/);
     expect(prisma.organization.create).not.toHaveBeenCalled();
@@ -209,7 +218,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
   it("crée le marchand comme owner — jamais de membership pour l'agent terrain lui-même", async () => {
     const prisma = createFakePrismaForAssisted();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -221,9 +230,29 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
     );
   });
 
+  it("F10 — résout toute PendingMemberInvite en attente pour le msisdn du marchand, dans la même transaction", async () => {
+    const prisma = createFakePrismaForAssisted();
+    const pendingMemberInvite = createFakePendingMemberInviteService();
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, pendingMemberInvite as any);
+
+    await service.createAssisted("agent-1", { ...ASSISTED_DTO, msisdn: "+224600000001" });
+
+    expect(pendingMemberInvite.resolveForNewUser).toHaveBeenCalledWith(prisma, "merchant-1", "+224600000001");
+  });
+
+  it("F10 — ne tente aucune résolution si le marchand n'a pas de msisdn (inscription assistée sans téléphone)", async () => {
+    const prisma = createFakePrismaForAssisted();
+    const pendingMemberInvite = createFakePendingMemberInviteService();
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, pendingMemberInvite as any);
+
+    await service.createAssisted("agent-1", ASSISTED_DTO);
+
+    expect(pendingMemberInvite.resolveForNewUser).not.toHaveBeenCalled();
+  });
+
   it("enregistre une AssistedSession traçant l'agent, l'organisation et le consentement horodaté", async () => {
     const prisma = createFakePrismaForAssisted();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -239,7 +268,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
   it("réessaie la génération du code-compte jusqu'à 3 tentatives en cas de collision", async () => {
     const prisma = createFakePrismaForAssisted({ accountCodeCollisions: 2 });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -252,7 +281,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
   // terrain était mal étiquetée dans les données, sans qu'aucun test ne le détecte.
   it("marque l'organisation registrationSource=agent_terrain (ADR-107)", async () => {
     const prisma = createFakePrismaForAssisted();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -264,7 +293,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
   it("provisionne une clé racine pour l'organisation créée en inscription assistée (A3, ADR-026)", async () => {
     const prisma = createFakePrismaForAssisted();
     const signingKeyService = createFakeSigningKeyService();
-    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+    const service = new OrganizationsService(prisma as any, signingKeyService as any, createFakePendingMemberInviteService() as any);
 
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
@@ -277,7 +306,7 @@ describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23,
     const prisma: any = {
       assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
-    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.revokeAssistedSession("org-1", "agent-1");
 
@@ -291,7 +320,7 @@ describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23,
     const prisma: any = {
       assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     };
-    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(service.revokeAssistedSession("org-1", "agent-1")).rejects.toThrow(/Aucune AssistedSession/);
   });
@@ -312,7 +341,7 @@ function createFakePrismaForVerifiedPaymentRatio(totalSum: bigint | null, verifi
 describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
   it("calcule le ratio paiements vérifiés / total des encaissements", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(500_000n, 300_000n);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.getVerifiedPaymentRatio("org-1");
 
@@ -321,7 +350,7 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
 
   it("renvoie ratio:null pour une organisation sans aucun paiement — jamais un faux 0%", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(null, null);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.getVerifiedPaymentRatio("org-1");
 
@@ -330,7 +359,7 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
 
   it("renvoie ratio:1 quand 100% des encaissements sont réglés par lien de paiement", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(400_000n, 400_000n);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.getVerifiedPaymentRatio("org-1");
 
@@ -339,7 +368,7 @@ describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
 
   it("exclut toujours les arrhes des deux totaux — bucket financier distinct (C5)", async () => {
     const prisma = createFakePrismaForVerifiedPaymentRatio(500_000n, 300_000n);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.getVerifiedPaymentRatio("org-1");
 
@@ -373,7 +402,7 @@ function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>
 describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)", () => {
   it("crée l'organisation avec registrationSource apip, aucun OrganizationMember", async () => {
     const prisma = createFakePrismaForCreateFromApip();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.createFromApip(APIP_DTO);
 
@@ -397,7 +426,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
     });
     const prisma = createFakePrismaForCreateFromApip(createImpl);
 
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.createFromApip(APIP_DTO);
 
@@ -408,7 +437,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
   it("propage toute autre erreur inattendue (pas une collision NIF)", async () => {
     const createImpl = vi.fn().mockRejectedValue(new Error("panne DB inattendue"));
     const prisma = createFakePrismaForCreateFromApip(createImpl);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(service.createFromApip(APIP_DTO)).rejects.toThrow(/panne DB inattendue/);
   });
@@ -416,7 +445,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
   it("provisionne une clé racine pour une création fraîche (A3, ADR-026)", async () => {
     const prisma = createFakePrismaForCreateFromApip();
     const signingKeyService = createFakeSigningKeyService();
-    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+    const service = new OrganizationsService(prisma as any, signingKeyService as any, createFakePendingMemberInviteService() as any);
 
     await service.createFromApip(APIP_DTO);
 
@@ -430,7 +459,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
     });
     const prisma = createFakePrismaForCreateFromApip(createImpl);
     const signingKeyService = createFakeSigningKeyService();
-    const service = new OrganizationsService(prisma as any, signingKeyService as any);
+    const service = new OrganizationsService(prisma as any, signingKeyService as any, createFakePendingMemberInviteService() as any);
 
     await service.createFromApip(APIP_DTO);
 
@@ -447,7 +476,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
           ]),
         },
       };
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.listMine("user-1");
 
@@ -468,7 +497,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
           ]),
         },
       };
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listMine("user-1");
 
@@ -509,7 +538,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
           }),
         },
       };
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.listMine("user-1");
 
@@ -523,7 +552,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     it("ne retourne jamais un membership révoqué (filtré côté requête, pas côté application)", async () => {
       const prisma: any = { organizationMember: { findMany: vi.fn().mockResolvedValue([]) } };
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.listMine("user-1");
 
@@ -539,7 +568,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
       const prisma: any = {
         organization: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", name: "Boutique Aissatou" }) },
       };
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.findOneDetail("org-1");
 
@@ -559,7 +588,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     it("scope les événements aux factures de l'organisation demandée", async () => {
       const prisma = createFakePrismaForAuditLog();
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listAuditLog("org-1", {});
 
@@ -573,7 +602,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     it("filtre sur les types de la catégorie paiement quand category=paiement", async () => {
       const prisma = createFakePrismaForAuditLog();
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listAuditLog("org-1", { category: "paiement" });
 
@@ -585,7 +614,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     it("filtre sur les types hors catégorie paiement quand category=facture", async () => {
       const prisma = createFakePrismaForAuditLog();
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listAuditLog("org-1", { category: "facture" });
 
@@ -597,7 +626,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     it("plafonne take à 100 quel que soit ce que le client demande", async () => {
       const prisma = createFakePrismaForAuditLog();
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listAuditLog("org-1", { take: 500 });
 
@@ -606,7 +635,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     it("respecte skip fourni par le client", async () => {
       const prisma = createFakePrismaForAuditLog();
-      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listAuditLog("org-1", { skip: 20 });
 
@@ -644,7 +673,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
 
   it("crée un OrganizationMember tax_controller_readonly pour un utilisateur déjà inscrit", async () => {
     const prisma = createFakePrismaForInvite();
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1");
 
@@ -657,7 +686,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
 
   it("rejette un téléphone sans compte facture.gn associé", async () => {
     const prisma = createFakePrismaForInvite({ userPhone: null });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224699999999", role: "tax_controller_readonly" }, "user-owner-1"),
@@ -669,7 +698,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     const prisma = createFakePrismaForInvite({
       existingMembership: { organizationId: "org-1", userId: "user-invite-1", role: "cashier", revokedAt: null },
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1"),
@@ -686,7 +715,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
         revokedAt: new Date(),
       },
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1"),
@@ -702,7 +731,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
         meta: { target: ["organization_id", "user_id"] },
       }),
     );
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1"),
@@ -741,7 +770,7 @@ describe("OrganizationsService.inviteMember — restriction admin/approver au ow
 
   it("refuse qu'un admin invite un pair admin", async () => {
     const prisma = createFakePrismaForInviteRestriction("admin");
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "admin" }, "user-admin-requester"),
@@ -751,7 +780,7 @@ describe("OrganizationsService.inviteMember — restriction admin/approver au ow
 
   it("refuse qu'un admin invite un approver", async () => {
     const prisma = createFakePrismaForInviteRestriction("admin");
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "approver" }, "user-admin-requester"),
@@ -760,7 +789,7 @@ describe("OrganizationsService.inviteMember — restriction admin/approver au ow
 
   it("autorise le owner à inviter un admin", async () => {
     const prisma = createFakePrismaForInviteRestriction("owner");
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.inviteMember("org-1", { msisdn: "+224612345678", role: "admin" }, "user-owner-1");
 
@@ -769,7 +798,7 @@ describe("OrganizationsService.inviteMember — restriction admin/approver au ow
 
   it("n'applique jamais cette restriction aux rôles moindres — un admin peut toujours inviter un cashier", async () => {
     const prisma = createFakePrismaForInviteRestriction("admin");
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-admin-requester");
 
@@ -805,7 +834,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
 
   it("refuse d'assigner inventory_manager en Freemium (nécessite Starter+)", async () => {
     const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "freemium" } });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "inventory_manager" }, "user-owner-1"),
@@ -815,7 +844,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
 
   it("refuse d'assigner approver en Starter (nécessite Pro+)", async () => {
     const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "starter" } });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "approver" }, "user-owner-1"),
@@ -827,7 +856,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
       organization: { id: "org-1", commercialTier: "freemium" },
       memberCount: 1,
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(
       service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-owner-1"),
@@ -837,7 +866,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
 
   it("ne compte que les membres actifs (revokedAt: null) contre le plafond", async () => {
     const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "freemium" } });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-owner-1");
 
@@ -851,7 +880,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
       organization: { id: "org-1", commercialTier: "enterprise" },
       memberCount: 500,
     });
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-owner-1");
 
@@ -872,7 +901,7 @@ describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
   it("change commercialTier vers le palier demandé", async () => {
     const organization = { id: "org-1", commercialTier: "freemium", dgiVerificationStatus: "verified" };
     const prisma = createFakePrismaForUpgrade(organization);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.upgradeCommercialTier("org-1", "pro");
 
@@ -886,7 +915,7 @@ describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
   it("autorise l'upgrade même pour une organisation dgiVerificationStatus='unverified' (ADR-049, jamais dépendant de DGI)", async () => {
     const organization = { id: "org-1", commercialTier: "freemium", dgiVerificationStatus: "unverified" };
     const prisma = createFakePrismaForUpgrade(organization);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.upgradeCommercialTier("org-1", "starter");
 
@@ -900,7 +929,7 @@ describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
   it("autorise un downgrade (pro → freemium)", async () => {
     const organization = { id: "org-1", commercialTier: "pro", dgiVerificationStatus: "verified" };
     const prisma = createFakePrismaForUpgrade(organization);
-    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.upgradeCommercialTier("org-1", "freemium");
 
@@ -912,7 +941,7 @@ describe("OrganizationsService.revokeSigningKey (A4, ADR-025)", () => {
   it("délègue à OrganizationSigningKeyService.revoke()", async () => {
     const prisma = {} as any;
     const signingKeyService = createFakeSigningKeyService();
-    const service = new OrganizationsService(prisma, signingKeyService as any);
+    const service = new OrganizationsService(prisma, signingKeyService as any, createFakePendingMemberInviteService() as any);
 
     const result = await service.revokeSigningKey("org-1");
 

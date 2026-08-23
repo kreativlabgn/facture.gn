@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
+import { PendingMemberInviteService } from "../pending-member-invites/pending-member-invite.service";
 import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
 import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organization.dto";
@@ -61,6 +62,7 @@ export class OrganizationsService {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly signingKeyService: OrganizationSigningKeyService,
+    private readonly pendingMemberInvite: PendingMemberInviteService,
   ) {}
 
   // Le créateur devient owner dans la même transaction — aucune organisation ne
@@ -170,6 +172,10 @@ export class OrganizationsService {
 
           if (dto.msisdn) {
             await tx.userPhone.create({ data: { userId: merchant.id, msisdn: dto.msisdn, isPrimary: true } });
+            // F10 — résout toute PendingMemberInvite en attente pour ce numéro
+            // (une organisation/cabinet distinct a pu inviter ce même
+            // marchand avant qu'il ne soit inscrit assistée ici).
+            await this.pendingMemberInvite.resolveForNewUser(tx, merchant.id, dto.msisdn);
           }
 
           await tx.organizationMember.create({
