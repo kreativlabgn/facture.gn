@@ -154,12 +154,12 @@ describe("UssdSessionService — menu racine (§1 Spec USSD)", () => {
     expect(result.text).toContain("Factures reçues");
   });
 
-  it("option 6 depuis la racine exige une authentification, comme les autres options authentifiées (numéro non reconnu → code compte)", async () => {
+  it("option 7 depuis la racine exige une authentification, comme les autres options authentifiées (numéro non reconnu → code compte)", async () => {
     const prisma = createFakePrisma({ existingSession: existingSession() });
     const ussdAuth = createFakeUssdAuth({ resolveByPhone: vi.fn().mockResolvedValue(null) });
     const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
 
-    const result = await service.handleRequest(SESSION_ID, PHONE, "6");
+    const result = await service.handleRequest(SESSION_ID, PHONE, "7");
 
     expect(result).toEqual({ continue: true, text: "Numéro non reconnu. Entrez votre code compte :" });
   });
@@ -795,10 +795,10 @@ describe("UssdSessionService — option 3, mes factures (§2.3 Spec USSD)", () =
   });
 });
 
-describe("UssdSessionService — option 6, factures reçues (F13, ADR-096/ADR-108)", () => {
-  it("authentification réussie sur l'option 6 → résumé par organisation (nom + solde dû), tous émetteurs confondus", async () => {
+describe("UssdSessionService — option 7, factures reçues (F13, ADR-096/ADR-108)", () => {
+  it("authentification réussie sur l'option 7 → résumé par organisation (nom + solde dû), tous émetteurs confondus", async () => {
     const prisma = createFakePrisma({
-      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "6", authUserId: USER_ID } }),
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "7", authUserId: USER_ID } }),
     });
     const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
     const clientPortal = createFakeClientPortal({
@@ -826,7 +826,7 @@ describe("UssdSessionService — option 6, factures reçues (F13, ADR-096/ADR-10
 
   it("revue post-fix #2 — une authentification PIN réussie (jamais d'OTP) confirme la possession du numéro AVANT d'afficher les factures reçues, sinon listOrganizations() ne verrait jamais ce numéro (verifiedAt requis)", async () => {
     const prisma = createFakePrisma({
-      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "6", authUserId: USER_ID } }),
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "7", authUserId: USER_ID } }),
     });
     const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
     const clientPortal = createFakeClientPortal({ listOrganizations: vi.fn().mockResolvedValue([]) });
@@ -851,7 +851,7 @@ describe("UssdSessionService — option 6, factures reçues (F13, ADR-096/ADR-10
 
   it("aucune organisation trouvée → message explicite, jamais un écran vide", async () => {
     const prisma = createFakePrisma({
-      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "6", authUserId: USER_ID } }),
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "7", authUserId: USER_ID } }),
     });
     const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
     const service = new UssdSessionService(
