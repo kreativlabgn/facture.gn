@@ -16,6 +16,19 @@ export const createOrganizationSchema = z
   .refine((data) => (data.nif === undefined) === (data.etaxNumber === undefined), {
     message: "NIF et eTax sont exigés conjointement (ADR-035) — les deux ou aucun des deux",
     path: ["nif"],
+  })
+  // I4, ADR-057 — l'exonération association (non_assujetti_association, 0 bps de TVA
+  // par nature dans tax-regime.ts) ne doit jamais être atteignable par une
+  // organisation legalForm=commercial : sans cette règle, n'importe quelle
+  // organisation pouvait librement se déclarer exonérée de TVA à la création, un
+  // vecteur de fraude fiscale direct. Sens inverse volontairement PAS contraint :
+  // une association peut légitimement choisir un régime non exonéré (activité
+  // commerciale accessoire imposable) — aucune spec V/ ne l'interdit, et
+  // restreindre ce sens irait au-delà de la faille identifiée.
+  .refine((data) => data.regimeFiscal !== "non_assujetti_association" || data.legalForm === "association", {
+    message:
+      "Le régime non_assujetti_association est réservé aux organisations legalForm=association (I4, ADR-057)",
+    path: ["regimeFiscal"],
   });
 
 export type CreateOrganizationDto = z.infer<typeof createOrganizationSchema>;

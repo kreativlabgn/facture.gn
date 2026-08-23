@@ -21,6 +21,16 @@ export const createAssistedOrganizationSchema = z
   .refine((data) => (data.nif === undefined) === (data.etaxNumber === undefined), {
     message: "NIF et eTax sont exigés conjointement (ADR-035) — les deux ou aucun des deux",
     path: ["nif"],
+  })
+  // I4, ADR-057 — même règle que create-organization.dto.ts : l'exonération
+  // association n'est jamais atteignable par legalForm=commercial, même via le
+  // Chemin B assisté (l'agent terrain ne doit pas pouvoir contourner la règle du
+  // Chemin A). Sens inverse volontairement pas contraint, voir justification dans
+  // create-organization.dto.ts.
+  .refine((data) => data.regimeFiscal !== "non_assujetti_association" || data.legalForm === "association", {
+    message:
+      "Le régime non_assujetti_association est réservé aux organisations legalForm=association (I4, ADR-057)",
+    path: ["regimeFiscal"],
   });
 
 export type CreateAssistedOrganizationDto = z.infer<typeof createAssistedOrganizationSchema>;
