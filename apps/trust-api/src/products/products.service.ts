@@ -11,9 +11,23 @@ export class ProductsService {
   // PRODUCT, voir PLAN "Clarifications"). costPrice jamais renseigné ici :
   // territoire d'E6, laissé undefined pour que Prisma applique le défaut
   // schema (null), jamais dupliqué en dur ici.
+  //
+  // E3, ADR-038 — dédoublonnage par nom (exact match insensible à la casse), contre
+  // la base existante de l'organisation. Même logique que
+  // CustomersService.create() (téléphone) : jamais de fusion automatique, juste le
+  // signal possibleDuplicateOf. Aucun ProductsService.merge() : le Backlog ne
+  // demande la fusion QUE pour les clients (E4).
   async create(dto: CreateProductDto) {
+    const existingMatch = await this.prisma.product.findFirst({
+      where: { organizationId: dto.organizationId, name: { equals: dto.name, mode: "insensitive" } },
+    });
+
     return this.prisma.product.create({
-      data: { organizationId: dto.organizationId, name: dto.name },
+      data: {
+        organizationId: dto.organizationId,
+        name: dto.name,
+        possibleDuplicateOf: existingMatch?.id ?? null,
+      },
     });
   }
 
