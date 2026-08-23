@@ -62,6 +62,7 @@ describe("CustomersService — création (C6, ADR-039)", () => {
         nif: undefined,
         creditLimit: undefined,
         notificationChannel: undefined,
+        possibleDuplicateOf: null,
       },
     });
     expect(result.id).toBe("cust-1");
@@ -74,6 +75,69 @@ describe("CustomersService — création (C6, ADR-039)", () => {
     const result = await service.create({ organizationId: "org-1", name: "Épicerie Sory" } as any);
 
     expect(result.creditLimit).toBeNull();
+  });
+});
+
+describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-038)", () => {
+  function createFakePrismaForCreate(opts: { existingMatch?: any } = {}) {
+    let createCallCount = 0;
+    return {
+      customer: {
+        findFirst: vi.fn().mockResolvedValue(opts.existingMatch ?? null),
+        create: vi.fn().mockImplementation(({ data }: any) => {
+          createCallCount += 1;
+          return Promise.resolve({ id: `cust-new-${createCallCount}`, ...data });
+        }),
+      },
+    };
+  }
+
+  it("pose possibleDuplicateOf quand le téléphone matche un client déjà en base de l'organisation", async () => {
+    const prisma = createFakePrismaForCreate({ existingMatch: { id: "cust-existant", phone: "+224622334455" } });
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({
+      organizationId: "org-1",
+      name: "Boutique Fanta (ressaisie après coupure)",
+      phone: "+224622334455",
+    } as any);
+
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", phone: "+224622334455" },
+    });
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: "cust-existant" }),
+    });
+    expect(result.possibleDuplicateOf).toBe("cust-existant");
+  });
+
+  it("laisse possibleDuplicateOf null quand aucun client de l'organisation ne partage ce téléphone", async () => {
+    const prisma = createFakePrismaForCreate();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({
+      organizationId: "org-1",
+      name: "Boutique Sory",
+      phone: "+224622334455",
+    } as any);
+
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: null }),
+    });
+    expect(result.possibleDuplicateOf).toBeNull();
+  });
+
+  it("ne fait aucune recherche de doublon quand le téléphone est absent — reste null", async () => {
+    const prisma = createFakePrismaForCreate();
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.create({ organizationId: "org-1", name: "Boutique Sory" } as any);
+
+    expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ possibleDuplicateOf: null }),
+    });
+    expect(result.possibleDuplicateOf).toBeNull();
   });
 });
 
