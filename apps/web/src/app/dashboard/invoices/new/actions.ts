@@ -31,6 +31,11 @@ export async function createAndIssueInvoiceAction(
   const customerIdRaw = formData.get("customerId");
   const customerId = customerIdRaw && customerIdRaw !== "" ? String(customerIdRaw) : undefined;
 
+  // K3, ADR-090 — champ libre optionnel, jamais vérifié ici ni côté serveur.
+  const referenceMarcheRaw = formData.get("referenceMarche");
+  const referenceMarche =
+    referenceMarcheRaw && String(referenceMarcheRaw).trim() !== "" ? String(referenceMarcheRaw).trim() : undefined;
+
   let rawLines: RawLine[];
   try {
     rawLines = JSON.parse(String(formData.get("linesJson") ?? "[]"));
@@ -56,6 +61,7 @@ export async function createAndIssueInvoiceAction(
       documentType,
       customerId,
       lines,
+      referenceMarche,
     });
     await issueInvoice(token, invoice.id);
   } catch (error) {

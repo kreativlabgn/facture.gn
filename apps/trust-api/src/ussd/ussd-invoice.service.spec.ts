@@ -5,11 +5,41 @@ const USER_ID = "user-1";
 const ORG_ID = "org-1";
 const PHONE = "+224622334455";
 
-function createFakePrisma(overrides: { customer?: any } = {}) {
+function createFakePrisma(overrides: { customer?: any; findManyResult?: any[] } = {}) {
   return {
     customer: {
       findFirst: vi.fn().mockResolvedValue(overrides.customer ?? null),
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "customer-1", ...data })),
+      findMany: vi.fn().mockResolvedValue(overrides.findManyResult ?? []),
+    },
+  };
+}
+
+// Revue post-fix #3 — un fake Prisma qui APPLIQUE réellement le filtrage
+// décrit par `where` sur un jeu de données en mémoire, contrairement à
+// createFakePrisma ci-dessus (findManyResult renvoie n'importe quelle liste
+// préparée, que le service ait ou non correctement scopé sa requête).
+// Nécessaire pour prouver l'absence d'IDOR : un mock qui vérifie seulement
+// la FORME du where passerait même si organizationId était oublié dans le
+// code du service.
+function createScopedCustomerFakePrisma(customers: any[]) {
+  return {
+    customer: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      findMany: vi.fn().mockImplementation(({ where, orderBy, take }: any) => {
+        let result = customers.filter((c) => c.organizationId === where.organizationId);
+        if (where.isPublicEntity !== undefined) {
+          result = result.filter((c) => c.isPublicEntity === where.isPublicEntity);
+        }
+        if (orderBy?.createdAt === "asc") {
+          result = [...result].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        }
+        if (typeof take === "number") {
+          result = result.slice(0, take);
+        }
+        return Promise.resolve(result);
+      }),
     },
   };
 }
@@ -143,5 +173,85 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
 
     await expect(service.emitInvoice(ORG_ID, 500_000n, undefined)).rejects.toThrow(/plafond/);
     expect(invoicesService.createDraft).not.toHaveBeenCalled();
+  });
+
+  // K3, §2.6.1 Spec USSD — Option 6 réutilise emitInvoice() tel quel, jamais un
+  // second chemin d'émission parallèle (contrainte explicite de la story).
+  it("transmet referenceMarche à createDraft quand fourni (K3, ADR-090)", async () => {
+    const invoicesService = createFakeInvoicesService();
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, createFakeVelocityTier() as any);
+
+    await service.emitInvoice(ORG_ID, 500_000n, "customer-1", "TELEMO-2026-000123");
+
+    expect(invoicesService.createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceMarche: "TELEMO-2026-000123" }),
+    );
+  });
+
+  it("sans referenceMarche, le comportement reste strictement identique à l'Option 4 — non-régression", async () => {
+    const invoicesService = createFakeInvoicesService();
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, createFakeVelocityTier() as any);
+
+    await service.emitInvoice(ORG_ID, 500_000n, "customer-1");
+
+    expect(invoicesService.createDraft).toHaveBeenCalledWith({
+      organizationId: ORG_ID,
+      documentType: "invoice",
+      customerId: "customer-1",
+      lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
+      discountPct: 0,
+      referenceMarche: undefined,
+    });
+  });
+});
+
+// K3, §2.6.1 Spec USSD — Option 6 sélectionne parmi les clients déjà marqués
+// entité publique (F16, ADR-105) : la session condensée USSD ne crée jamais ce
+// rattachement elle-même (flagPublicEntity() est hors périmètre USSD, §6 Spec).
+describe("UssdInvoiceService — clients entité publique déjà rattachés (K3, décision 1)", () => {
+  it("filtre les clients de l'organisation marqués isPublicEntity, jamais les autres", async () => {
+    const prisma = createFakePrisma({
+      findManyResult: [{ id: "customer-public-1", name: "Ministère du Plan" }],
+    });
+    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
+
+    const result = await service.listPublicEntityCustomers(ORG_ID);
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: ORG_ID, isPublicEntity: true } }),
+    );
+    expect(result).toEqual([{ id: "customer-public-1", name: "Ministère du Plan" }]);
+  });
+
+  it("liste vide si aucun client de l'organisation n'est encore marqué entité publique", async () => {
+    const prisma = createFakePrisma({ findManyResult: [] });
+    const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
+
+    await expect(service.listPublicEntityCustomers(ORG_ID)).resolves.toEqual([]);
+  });
+
+  // Revue post-fix #3 — jusqu'ici les tests ne vérifiaient que la FORME du
+  // where transmis à un mock inconditionnellement obéissant. Ici, un vrai
+  // jeu de données à 2 organisations, filtré par un fake Prisma qui applique
+  // réellement le where (createScopedCustomerFakePrisma) : prouve que
+  // l'appel avec organizationId d'une seule organisation exclut bien les
+  // clients entité publique de l'autre organisation.
+  it("exclut les clients entité publique d'une autre organisation (IDOR)", async () => {
+    const customers = [
+      { id: "cust-org-a", organizationId: "org-a", isPublicEntity: true, name: "Ministère A", createdAt: "2026-01-01" },
+      { id: "cust-org-b", organizationId: "org-b", isPublicEntity: true, name: "Ministère B", createdAt: "2026-01-02" },
+    ];
+    const prisma = createScopedCustomerFakePrisma(customers);
+    const service = new UssdInvoiceService(
+      prisma as any,
+      createFakeOrganizationsService() as any,
+      createFakeInvoicesService() as any,
+      createFakeVelocityTier() as any,
+    );
+
+    const result = await service.listPublicEntityCustomers("org-a");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("cust-org-a");
   });
 });

@@ -41,6 +41,19 @@ export const createInvoiceSchema = z
     referenceAmount: z.coerce.bigint().positive().optional(),
     fxRate: z.string().regex(/^\d+(\.\d+)?$/, "Taux de change attendu au format décimal (ex. 9440.50)").optional(),
     fxRateDate: z.coerce.date().optional(),
+    // K3, ADR-090 — "Référence marché TELEMO", recopiée à la main par la PME au
+    // moment de l'émission, AUCUNE vérification automatique. Optionnel : une
+    // facture sans référence suit exactement le même parcours qu'une facture
+    // avec référence (Backlog K3).
+    // Revue post-fix #1 — pas de .min(1) : une chaîne vide "" envoyée
+    // explicitement par un appelant HTTP direct est acceptée telle quelle,
+    // sans être promue en erreur de validation ni réinterprétée en
+    // undefined ici. La normalisation "champ vide → pas de référence" est
+    // déjà faite en amont côté appelant (ex. USSD : voir
+    // `input.trim() || undefined` dans ussd-session.service.ts) — cohérent
+    // avec "AUCUNE vérification automatique" : ce DTO ne juge pas le
+    // contenu du champ, il le transporte tel quel.
+    referenceMarche: z.string().optional(),
   })
   .refine(
     (data) =>

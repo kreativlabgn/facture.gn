@@ -61,11 +61,15 @@ function createFakeUssdInvoice(overrides: {
   resolveOrganizationForEmission?: ReturnType<typeof vi.fn>;
   resolveOrCreateCustomer?: ReturnType<typeof vi.fn>;
   emitInvoice?: ReturnType<typeof vi.fn>;
+  listPublicEntityCustomers?: ReturnType<typeof vi.fn>;
 } = {}) {
   return {
     resolveOrganizationForEmission: overrides.resolveOrganizationForEmission ?? vi.fn().mockResolvedValue(ORG_ID),
     resolveOrCreateCustomer: overrides.resolveOrCreateCustomer ?? vi.fn().mockResolvedValue(undefined),
     emitInvoice: overrides.emitInvoice ?? vi.fn().mockResolvedValue({ id: "inv-1", number: "FG-2026-000001" }),
+    // K3 — vide par défaut : la plupart des tests d'options 1/3/4/5/7 ne
+    // touchent jamais à l'option 6, aucun client public n'est pertinent.
+    listPublicEntityCustomers: overrides.listPublicEntityCustomers ?? vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -81,8 +85,14 @@ function createFakeUssdPayment(overrides: {
   };
 }
 
-function createFakeUssdInvoiceList(overrides: { listRecent?: ReturnType<typeof vi.fn> } = {}) {
-  return { listRecent: overrides.listRecent ?? vi.fn().mockResolvedValue([]) };
+function createFakeUssdInvoiceList(overrides: {
+  listRecent?: ReturnType<typeof vi.fn>;
+  listPublicOrderStatus?: ReturnType<typeof vi.fn>;
+} = {}) {
+  return {
+    listRecent: overrides.listRecent ?? vi.fn().mockResolvedValue([]),
+    listPublicOrderStatus: overrides.listPublicOrderStatus ?? vi.fn().mockResolvedValue([]),
+  };
 }
 
 function createFakeUssdAccount(overrides: {
@@ -1160,6 +1170,334 @@ describe("UssdSessionService — option 5, gérer mon compte (§2.5 Spec USSD)",
         text: "Seul le propriétaire ou un administrateur peut inviter un proche",
       });
     });
+  });
+});
+
+describe("UssdSessionService — option 6, commande publique (K3, §2.6 Spec USSD, ADR-086/ADR-090)", () => {
+  it("authentification réussie sur l'option 6 → affiche le sous-menu 6.1/6.2", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "6", authUserId: USER_ID } }),
+    });
+    const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+    expect(result.continue).toBe(true);
+    expect(result.text).toContain("Émettre une facture");
+    expect(result.text).toContain("Statut de validation");
+    expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: "public_order_menu", userId: USER_ID, organizationId: ORG_ID }) }),
+    );
+  });
+
+  it("aucune organisation habilitée trouvée → message d'erreur propre (même garde que les options 1/3/4/5/7)", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "auth_pin", contextData: { pendingOption: "6", authUserId: USER_ID } }),
+    });
+    const ussdAuth = createFakeUssdAuth({ verifyPin: vi.fn().mockResolvedValue({ success: true, locked: false }) });
+    const ussdInvoice = createFakeUssdInvoice({ resolveOrganizationForEmission: vi.fn().mockResolvedValue(null) });
+    const service = new UssdSessionService(prisma as any, ussdAuth as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "1234");
+
+    expect(result).toEqual({ continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." });
+  });
+
+  describe("6.1 — émettre une facture (décision 1 du plan : sélection parmi les clients déjà entité publique, F16)", () => {
+    it("un seul client public → sélection automatique, demande directement le montant", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "public_order_menu", organizationId: ORG_ID }),
+      });
+      const ussdInvoice = createFakeUssdInvoice({
+        listPublicEntityCustomers: vi.fn().mockResolvedValue([{ id: "customer-public-1", name: "Ministère du Plan" }]),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "1");
+
+      expect(result).toEqual({ continue: true, text: "Montant de la facture (GNF) :" });
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: "public_order_awaiting_amount",
+            contextData: { publicOrderCustomerId: "customer-public-1" },
+          }),
+        }),
+      );
+    });
+
+    it("aucun client public → message explicite renvoyant vers l'application, session terminée (décision 1, non-négociable)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "public_order_menu", organizationId: ORG_ID }),
+      });
+      const ussdInvoice = createFakeUssdInvoice({ listPublicEntityCustomers: vi.fn().mockResolvedValue([]) });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "1");
+
+      expect(result.continue).toBe(false);
+      expect(result.text).toContain("application");
+    });
+
+    it("plusieurs clients publics → liste numérotée, demande un numéro", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "public_order_menu", organizationId: ORG_ID }),
+      });
+      const ussdInvoice = createFakeUssdInvoice({
+        listPublicEntityCustomers: vi.fn().mockResolvedValue([
+          { id: "customer-public-1", name: "Ministère du Plan" },
+          { id: "customer-public-2", name: "Mairie de Kaloum" },
+        ]),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "1");
+
+      expect(result.continue).toBe(true);
+      expect(result.text).toContain("1. Ministère du Plan");
+      expect(result.text).toContain("2. Mairie de Kaloum");
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: "public_order_customer_select" }),
+        }),
+      );
+    });
+
+    it("sélection d'un numéro valide dans la liste → demande le montant", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_customer_select",
+          contextData: {
+            publicOrderCustomerOptions: [
+              { id: "customer-public-1", name: "Ministère du Plan" },
+              { id: "customer-public-2", name: "Mairie de Kaloum" },
+            ],
+          },
+        }),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "2");
+
+      expect(result).toEqual({ continue: true, text: "Montant de la facture (GNF) :" });
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: "public_order_awaiting_amount",
+            contextData: { publicOrderCustomerId: "customer-public-2" },
+          }),
+        }),
+      );
+    });
+
+    it("numéro hors plage → message d'échec, aucune action", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_customer_select",
+          contextData: { publicOrderCustomerOptions: [{ id: "customer-public-1", name: "Ministère du Plan" }] },
+        }),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "9");
+
+      expect(result).toEqual({ continue: false, text: "Numéro invalide." });
+    });
+
+    it("montant invalide → reprompt sans avancer d'état", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_amount",
+          contextData: { publicOrderCustomerId: "customer-public-1" },
+        }),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "abc");
+
+      expect(result).toEqual({ continue: true, text: "Montant invalide. Réessayez :" });
+    });
+
+    it("montant valide → demande la référence marché (optionnelle)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_amount",
+          contextData: { publicOrderCustomerId: "customer-public-1" },
+        }),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "500000");
+
+      expect(result.continue).toBe(true);
+      expect(result.text).toContain("Référence marché");
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: "public_order_awaiting_reference",
+            contextData: { publicOrderCustomerId: "customer-public-1", emitAmountCentimes: "50000000" },
+          }),
+        }),
+      );
+    });
+
+    it("référence marché renseignée → émission avec referenceMarche transmis tel quel (ADR-090)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_reference",
+          contextData: { publicOrderCustomerId: "customer-public-1", emitAmountCentimes: "50000000" },
+          organizationId: ORG_ID,
+        }),
+      });
+      const ussdInvoice = createFakeUssdInvoice();
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "TELEMO-2026-000123");
+
+      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", "TELEMO-2026-000123");
+      // Revue post-fix #4 — texte exact (pas seulement .toContain(numéro)) :
+      // customerId est TOUJOURS renseigné sur l'Option 6 (client entité
+      // publique obligatoirement sélectionné), donc C9 part TOUJOURS. Le
+      // message doit le mentionner, comme l'Option 4 (:655-656), pour que
+      // cette régression ne puisse plus passer inaperçue.
+      expect(result.text).toBe("Facture FG-2026-000001 émise (Commande Publique). Lien de paiement envoyé par SMS.");
+    });
+
+    it("référence marché laissée vide → émission SANS référence, exactement le même parcours (Backlog K3, non-négociable)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_reference",
+          contextData: { publicOrderCustomerId: "customer-public-1", emitAmountCentimes: "50000000" },
+          organizationId: ORG_ID,
+        }),
+      });
+      const ussdInvoice = createFakeUssdInvoice();
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "");
+
+      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", undefined);
+      // Revue post-fix #4 — texte exact : même sans référence marché, le
+      // client entité publique reste toujours renseigné, donc la mention SMS
+      // reste toujours présente (identique au cas avec référence ci-dessus).
+      expect(result.text).toBe("Facture FG-2026-000001 émise (Commande Publique). Lien de paiement envoyé par SMS.");
+    });
+
+    it("transite vers emit_terminal après émission — jamais un rejeu qui réémettrait (même garde que l'Option 4)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_reference",
+          contextData: { publicOrderCustomerId: "customer-public-1", emitAmountCentimes: "50000000" },
+          organizationId: ORG_ID,
+        }),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      await service.handleRequest(SESSION_ID, PHONE, "");
+
+      expect(prisma.ussdSession.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "session-row-1", state: "public_order_awaiting_reference" },
+          data: expect.objectContaining({ state: "emit_processing" }),
+        }),
+      );
+      expect(prisma.ussdSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: "emit_terminal",
+            contextData: expect.objectContaining({ emitTerminalMessage: expect.stringContaining("FG-2026-000001") }),
+          }),
+        }),
+      );
+    });
+
+    it("deux requêtes réellement concurrentes pour le même sessionId n'émettent qu'UNE SEULE facture", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_reference",
+          contextData: { publicOrderCustomerId: "customer-public-1", emitAmountCentimes: "50000000" },
+          organizationId: ORG_ID,
+        }),
+      });
+      const ussdInvoice = createFakeUssdInvoice();
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const [first, second] = await Promise.all([
+        service.handleRequest(SESSION_ID, PHONE, ""),
+        service.handleRequest(SESSION_ID, PHONE, ""),
+      ]);
+
+      expect(ussdInvoice.emitInvoice).toHaveBeenCalledTimes(1);
+      const results = [first, second];
+      const winner = results.filter((r) => r.text.includes("FG-2026-000001"));
+      const loser = results.filter((r) => r.text === "Traitement en cours, veuillez patienter.");
+      expect(winner).toHaveLength(1);
+      expect(loser).toHaveLength(1);
+    });
+
+    it("plafond de vélocité dépassé (D4, cohérence avec l'Option 4) → message d'échec explicite, session terminée", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({
+          state: "public_order_awaiting_reference",
+          contextData: { publicOrderCustomerId: "customer-public-1", emitAmountCentimes: "50000000" },
+          organizationId: ORG_ID,
+        }),
+      });
+      const ussdInvoice = createFakeUssdInvoice({
+        emitInvoice: vi.fn().mockRejectedValue(new ForbiddenException("Plafond journalier dépassé (palier T0) : 1 500 000 GNF/jour")),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "");
+
+      expect(result).toEqual({ continue: false, text: "Plafond journalier dépassé (palier T0) : 1 500 000 GNF/jour" });
+    });
+  });
+
+  describe("6.2 — statut de validation (lecture seule, expose validatedByAdministration)", () => {
+    it("affiche le statut de chaque facture commande publique (validée / en attente)", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "public_order_menu", organizationId: ORG_ID }),
+      });
+      const ussdInvoiceList = createFakeUssdInvoiceList({
+        listPublicOrderStatus: vi.fn().mockResolvedValue([
+          { number: "FG-2026-000010", validatedByAdministration: true },
+          { number: "FG-2026-000011", validatedByAdministration: false },
+        ]),
+      });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, ussdInvoiceList as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "2");
+
+      expect(ussdInvoiceList.listPublicOrderStatus).toHaveBeenCalledWith(ORG_ID);
+      expect(result.text).toContain("FG-2026-000010");
+      expect(result.text).toContain("FG-2026-000011");
+      expect(result.continue).toBe(false);
+    });
+
+    it("aucune facture commande publique → message explicite, jamais un écran vide", async () => {
+      const prisma = createFakePrisma({
+        existingSession: existingSession({ state: "public_order_menu", organizationId: ORG_ID }),
+      });
+      const ussdInvoiceList = createFakeUssdInvoiceList({ listPublicOrderStatus: vi.fn().mockResolvedValue([]) });
+      const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, ussdInvoiceList as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+      const result = await service.handleRequest(SESSION_ID, PHONE, "2");
+
+      expect(result).toEqual({ continue: false, text: "Aucune facture Commande Publique pour le moment." });
+    });
+  });
+
+  it("choix invalide dans le sous-menu 6 → message d'échec", async () => {
+    const prisma = createFakePrisma({
+      existingSession: existingSession({ state: "public_order_menu", organizationId: ORG_ID }),
+    });
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, createFakeUssdInvoice() as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any, createFakeClientPortal() as any);
+
+    const result = await service.handleRequest(SESSION_ID, PHONE, "9");
+
+    expect(result).toEqual({ continue: false, text: "Choix invalide." });
   });
 });
 

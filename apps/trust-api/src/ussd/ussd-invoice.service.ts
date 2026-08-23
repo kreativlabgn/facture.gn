@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { InvoicesService } from "../invoices/invoices.service";
 import { VelocityTierService } from "./velocity-tier.service";
+import { MAX_RESULTS } from "./ussd-invoice-list.service";
 
 // Même trio que POST /invoices (invoices.controller.ts) — cet appel bypasse
 // RolesGuard (appel direct service à service, jamais passé par le contrôleur
@@ -58,7 +59,15 @@ export class UssdInvoiceService {
   // amountCentimes : centimes GNF (convention repo), pas des GNF naturels —
   // la conversion ×100 se fait à la lecture de la saisie utilisateur, jamais
   // ici (même discipline que InvoiceForm.tsx côté web).
-  async emitInvoice(organizationId: string, amountCentimes: bigint, customerId: string | undefined) {
+  // referenceMarche : K3, §2.6.1 Spec USSD, ADR-090 — optionnel, recopié tel
+  // quel, jamais vérifié. Option 6 réutilise ce même chemin d'émission que
+  // l'Option 4, jamais un second chemin parallèle.
+  async emitInvoice(
+    organizationId: string,
+    amountCentimes: bigint,
+    customerId: string | undefined,
+    referenceMarche?: string,
+  ) {
     // D4, §2.4 Spec USSD — "plafonds velocity_tier vérifiés avant confirmation",
     // toujours avant toute création (jamais un brouillon abandonné en base).
     await this.velocityTier.assertWithinLimits(organizationId, amountCentimes);
@@ -69,7 +78,23 @@ export class UssdInvoiceService {
       customerId,
       lines: [{ description: "Vente USSD", quantity: 1, unitPrice: amountCentimes }],
       discountPct: 0,
+      referenceMarche,
     });
     return this.invoicesService.issue(draft.id);
+  }
+
+  // K3, §2.6.1 Spec USSD, décision 1 du plan — Option 6 sélectionne parmi les
+  // clients DÉJÀ marqués isPublicEntity (F16, ADR-105, action PWA réservée
+  // admin/owner) : la session condensée USSD (<90s) ne crée jamais ce
+  // rattachement elle-même (flagPublicEntity() est explicitement hors
+  // périmètre USSD, §6 Spec USSD — "aucune n'a de sens sur un menu texte à
+  // profondeur limitée"). Plafonné comme les autres listes USSD (canal texte
+  // contraint) — une PME a rarement plus de quelques administrations clientes.
+  async listPublicEntityCustomers(organizationId: string) {
+    return this.prisma.customer.findMany({
+      where: { organizationId, isPublicEntity: true },
+      orderBy: { createdAt: "asc" },
+      take: MAX_RESULTS,
+    });
   }
 }

@@ -47,6 +47,10 @@ interface SessionContext {
   payInvoiceNumber?: string;
   mandateAction?: "accept" | "revoke";
   mandateOptions?: { id: string; name: string }[];
+  // K3, §2.6.1 Spec USSD — client entité publique déjà résolu (sélection
+  // automatique ou numérotée), transmis jusqu'à l'émission finale.
+  publicOrderCustomerId?: string;
+  publicOrderCustomerOptions?: { id: string; name: string }[];
 }
 
 type UssdSessionRow = {
@@ -85,6 +89,13 @@ type UssdState =
   | "account_new_pin_confirm"
   | "account_mandate_select"
   | "account_invite_viewer_phone"
+  // K3, §2.6 Spec USSD — Option 6 "Commande Publique" (ADR-086) : sous-menu
+  // 6.1 (émettre, saisie condensée) / 6.2 (statut de validation, lecture
+  // seule).
+  | "public_order_menu"
+  | "public_order_customer_select"
+  | "public_order_awaiting_amount"
+  | "public_order_awaiting_reference"
   // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — état "stub
   // générique" pour toute option authentifiée pas encore construite (voir
   // completeAuthentication()) : manquait de l'union d'origine, ces deux
@@ -106,8 +117,9 @@ type UssdState =
 // Renumérotée de 6 vers 7 (fix/renumber-f13-ussd-option) : le premier
 // implémenteur de F13 a choisi "6" sans consulter la spec canonique
 // (V/Spec USSD facture-gn.md §1/§2.6), qui réserve explicitement l'option 6
-// à "Commande Publique" (K3, ADR-086, structure 6.1/6.2 déjà documentée,
-// pas encore construite au moment de F13).
+// à "Commande Publique" (K3, ADR-086, structure 6.1/6.2). Le "trou volontaire"
+// entre 5 et 7 (laissé par F13) se referme avec cette tâche — Option 6
+// construite ci-dessous.
 const ROOT_MENU = [
   "facture.gn *620#",
   "",
@@ -116,6 +128,7 @@ const ROOT_MENU = [
   "3. Mes factures",
   "4. Émettre une facture",
   "5. Gérer mon compte",
+  "6. Commande Publique",
   "7. Factures reçues",
 ].join("\n");
 
@@ -143,7 +156,11 @@ const MANAGE_ACCOUNT_MENU = [
 // Toute option autre que 2 (vérifier un reçu, §2.2 — aucune authentification
 // requise) exige le sous-flux d'authentification ci-dessous avant sa logique
 // propre — construite tâche par tâche par la suite de la feuille de route USSD.
-const AUTHENTICATED_OPTIONS = new Set(["1", "3", "4", "5", "7"]);
+const AUTHENTICATED_OPTIONS = new Set(["1", "3", "4", "5", "6", "7"]);
+
+// §2.6 Spec USSD — 6.1/6.2. Même discipline de numérotation que
+// MANAGE_ACCOUNT_MENU (chiffres uniquement, jamais "6.1" littéral).
+const PUBLIC_ORDER_MENU = ["1. Émettre une facture", "2. Statut de validation"].join("\n");
 
 // §1 Spec USSD — menu canonique, point d'entrée unique. Machine à états pilotée
 // par UssdSession.state (même style que la "machine à états" déjà pratiquée dans
@@ -236,6 +253,14 @@ export class UssdSessionService {
         return this.handleAccountMandateSelect(session, context, input);
       case "account_invite_viewer_phone":
         return this.handleAccountInviteViewerPhone(session, input);
+      case "public_order_menu":
+        return this.handlePublicOrderMenu(session, input);
+      case "public_order_customer_select":
+        return this.handlePublicOrderCustomerSelect(session, context, input);
+      case "public_order_awaiting_amount":
+        return this.handlePublicOrderAmount(session, context, input);
+      case "public_order_awaiting_reference":
+        return this.handlePublicOrderReference(session, context, input);
       // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — même
       // pattern que emit_terminal ci-dessus : un rejeu (sessionId réutilisé
       // avant expiresAt) sur une option authentifiée pas encore construite
@@ -500,6 +525,30 @@ export class UssdSessionService {
         },
       });
       return { continue: true, text: MANAGE_ACCOUNT_MENU };
+    }
+
+    // K3, ADR-086 — Option 6 Commande Publique : sous-menu 6.1/6.2, même
+    // re-résolution d'organisation que les options 1/3/4/5/7 (Security Audit
+    // 2026-08-23, finding #7) — authOrganizationId seul n'est jamais fait
+    // confiance.
+    if (context.pendingOption === "6") {
+      const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
+        context.authUserId as string,
+        context.authOrganizationId,
+      );
+      if (!organizationId) {
+        return { continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." };
+      }
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "public_order_menu" satisfies UssdState,
+          userId: context.authUserId,
+          organizationId,
+          contextData: {},
+        },
+      });
+      return { continue: true, text: PUBLIC_ORDER_MENU };
     }
 
     // F13, ADR-096/ADR-108 — identité client_portal déjà résolue par le même
@@ -815,6 +864,136 @@ export class UssdSessionService {
 
     await this.ussdAccount.changePin(session.userId as string, session.organizationId as string, input);
     return { continue: false, text: "PIN changé. Un SMS de confirmation vous a été envoyé." };
+  }
+
+  // K3, §2.6.1 Spec USSD, décision 1 du plan — sélectionne parmi les clients
+  // DÉJÀ marqués isPublicEntity (F16, action PWA réservée admin/owner) : la
+  // session USSD condensée ne crée jamais ce rattachement elle-même.
+  private async handlePublicOrderMenu(session: UssdSessionRow, input: string): Promise<UssdResponse> {
+    const organizationId = session.organizationId as string;
+
+    if (input === "1") {
+      const customers = await this.ussdInvoice.listPublicEntityCustomers(organizationId);
+      if (customers.length === 0) {
+        return {
+          continue: false,
+          text: "Aucun client entité publique enregistré. Marquez un client comme entité publique depuis l'application avant d'émettre une facture Commande Publique.",
+        };
+      }
+      if (customers.length === 1) {
+        await this.setState(session.id, "public_order_awaiting_amount", { publicOrderCustomerId: customers[0].id });
+        return { continue: true, text: "Montant de la facture (GNF) :" };
+      }
+
+      const options = customers.map((customer: { id: string; name: string }) => ({
+        id: customer.id,
+        name: customer.name,
+      }));
+      await this.setState(session.id, "public_order_customer_select", { publicOrderCustomerOptions: options });
+      const lines = options.map((option, index) => `${index + 1}. ${option.name}`);
+      return { continue: true, text: [...lines, "Choisissez le client entité publique :"].join("\n") };
+    }
+
+    if (input === "2") {
+      return this.renderPublicOrderStatus(organizationId);
+    }
+
+    return { continue: false, text: "Choix invalide." };
+  }
+
+  private async handlePublicOrderCustomerSelect(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    const options = context.publicOrderCustomerOptions ?? [];
+    const index = Number(input) - 1;
+    const selected = Number.isInteger(index) ? options[index] : undefined;
+    if (!selected) {
+      return { continue: false, text: "Numéro invalide." };
+    }
+
+    await this.setState(session.id, "public_order_awaiting_amount", { publicOrderCustomerId: selected.id });
+    return { continue: true, text: "Montant de la facture (GNF) :" };
+  }
+
+  // Même format que handleEmitAmount (§2.4) — montant seul, jamais une
+  // description (séquence <90s).
+  private async handlePublicOrderAmount(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    if (!AMOUNT_FORMAT.test(input)) {
+      return { continue: true, text: "Montant invalide. Réessayez :" };
+    }
+    const amountCentimes = (BigInt(input) * 100n).toString();
+    await this.setState(session.id, "public_order_awaiting_reference", {
+      publicOrderCustomerId: context.publicOrderCustomerId,
+      emitAmountCentimes: amountCentimes,
+    });
+    return { continue: true, text: "Référence marché TELEMO (optionnel, laissez vide si aucune) :" };
+  }
+
+  // ADR-090 — champ libre recopié à la main, AUCUNE vérification automatique.
+  // Une référence vide suit exactement le même parcours qu'une référence
+  // renseignée (Backlog K3) : même émission, même garde de rejeu.
+  private async handlePublicOrderReference(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    const referenceMarche = input.trim() || undefined;
+    const organizationId = session.organizationId as string;
+    const amountCentimes = BigInt(context.emitAmountCentimes as string);
+    const customerId = context.publicOrderCustomerId as string;
+
+    // Security Audit 2026-08-23, finding #4 (durci en revue post-fix #2) — même
+    // garde ATOMIQUE que emit_awaiting_customer_phone (Option 4) et anon_emit :
+    // where:{state: "public_order_awaiting_reference"} garantit qu'une seule
+    // requête concurrente peut gagner la transition.
+    const claimed = await this.tryClaimProcessingState(session.id, "public_order_awaiting_reference", context);
+    if (!claimed) {
+      return { continue: false, text: "Traitement en cours, veuillez patienter." };
+    }
+
+    let invoice;
+    try {
+      invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, customerId, referenceMarche);
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        await this.setState(session.id, "emit_terminal", { emitTerminalMessage: error.message });
+        return { continue: false, text: error.message };
+      }
+      throw error;
+    }
+
+    // Revue post-fix #4 — customerId est TOUJOURS renseigné ici (client entité
+    // publique obligatoirement sélectionné, handlePublicOrderCustomerSelect
+    // ci-dessus), donc C9 (notification best-effort) part TOUJOURS. Même
+    // principe que l'Option 4 (:655) : le message reflète fidèlement ce qui a
+    // réellement eu lieu, jamais un message générique qui omettrait un effet
+    // de bord réel.
+    const smsNote = customerId ? " Lien de paiement envoyé par SMS." : "";
+    const message = `Facture ${invoice.number} émise (Commande Publique).${smsNote}`;
+    await this.setState(session.id, "emit_terminal", { emitTerminalMessage: message });
+    return { continue: false, text: message };
+  }
+
+  // K3, §2.6.2 Spec USSD — EXPOSE validatedByAdministration déjà positionné
+  // par PublicBuyerPortalService.validateLiquidation() (J1), ne reconstruit
+  // rien. Aucune donnée Trésor (Niveau 3, ADR-086) — hors scope, non construit.
+  private async renderPublicOrderStatus(organizationId: string): Promise<UssdResponse> {
+    const invoices = await this.ussdInvoiceList.listPublicOrderStatus(organizationId);
+    if (invoices.length === 0) {
+      return { continue: false, text: "Aucune facture Commande Publique pour le moment." };
+    }
+
+    const lines = invoices.map(
+      (invoice: { number: string | null; validatedByAdministration: boolean }) =>
+        `${invoice.number} — ${invoice.validatedByAdministration ? "Validée par le DAF" : "En attente de validation DAF"}`,
+    );
+    return { continue: false, text: lines.join("\n") };
   }
 
   // §2.2 Spec USSD — aucune authentification requise, statut de contestation

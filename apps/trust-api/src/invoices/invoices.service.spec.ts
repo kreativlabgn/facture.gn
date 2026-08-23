@@ -261,6 +261,45 @@ describe("InvoicesService — montant de référence en devise étrangère (I3, 
   });
 });
 
+describe("InvoicesService — référence marché commande publique B2G (K3, ADR-090)", () => {
+  it("persiste referenceMarche tel quel quand fourni — aucune vérification automatique (ADR-090)", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Fourniture matériel bureau", quantity: 1, unitPrice: 1_180_000n }],
+      referenceMarche: "TELEMO-2026-000123",
+    } as any);
+
+    expect(result.referenceMarche).toBe("TELEMO-2026-000123");
+  });
+
+  it("sans referenceMarche, le comportement reste strictement inchangé — même parcours qu'avec référence (Backlog K3)", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 100_000n }],
+    } as any);
+
+    expect(result.referenceMarche).toBeUndefined();
+  });
+});
+
 function createFakePrismaForConvertToInvoice(
   proforma: any,
   regimeFiscal: string,
