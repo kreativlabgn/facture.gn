@@ -16,7 +16,22 @@ ALTER TABLE "assisted_session" ADD COLUMN     "expires_at" TIMESTAMP(3),
 ADD COLUMN     "revoked_at" TIMESTAMP(3);
 
 -- AlterTable (finding #2 — refunds idempotents, même pattern que payment.idempotency_key)
-ALTER TABLE "refund" ADD COLUMN     "idempotency_key" TEXT NOT NULL;
+-- Security Audit 2026-08-23, revue post-fix #3 — contrairement à Payment
+-- (idempotencyKey ajouté dès la CREATE TABLE initiale, jamais de ligne
+-- existante à concerner), la table refund existe déjà depuis la migration
+-- 20260809150541_add_refund. Un ADD COLUMN ... NOT NULL sans DEFAULT échouerait
+-- au déploiement dès qu'un seul remboursement existe déjà en base (Postgres
+-- rejette un NOT NULL sur une colonne fraîchement ajoutée si des lignes non
+-- nulles ne peuvent être garanties). Colonne nullable d'abord, backfill par
+-- UUID généré (jamais réutilisable comme vraie clé d'idempotence applicative —
+-- ces lignes existantes n'ont jamais eu de clé d'idempotence réelle, seul le
+-- besoin ici est de satisfaire la contrainte), puis contrainte NOT NULL posée
+-- en dernier.
+ALTER TABLE "refund" ADD COLUMN     "idempotency_key" TEXT;
+
+UPDATE "refund" SET "idempotency_key" = gen_random_uuid()::text WHERE "idempotency_key" IS NULL;
+
+ALTER TABLE "refund" ALTER COLUMN "idempotency_key" SET NOT NULL;
 
 -- CreateIndex
 CREATE UNIQUE INDEX "refund_idempotency_key_key" ON "refund"("idempotency_key");
