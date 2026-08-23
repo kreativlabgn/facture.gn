@@ -7,6 +7,7 @@ function createFakePrisma(
     requesterMembership?: any;
     mandates?: any[];
     platformFeeSum?: bigint | null;
+    payments?: any[];
     credits?: any[];
     existingCredit?: any;
     practice?: any;
@@ -24,8 +25,19 @@ function createFakePrisma(
     mandate: {
       findMany: vi.fn().mockResolvedValue(overrides.mandates ?? []),
     },
+    // Quality Audit 2026-08-23, finding #13 — payment.aggregate() par mandat
+    // remplacé par UN SEUL payment.findMany() (agrégé en JS ensuite) : le
+    // raccourci platformFeeSum (toutes les tests existants n'utilisent qu'une
+    // seule organisation, "org-1") synthétise la même ligne qu'avant sans
+    // devoir réécrire chaque test individuellement ; payments permet un
+    // contrôle explicite quand plusieurs organisations sont en jeu.
     payment: {
-      aggregate: vi.fn().mockResolvedValue({ _sum: { platformFeeAmount: overrides.platformFeeSum ?? null } }),
+      findMany: vi.fn().mockResolvedValue(
+        overrides.payments ??
+          (overrides.platformFeeSum != null
+            ? [{ platformFeeAmount: overrides.platformFeeSum, invoice: { organizationId: "org-1" } }]
+            : []),
+      ),
     },
     revenueShareCredit: {
       findUnique: vi.fn().mockResolvedValue(overrides.existingCredit ?? null),
@@ -103,14 +115,46 @@ describe("RevenueShareService.generate (H4, ADR-071)", () => {
 
     await service.generate("practice-1", "user-1", "2026-08");
 
-    expect(prisma.payment.aggregate).toHaveBeenCalledWith({
+    expect(prisma.payment.findMany).toHaveBeenCalledWith({
       where: {
-        invoice: { organizationId: "org-1" },
+        invoice: { organizationId: { in: ["org-1"] } },
         status: "completed",
         collectedAt: { gte: new Date("2026-08-01T00:00:00.000Z"), lt: new Date("2026-09-01T00:00:00.000Z") },
       },
-      _sum: { platformFeeAmount: true },
+      select: { platformFeeAmount: true, invoice: { select: { organizationId: true } } },
     });
+  });
+
+  it("agrège correctement les paiements de plusieurs organisations mandantes en une seule requête (Quality Audit 2026-08-23, finding #13)", async () => {
+    const prisma = createFakePrisma({
+      mandates: [
+        { id: "mandate-1", practiceId: "practice-1", organizationId: "org-1", status: "active" },
+        { id: "mandate-2", practiceId: "practice-1", organizationId: "org-2", status: "active" },
+      ],
+      payments: [
+        { platformFeeAmount: 50_000n, invoice: { organizationId: "org-1" } },
+        { platformFeeAmount: 30_000n, invoice: { organizationId: "org-1" } },
+        { platformFeeAmount: 20_000n, invoice: { organizationId: "org-2" } },
+      ],
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    await service.generate("practice-1", "user-1", "2026-08");
+
+    // Une seule requête payment.findMany, pas une par mandat.
+    expect(prisma.payment.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.revenueShareCredit.upsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        create: expect.objectContaining({ organizationId: "org-1", grossCommissionCentimes: 80_000n }),
+      }),
+    );
+    expect(prisma.revenueShareCredit.upsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        create: expect.objectContaining({ organizationId: "org-2", grossCommissionCentimes: 20_000n }),
+      }),
+    );
   });
 
   it("ignore les mandats non actifs (pending/revoked/expired)", async () => {
@@ -165,7 +209,6 @@ describe("RevenueShareService.generate (H4, ADR-071)", () => {
     const result = await service.generate("practice-1", "user-1", "2026-08");
 
     expect(prisma.revenueShareCredit.upsert).not.toHaveBeenCalled();
-    expect(prisma.payment.aggregate).not.toHaveBeenCalled();
     expect(result[0]).toEqual(
       expect.objectContaining({ id: "credit-existing", status: "paid", creditedAmountCentimes: 8_000n }),
     );

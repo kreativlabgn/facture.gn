@@ -25,6 +25,35 @@ export class RevenueShareService {
       where: { practiceId, status: "active", ...mandateNotExpiredWhere() },
     });
 
+    // Quality Audit 2026-08-23, finding #13 — UNE seule requête pour la somme
+    // des commissions de TOUTES les organisations mandantes de la période,
+    // plutôt qu'un payment.aggregate() répété par mandat dans la boucle (3
+    // round-trips DB séquentiels par mandat auparavant : findUnique + aggregate
+    // + upsert). Payment n'a pas de organizationId scalaire propre (seulement
+    // invoiceId) — un vrai groupBy Prisma sur invoice.organizationId n'est donc
+    // pas possible nativement ; on récupère les paiements pertinents en une
+    // fois et on agrège en JS, plutôt que du $queryRaw (pas nécessaire ici,
+    // contrairement au verrou FOR UPDATE du finding #1 — le volume de lignes
+    // reste borné à une période/un portefeuille de mandats, pas à tout
+    // l'historique).
+    const organizationIds = activeMandates.map((mandate) => mandate.organizationId);
+    const relevantPayments = await this.prisma.payment.findMany({
+      where: {
+        invoice: { organizationId: { in: organizationIds } },
+        status: "completed",
+        collectedAt: { gte: start, lt: end },
+      },
+      select: { platformFeeAmount: true, invoice: { select: { organizationId: true } } },
+    });
+    const commissionByOrganization = new Map<string, bigint>();
+    for (const payment of relevantPayments) {
+      const organizationId = payment.invoice.organizationId;
+      commissionByOrganization.set(
+        organizationId,
+        (commissionByOrganization.get(organizationId) ?? 0n) + payment.platformFeeAmount,
+      );
+    }
+
     const credits = [];
     for (const mandate of activeMandates) {
       // Un crédit déjà marqué "paid" (futur mécanisme, pas encore construit)
@@ -45,15 +74,7 @@ export class RevenueShareService {
         continue;
       }
 
-      const aggregate = await this.prisma.payment.aggregate({
-        where: {
-          invoice: { organizationId: mandate.organizationId },
-          status: "completed",
-          collectedAt: { gte: start, lt: end },
-        },
-        _sum: { platformFeeAmount: true },
-      });
-      const grossCommissionCentimes = aggregate._sum.platformFeeAmount ?? 0n;
+      const grossCommissionCentimes = commissionByOrganization.get(mandate.organizationId) ?? 0n;
       const rawShare = (grossCommissionCentimes * BigInt(REVENUE_SHARE_RATE_BPS)) / BPS_DENOMINATOR;
       const creditedAmountCentimes =
         rawShare > REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF ? REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF : rawShare;
