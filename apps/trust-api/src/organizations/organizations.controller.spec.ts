@@ -29,7 +29,7 @@ describe("OrganizationsController — POST /organizations/:id/verify-dgi (B2)", 
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL", async () => {
     const service = { verifyDgi: vi.fn().mockResolvedValue({ dgiVerificationStatus: "verified" }) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     const result = await controller.verifyDgi("org-1");
 
@@ -48,7 +48,7 @@ describe("OrganizationsController — GET /organizations/:id/audit-log (G4, ADR-
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL et les filtres de la query", async () => {
     const service = { listAuditLog: vi.fn().mockResolvedValue([]) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     await controller.listAuditLog("org-1", { category: "paiement" });
 
@@ -66,7 +66,7 @@ describe("OrganizationsController — POST /organizations/:id/commercial-tier (H
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL et le palier demandé", async () => {
     const service = { upgradeCommercialTier: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     const result = await controller.upgradeCommercialTier("org-1", { tier: "pro" });
 
@@ -92,11 +92,98 @@ describe("OrganizationsController — POST /organizations/:id/signing-key/revoke
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL", async () => {
     const service = { revokeSigningKey: vi.fn().mockResolvedValue({ id: "signing-key-1", revokedAt: new Date() }) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     const result = await controller.revokeSigningKey("org-1");
 
     expect(service.revokeSigningKey).toHaveBeenCalledWith("org-1");
     expect(result.id).toBe("signing-key-1");
+  });
+});
+
+// F10, revue post-fix #6 — les 3 nouvelles routes pending-invites n'avaient
+// aucun test de délégation (seul le service PendingMemberInviteService était
+// testé isolément).
+describe("OrganizationsController — POST/GET .../pending-invites (F10)", () => {
+  it("restreint invitePendingMember à owner/admin, résolu via idSource \"organization\"", () => {
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, OrganizationsController.prototype.invitePendingMember)).toEqual([
+      "owner",
+      "admin",
+    ]);
+    expect(
+      reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.invitePendingMember),
+    ).toBe("organization");
+  });
+
+  it("invitePendingMember délègue à PendingMemberInviteService.inviteToOrganization", async () => {
+    const pendingMemberInviteService = {
+      inviteToOrganization: vi.fn().mockResolvedValue({ id: "invite-1" }),
+      listPendingForOrganization: vi.fn(),
+      revokeForOrganization: vi.fn(),
+    };
+    const controller = new OrganizationsController({} as any, pendingMemberInviteService as any);
+
+    const result = await controller.invitePendingMember(
+      "org-1",
+      { msisdn: "+224600000001", role: "cashier" },
+      { id: "requester-1" } as any,
+    );
+
+    expect(pendingMemberInviteService.inviteToOrganization).toHaveBeenCalledWith(
+      "org-1",
+      { msisdn: "+224600000001", role: "cashier" },
+      "requester-1",
+    );
+    expect(result).toEqual({ id: "invite-1" });
+  });
+
+  it("restreint listPendingInvites à owner/admin, résolu via idSource \"organization\"", () => {
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, OrganizationsController.prototype.listPendingInvites)).toEqual([
+      "owner",
+      "admin",
+    ]);
+    expect(reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.listPendingInvites)).toBe(
+      "organization",
+    );
+  });
+
+  it("listPendingInvites délègue à PendingMemberInviteService.listPendingForOrganization", async () => {
+    const pendingMemberInviteService = {
+      inviteToOrganization: vi.fn(),
+      listPendingForOrganization: vi.fn().mockResolvedValue([{ id: "invite-1" }]),
+      revokeForOrganization: vi.fn(),
+    };
+    const controller = new OrganizationsController({} as any, pendingMemberInviteService as any);
+
+    const result = await controller.listPendingInvites("org-1");
+
+    expect(pendingMemberInviteService.listPendingForOrganization).toHaveBeenCalledWith("org-1");
+    expect(result).toEqual([{ id: "invite-1" }]);
+  });
+
+  it("restreint revokePendingInvite à owner/admin, résolu via idSource \"organization\"", () => {
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, OrganizationsController.prototype.revokePendingInvite)).toEqual([
+      "owner",
+      "admin",
+    ]);
+    expect(reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.revokePendingInvite)).toBe(
+      "organization",
+    );
+  });
+
+  it("revokePendingInvite délègue à PendingMemberInviteService.revokeForOrganization", async () => {
+    const pendingMemberInviteService = {
+      inviteToOrganization: vi.fn(),
+      listPendingForOrganization: vi.fn(),
+      revokeForOrganization: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = new OrganizationsController({} as any, pendingMemberInviteService as any);
+
+    await controller.revokePendingInvite("org-1", "invite-1");
+
+    expect(pendingMemberInviteService.revokeForOrganization).toHaveBeenCalledWith("org-1", "invite-1");
   });
 });

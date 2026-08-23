@@ -17,6 +17,11 @@ import {
   type InviteOrganizationMemberDto,
 } from "./dto/invite-organization-member.dto";
 import {
+  inviteOrganizationPendingSchema,
+  type InviteOrganizationPendingDto,
+} from "../pending-member-invites/dto/invite-organization-pending.dto";
+import { PendingMemberInviteService } from "../pending-member-invites/pending-member-invite.service";
+import {
   upgradeCommercialTierSchema,
   type UpgradeCommercialTierDto,
 } from "./dto/upgrade-commercial-tier.dto";
@@ -26,7 +31,10 @@ import { OrganizationsService } from "./organizations.service";
 @ApiBearerAuth()
 @Controller("organizations")
 export class OrganizationsController {
-  constructor(private readonly organizationsService: OrganizationsService) {}
+  constructor(
+    private readonly organizationsService: OrganizationsService,
+    private readonly pendingMemberInviteService: PendingMemberInviteService,
+  ) {}
 
   // Aucun rôle requis à la création : n'importe quel utilisateur authentifié peut
   // créer une organisation, il en devient automatiquement owner (voir service).
@@ -122,6 +130,37 @@ export class OrganizationsController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.organizationsService.inviteMember(organizationId, dto, user.id);
+  }
+
+  // F10 — mécanisme distinct de POST :id/members ci-dessus : inviter un
+  // collaborateur qui n'a PAS encore de compte facture.gn (inviteMember()
+  // exige déjà un compte, résolu par UserPhone). Aucun accès accordé avant
+  // inscription réelle — voir PendingMemberInviteService.resolveForNewUser().
+  // Même trio owner/admin que inviteMember() (garde owner-only sur admin/
+  // approver en plus, dans le service).
+  @Post(":id/pending-invites")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  invitePendingMember(
+    @Param("id") organizationId: string,
+    @Body(new ZodValidationPipe(inviteOrganizationPendingSchema)) dto: InviteOrganizationPendingDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.pendingMemberInviteService.inviteToOrganization(organizationId, dto, user.id);
+  }
+
+  @Get(":id/pending-invites")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  listPendingInvites(@Param("id") organizationId: string) {
+    return this.pendingMemberInviteService.listPendingForOrganization(organizationId);
+  }
+
+  @Post(":id/pending-invites/:inviteId/revoke")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  revokePendingInvite(@Param("id") organizationId: string, @Param("inviteId") inviteId: string) {
+    return this.pendingMemberInviteService.revokeForOrganization(organizationId, inviteId);
   }
 
   // H2, ADR-049 — même trio owner/admin que les autres routes de gestion

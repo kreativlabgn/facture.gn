@@ -269,6 +269,8 @@ model User {
   publicBuyerAccountMemberships PublicBuyerAccountMember[]
   apiKeysCreated                ApiKey[]                   @relation("ApiKeyCreator")
   apiKeysRevoked                ApiKey[]                   @relation("ApiKeyRevoker")
+  pendingMemberInvitesSent      PendingMemberInvite[]      @relation("PendingMemberInviteInviter")
+  pendingMemberInvitesResolved  PendingMemberInvite[]      @relation("PendingMemberInviteResolvedUser")
 
   @@map("user")
 }
@@ -542,6 +544,7 @@ model Organization {
   revenueShareCredits   RevenueShareCredit[]
   recurringTemplates    RecurringInvoiceTemplate[]
   commissionBypassCases CommissionBypassCase[]
+  pendingMemberInvites  PendingMemberInvite[]
 
   @@map("organization")
 }
@@ -603,6 +606,49 @@ model AssistedSession {
   organization    Organization @relation(fields: [organizationId], references: [id])
 
   @@map("assisted_session")
+}
+
+// F10, ADR-068/ADR-096 — comble le trou explicitement laissé "hors scope" par F8
+// (PracticesService.inviteMember) et F14 (OrganizationsService.inviteMember) :
+// les deux résolvent l'invité par UserPhone et échouent si le numéro n'a aucun
+// compte facture.gn. organizationId/practiceId mutuellement exclusifs (une seule
+// cible par invitation, jamais les deux) — imposé au niveau base par une
+// contrainte CHECK dédiée (pending_member_invite_xor_target_check,
+// 20260823160000), même précédent que invoice_conversion_requires_proforma_check
+// (20260809130000) : au-delà de la vérification applicative à ses deux seuls
+// points d'écriture actuels. Au plus une invitation VIVANTE par (msisdn, cible)
+// également garanti au niveau base (index uniques partiels, même migration,
+// même précédent que payment_one_arrhes_per_invoice) — revue post-fix #1, une
+// fenêtre de course applicative permettait deux invitations concurrentes sur le
+// même numéro. role en String (pas un enum Prisma) : OrganizationRole et
+// PracticeMemberRole sont deux enums disjoints, validé côté service contre le
+// bon enum selon la cible — même compromis déjà accepté pour UssdSession.state
+// (typage TypeScript uniquement). expiresAt : leçon apprise deux fois cette
+// session (AssistedSession puis Mandate ont eu ce champ scaffoldé sans jamais
+// être appliqué à la lecture) — voir
+// pending-member-invite.service.ts::resolveForNewUser(), filtré dès la
+// première version. TTL 14 jours arbitraire (aucune spec ne fixe de durée),
+// ajustable en un point unique (PENDING_MEMBER_INVITE_TTL_MS).
+model PendingMemberInvite {
+  id              String    @id @default(uuid())
+  msisdn          String
+  role            String
+  organizationId  String?   @map("organization_id")
+  practiceId      String?   @map("practice_id")
+  invitedByUserId String    @map("invited_by_user_id")
+  expiresAt       DateTime  @map("expires_at")
+  acceptedAt      DateTime? @map("accepted_at")
+  revokedAt       DateTime? @map("revoked_at")
+  resolvedUserId  String?   @map("resolved_user_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  organization  Organization?         @relation(fields: [organizationId], references: [id])
+  practice      ProfessionalPractice? @relation(fields: [practiceId], references: [id])
+  invitedByUser User                  @relation("PendingMemberInviteInviter", fields: [invitedByUserId], references: [id])
+  resolvedUser  User?                 @relation("PendingMemberInviteResolvedUser", fields: [resolvedUserId], references: [id])
+
+  @@index([msisdn])
+  @@map("pending_member_invite")
 }
 
 // Compteur atomique par organisation/année — support de la numérotation
@@ -1253,9 +1299,10 @@ model ProfessionalPractice {
   // RevenueShareCredit existant, oriente seulement le calcul à la lecture.
   revenueShareSettlementMode RevenueShareSettlementMode @default(payout) @map("revenue_share_settlement_mode")
 
-  members             PracticeMember[]
-  mandates            Mandate[]
-  revenueShareCredits RevenueShareCredit[]
+  members              PracticeMember[]
+  mandates             Mandate[]
+  revenueShareCredits  RevenueShareCredit[]
+  pendingMemberInvites PendingMemberInvite[]
 
   @@map("professional_practice")
 }

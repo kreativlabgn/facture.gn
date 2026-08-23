@@ -5,6 +5,11 @@ import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decor
 import { MandatesService } from "../mandates/mandates.service";
 import { createPracticeSchema, type CreatePracticeDto } from "./dto/create-practice.dto";
 import { inviteMemberSchema, type InviteMemberDto } from "./dto/invite-member.dto";
+import {
+  invitePracticePendingSchema,
+  type InvitePracticePendingDto,
+} from "../pending-member-invites/dto/invite-practice-pending.dto";
+import { PendingMemberInviteService } from "../pending-member-invites/pending-member-invite.service";
 import { upgradePartnerTierSchema, type UpgradePartnerTierDto } from "./dto/upgrade-partner-tier.dto";
 import {
   upgradeRevenueShareSettlementModeSchema,
@@ -19,6 +24,7 @@ export class PracticesController {
   constructor(
     private readonly practicesService: PracticesService,
     private readonly mandatesService: MandatesService,
+    private readonly pendingMemberInviteService: PendingMemberInviteService,
   ) {}
 
   // Aucun rôle requis : une practice n'est PAS scopée à une organisation existante
@@ -44,6 +50,33 @@ export class PracticesController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.practicesService.inviteMember(practiceId, dto, user.id);
+  }
+
+  // F10 — mécanisme distinct de POST :id/members ci-dessus : inviter un
+  // collaborateur qui n'a PAS encore de compte facture.gn. Aucun @Roles()
+  // (practice_admin n'est pas un OrganizationRole), autorisation inline dans
+  // le service (assertPracticeAdmin).
+  @Post(":id/pending-invites")
+  invitePendingMember(
+    @Param("id") practiceId: string,
+    @Body(new ZodValidationPipe(invitePracticePendingSchema)) dto: InvitePracticePendingDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.pendingMemberInviteService.inviteToPractice(practiceId, dto, user.id);
+  }
+
+  @Get(":id/pending-invites")
+  listPendingInvites(@Param("id") practiceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.pendingMemberInviteService.listPendingForPractice(practiceId, user.id);
+  }
+
+  @Post(":id/pending-invites/:inviteId/revoke")
+  revokePendingInvite(
+    @Param("id") practiceId: string,
+    @Param("inviteId") inviteId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.pendingMemberInviteService.revokeForPractice(practiceId, inviteId, user.id);
   }
 
   // F7, ADR-070 — donnée source d'un sélecteur "switch organisation" côté client

@@ -6,6 +6,7 @@ import { PASSWORD_SERVICE, AUTH_TOKEN_SERVICE } from "./auth.tokens";
 import type { PasswordService } from "./password.service";
 import type { AuthTokenService } from "./auth-token.service";
 import { TokenRevocationService } from "./token-revocation.service";
+import { PendingMemberInviteService } from "../pending-member-invites/pending-member-invite.service";
 import type { RegisterDto } from "./dto/register.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RequestRecoveryDto } from "./dto/request-recovery.dto";
@@ -28,6 +29,7 @@ export class AuthService {
     @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
     @Inject(AUTH_TOKEN_SERVICE) private readonly tokenService: AuthTokenService,
     private readonly tokenRevocation: TokenRevocationService,
+    private readonly pendingMemberInvite: PendingMemberInviteService,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ userId: string }> {
@@ -41,6 +43,11 @@ export class AuthService {
     const user = await this.prisma.$transaction(async (tx) => {
       const created = await tx.user.create({ data: { name: dto.name, passwordHash } });
       await tx.userPhone.create({ data: { userId: created.id, msisdn: dto.msisdn, isPrimary: true } });
+      // F10 — résout dans la même transaction toute PendingMemberInvite en
+      // attente pour ce numéro (organisation ou cabinet, éventuellement les
+      // deux) : jamais un état partiel (user créé sans son invitation résolue)
+      // qui pourrait survivre à un rollback.
+      await this.pendingMemberInvite.resolveForNewUser(tx, created.id, dto.msisdn);
       return created;
     });
 
