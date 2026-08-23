@@ -101,16 +101,37 @@ describe("FecService — autorisation à deux chemins (F9)", () => {
 });
 
 describe("FecService — chargement des factures (F9)", () => {
-  it("charge uniquement les factures issued/partially_paid/paid de type invoice, avec leurs payments", async () => {
+  it("charge uniquement les factures issued/partially_paid/paid de type invoice, avec leurs payments, de l'exercice fiscal demandé", async () => {
     const prisma = createFakePrisma({ member: { role: "owner", revokedAt: null } });
     const service = new FecService(prisma as any, new OrganizationAccessService(prisma as any));
 
-    await service.export(ORG_ID, USER_ID);
+    await service.export(ORG_ID, USER_ID, 2026);
 
     expect(prisma.invoice.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG_ID, documentType: "invoice", status: { in: ["issued", "partially_paid", "paid"] } },
+      where: {
+        organizationId: ORG_ID,
+        documentType: "invoice",
+        status: { in: ["issued", "partially_paid", "paid"] },
+        issuedAt: { gte: new Date(Date.UTC(2026, 0, 1)), lt: new Date(Date.UTC(2027, 0, 1)) },
+      },
       include: { payments: true },
     });
+  });
+
+  it("year omis retombe sur l'année en cours (Quality Audit 2026-08-23, finding #7)", async () => {
+    const prisma = createFakePrisma({ member: { role: "owner", revokedAt: null } });
+    const service = new FecService(prisma as any, new OrganizationAccessService(prisma as any));
+    const currentYear = new Date().getFullYear();
+
+    await service.export(ORG_ID, USER_ID);
+
+    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          issuedAt: { gte: new Date(Date.UTC(currentYear, 0, 1)), lt: new Date(Date.UTC(currentYear + 1, 0, 1)) },
+        }),
+      }),
+    );
   });
 
   it("le texte final commence par l'en-tête FEC puis les écritures, séparés par des retours à la ligne", async () => {
