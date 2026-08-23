@@ -784,6 +784,22 @@ describe("InvoicesService — machine à états", () => {
     expect(result.status).toBe("voided");
   });
 
+  it("refuse d'annuler une facture déjà voided (Quality Audit 2026-08-23, revue post-fix #3, cas limite)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "voided", amountPaid: 0n }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.void("inv-1")).rejects.toThrow(/statut voided/);
+  });
+
   it("refuse d'annuler une facture ayant déjà un paiement enregistré", async () => {
     const prisma = createFakePrisma({
       invoice: {

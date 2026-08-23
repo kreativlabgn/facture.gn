@@ -582,6 +582,32 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
     });
   });
 
+  it("liste les mandats actifs — un mandat expiré (status \"active\" mais expiresAt passé) n'apparaît jamais (Quality Audit 2026-08-23, revue post-fix #2)", async () => {
+    // Contrairement au test précédent (forme du where), simule le comportement
+    // réel du filtre expiresAt côté "DB" plutôt que de toujours renvoyer la
+    // même fixture quel que soit le where.
+    const rows = [
+      { id: "mandate-expired", status: "active", expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      { id: "mandate-valid", status: "active", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+      { id: "mandate-no-expiry", status: "active", expiresAt: null },
+    ];
+    const prisma: any = {
+      mandate: {
+        findMany: vi.fn().mockImplementation(() => {
+          const now = new Date();
+          return Promise.resolve(
+            rows.filter((row) => row.expiresAt === null || row.expiresAt.getTime() > now.getTime()),
+          );
+        }),
+      },
+    };
+    const service = new MandatesService(prisma as any);
+
+    const result = await service.listActiveForOrganization(ORG_ID);
+
+    expect(result.map((mandate: any) => mandate.id)).toEqual(["mandate-valid", "mandate-no-expiry"]);
+  });
+
   function createFakePrismaForRevokeAsOrganization(
     overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
   ) {

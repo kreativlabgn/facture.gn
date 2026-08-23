@@ -25,9 +25,24 @@ const MAX_LIST_PAGE_SIZE = 100;
 // InvoiceUncheckedUpdateInput (pas InvoiceUpdateInput) : customerId/branchId
 // n'existent qu'en tant que scalaires FK directs sur la variante "unchecked"
 // de Prisma, jamais sur la variante "checked" (relation connect/disconnect).
+// Quality Audit 2026-08-23, revue post-fix #9 — quoteValidUntil/referenceMarche
+// ajoutés : légitimement éditables sur un brouillon de devis (documentType
+// "quote") ou de facture destinée à une commande publique B2G, omis par la
+// première itération de cette whitelist faute d'avoir revu le modèle Invoice
+// complet plutôt que seulement les champs de calcul.
 type DraftInvoicePatch = Pick<
   Prisma.InvoiceUncheckedUpdateInput,
-  "customerId" | "branchId" | "discountPct" | "totalHt" | "totalTva" | "totalTtc" | "referenceCurrency" | "referenceAmount" | "fxRate"
+  | "customerId"
+  | "branchId"
+  | "discountPct"
+  | "totalHt"
+  | "totalTva"
+  | "totalTtc"
+  | "referenceCurrency"
+  | "referenceAmount"
+  | "fxRate"
+  | "quoteValidUntil"
+  | "referenceMarche"
 >;
 
 @Injectable()

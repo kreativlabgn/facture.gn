@@ -73,6 +73,56 @@ describe("OrganizationAccessService — accès par membership OU mandat actif", 
   });
 });
 
+describe("OrganizationAccessService — Mandate.expiresAt réellement appliqué (Quality Audit 2026-08-23, revue post-fix #2)", () => {
+  // Contrairement aux tests ci-dessus (qui n'inspectent que la FORME du where
+  // passé au mock), ce mock simule le comportement réel de Postgres pour le
+  // filtre expiresAt : un mandat status:"active" mais expiré n'est jamais
+  // renvoyé, même si aucun cron de purge n'a encore mis à jour son status.
+  function createFakePrismaWithRealExpirationFilter(mandate: { status: string; expiresAt: Date | null } | null) {
+    return {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue(null) },
+      mandate: {
+        findFirst: vi.fn().mockImplementation(({ where }: any) => {
+          if (!mandate) return Promise.resolve(null);
+          if (where.status !== mandate.status) return Promise.resolve(null);
+          const now = new Date();
+          const notExpired =
+            mandate.expiresAt === null || mandate.expiresAt.getTime() > now.getTime();
+          if (!notExpired) return Promise.resolve(null);
+          return Promise.resolve({ id: "mandate-1", ...mandate });
+        }),
+      },
+    };
+  }
+
+  it("refuse l'accès pour un mandat status:\"active\" mais expiresAt dans le passé", async () => {
+    const prisma = createFakePrismaWithRealExpirationFilter({
+      status: "active",
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+    const service = new OrganizationAccessService(prisma as any);
+
+    await expect(service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES])).rejects.toThrow(/accès/);
+  });
+
+  it("autorise l'accès pour un mandat status:\"active\" avec expiresAt dans le futur", async () => {
+    const prisma = createFakePrismaWithRealExpirationFilter({
+      status: "active",
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    const service = new OrganizationAccessService(prisma as any);
+
+    await expect(service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES])).resolves.toBeUndefined();
+  });
+
+  it("autorise l'accès pour un mandat status:\"active\" avec expiresAt: null (jamais d'expiration posée)", async () => {
+    const prisma = createFakePrismaWithRealExpirationFilter({ status: "active", expiresAt: null });
+    const service = new OrganizationAccessService(prisma as any);
+
+    await expect(service.assertAccess(ORG_ID, USER_ID, [...ELIGIBLE_ROLES])).resolves.toBeUndefined();
+  });
+});
+
 describe("OrganizationAccessService — filtre optionnel requiredMandateGrantedRole (E7, ADR-084)", () => {
   it("autorise un mandat actif dont grantedRole correspond au filtre demandé", async () => {
     const prisma = createFakePrisma({ member: null, mandate: { id: "mandate-1", status: "active" } });

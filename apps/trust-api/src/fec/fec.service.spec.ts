@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { OrganizationAccessService } from "../common/rbac/organization-access.service";
 import { FecService } from "./fec.service";
+import { FEC_HEADER } from "./fec-formatting";
 
 const ORG_ID = "org-1";
 const USER_ID = "user-1";
@@ -143,5 +144,14 @@ describe("FecService — chargement des factures (F9)", () => {
 
     expect(rows[0].split("\t")[0]).toBe("JournalCode");
     expect(rows.length).toBeGreaterThan(1);
+  });
+
+  it("un exercice fiscal sans aucune facture retourne juste l'en-tête FEC, jamais une erreur (Quality Audit 2026-08-23, revue post-fix #7, cas limite)", async () => {
+    const prisma = createFakePrisma({ member: { role: "owner", revokedAt: null }, invoices: [] });
+    const service = new FecService(prisma as any, new OrganizationAccessService(prisma as any));
+
+    const fec = await service.export(ORG_ID, USER_ID, 2020);
+
+    expect(fec.split("\n")).toEqual([FEC_HEADER.join("\t")]);
   });
 });
