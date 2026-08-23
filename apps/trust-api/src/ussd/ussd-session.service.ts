@@ -57,6 +57,34 @@ type UssdSessionRow = {
   organizationId?: string | null;
 };
 
+// Quality Audit 2026-08-23, finding #10 — les ~18 états réellement utilisés
+// par dispatch()/setState(), jusqu'ici en string libre : une faute de frappe
+// dans un appel setState(sessionId, "emit_awaiting_amout", ...) compilait sans
+// erreur, l'utilisateur USSD recevait "Session invalide" au tour suivant —
+// panne silencieuse sur *620#, canal d'inclusion critique (budget <90s, sans
+// retry structuré). UssdSession.state reste `String` côté Prisma (colonne DB
+// non typée, jamais un enum) : seule la couche applicative TypeScript se
+// durcit ici, pas de migration nécessaire.
+type UssdState =
+  | "root"
+  | "auth_account_code"
+  | "auth_pin"
+  | "auth_account_pin"
+  | "auth_new_pin"
+  | "auth_new_pin_confirm"
+  | "verify_awaiting_code"
+  | "emit_awaiting_amount"
+  | "emit_awaiting_customer_phone"
+  | "emit_processing"
+  | "emit_terminal"
+  | "pay_awaiting_invoice_number"
+  | "pay_awaiting_confirmation"
+  | "manage_account_menu"
+  | "account_new_pin"
+  | "account_new_pin_confirm"
+  | "account_mandate_select"
+  | "account_invite_viewer_phone";
+
 const ROOT_MENU = [
   "facture.gn *620#",
   "",
@@ -137,7 +165,13 @@ export class UssdSessionService {
   private async dispatch(session: UssdSessionRow, input: string): Promise<UssdResponse> {
     const context = (session.contextData as SessionContext | null) ?? {};
 
-    switch (session.state) {
+    // Cast défensif : UssdSession.state reste `string` côté DB (non typée),
+    // mais toute écriture applicative passe désormais par setState()/
+    // tryClaimProcessingState() (typés UssdState) — ce cast rend les `case`
+    // ci-dessous exhaustivement vérifiés par le compilateur contre UssdState,
+    // tout en gardant le `default` comme filet pour une valeur DB inattendue
+    // (ancienne session, valeur corrompue).
+    switch (session.state as UssdState) {
       case "root":
         return this.handleRoot(session, input);
       case "auth_account_code":
@@ -342,7 +376,9 @@ export class UssdSessionService {
       // intermédiaire AVANT l'appel emitInvoice() : un rejeu USSD réellement
       // concurrent (timeout réseau agrégateur) ne peut plus gagner la ligne deux
       // fois, voir tryClaimProcessingState() pour le détail de la garde.
-      const claimed = await this.tryClaimProcessingState(sessionId, currentState, context);
+      // currentState provient de session.state (string, colonne DB non typée) —
+      // même cast défensif que dispatch(), voir la note UssdState plus haut.
+      const claimed = await this.tryClaimProcessingState(sessionId, currentState as UssdState, context);
       if (!claimed) {
         return { continue: false, text: "Traitement en cours, veuillez patienter." };
       }
@@ -726,7 +762,7 @@ export class UssdSessionService {
     }
   }
 
-  private async setState(sessionId: string, state: string, context: SessionContext): Promise<void> {
+  private async setState(sessionId: string, state: UssdState, context: SessionContext): Promise<void> {
     await this.prisma.ussdSession.update({
       where: { id: sessionId },
       data: { state, contextData: context as Prisma.InputJsonValue },
@@ -744,7 +780,7 @@ export class UssdSessionService {
   // emitInvoice().
   private async tryClaimProcessingState(
     sessionId: string,
-    expectedState: string,
+    expectedState: UssdState,
     context: SessionContext,
   ): Promise<boolean> {
     const claimed = await this.prisma.ussdSession.updateMany({
