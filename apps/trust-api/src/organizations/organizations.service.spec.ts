@@ -451,14 +451,34 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
       const result = await service.listMine("user-1");
 
-      expect(prisma.organizationMember.findMany).toHaveBeenCalledWith({
-        where: { userId: "user-1", revokedAt: null },
-        include: { organization: true },
-      });
+      expect(prisma.organizationMember.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: "user-1", revokedAt: null } }),
+      );
       expect(result).toEqual([
         { id: "org-1", name: "Boutique Aissatou", role: "owner" },
         { id: "org-2", name: "Restaurant Le Damier", role: "cashier" },
       ]);
+    });
+
+    it("ne sélectionne jamais bankAccountDetails/chiffreAffairesBrutDeclare ni la config anti-fraude interne (Quality Audit 2026-08-23, finding #5)", async () => {
+      const prisma: any = {
+        organizationMember: {
+          findMany: vi.fn().mockResolvedValue([
+            { role: "cashier", organization: { id: "org-1", name: "Boutique Aissatou" } },
+          ]),
+        },
+      };
+      const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+      await service.listMine("user-1");
+
+      const call = prisma.organizationMember.findMany.mock.calls[0][0];
+      const orgSelect = call.select.organization.select;
+      expect(orgSelect).not.toHaveProperty("bankAccountDetails");
+      expect(orgSelect).not.toHaveProperty("chiffreAffairesBrutDeclare");
+      expect(orgSelect).not.toHaveProperty("creditLimitApprovalThreshold");
+      expect(orgSelect).not.toHaveProperty("commissionBypassLevel");
+      expect(orgSelect).not.toHaveProperty("commissionBypassProofThresholdOverrideGnf");
     });
 
     it("ne retourne jamais un membership révoqué (filtré côté requête, pas côté application)", async () => {
