@@ -87,7 +87,16 @@ export class ClientPortalService {
     const skip = pagination.skip ?? 0;
 
     return this.prisma.invoice.findMany({
-      where: { customerId: customer.id, organizationId: customer.organizationId },
+      where: {
+        customerId: customer.id,
+        organizationId: customer.organizationId,
+        // F13, revue post-fix #1 — même exclusion que PublicBuyerPortalService
+        // (public-buyer-portal.service.ts) : draft exclu car jamais réellement
+        // émise/certifiée par la PME (mutable, pas encore "reçue" légitimement) ;
+        // voided exclu car plus aucune dette réelle. Sans ce filtre, un client
+        // externe verrait des brouillons internes de la PME.
+        status: { notIn: ["draft", "voided"] as Array<"draft" | "voided"> },
+      },
       orderBy: { issuedAt: "desc" },
       take,
       skip,
