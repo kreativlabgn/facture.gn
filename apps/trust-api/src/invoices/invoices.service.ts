@@ -16,6 +16,20 @@ import { isOverdue } from "./overdue";
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
 
+// Quality Audit 2026-08-23, finding #9 — sous-ensemble explicite des champs
+// qu'un brouillon peut légitimement recevoir en correction. Exclut
+// délibérément tout ce qui appartient au chemin de certification (status,
+// number, hash, previousHash, signature, signingKeyId, certificationId,
+// issuedAt) et tout champ dérivé/serveur (amountPaid, amountDue,
+// validatedByAdministration, paymentLinkUrl/Id/ExpiresAt, organizationId).
+// InvoiceUncheckedUpdateInput (pas InvoiceUpdateInput) : customerId/branchId
+// n'existent qu'en tant que scalaires FK directs sur la variante "unchecked"
+// de Prisma, jamais sur la variante "checked" (relation connect/disconnect).
+type DraftInvoicePatch = Pick<
+  Prisma.InvoiceUncheckedUpdateInput,
+  "customerId" | "branchId" | "discountPct" | "totalHt" | "totalTva" | "totalTtc" | "referenceCurrency" | "referenceAmount" | "fxRate"
+>;
+
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
@@ -167,7 +181,14 @@ export class InvoicesService {
   }
 
   // Une facture issued est immuable — toute correction passe par un avoir (DAT §5.4).
-  async updateDraft(invoiceId: string, patch: Prisma.InvoiceUpdateInput) {
+  // Quality Audit 2026-08-23, finding #9 — patch restreint à un sous-ensemble
+  // explicite de champs de brouillon légitimes (whitelist), plutôt que
+  // Prisma.InvoiceUpdateInput complet : ce dernier acceptait n'importe quel
+  // champ, y compris status/hash/certificationId/signature/number — cette
+  // méthode n'est câblée sur AUCUNE route aujourd'hui, mais rien n'empêchait
+  // qu'un futur PATCH /invoices/:id mal branché contourne totalement issue()
+  // (poser status:"issued" sans jamais passer par la certification réelle).
+  async updateDraft(invoiceId: string, patch: DraftInvoicePatch) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     if (invoice.status !== "draft") {
       throw new ConflictException(
