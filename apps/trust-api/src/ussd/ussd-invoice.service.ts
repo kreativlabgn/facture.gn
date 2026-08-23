@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { InvoicesService } from "../invoices/invoices.service";
 import { VelocityTierService } from "./velocity-tier.service";
+import { MAX_RESULTS } from "./ussd-invoice-list.service";
 
 // Même trio que POST /invoices (invoices.controller.ts) — cet appel bypasse
 // RolesGuard (appel direct service à service, jamais passé par le contrôleur
@@ -93,7 +94,7 @@ export class UssdInvoiceService {
     return this.prisma.customer.findMany({
       where: { organizationId, isPublicEntity: true },
       orderBy: { createdAt: "asc" },
-      take: 5,
+      take: MAX_RESULTS,
     });
   }
 }

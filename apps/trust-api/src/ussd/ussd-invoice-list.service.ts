@@ -3,7 +3,10 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 
 const DISPLAYABLE_STATUSES = ["issued", "partially_paid", "paid", "voided"] as const;
-const MAX_RESULTS = 5; // canal texte contraint (§6 Spec USSD)
+// Exportée (revue post-fix #5) pour être réutilisée telle quelle par
+// UssdInvoiceService.listPublicEntityCustomers — jamais une seconde
+// constante `5` en dur qui pourrait diverger de celle-ci.
+export const MAX_RESULTS = 5; // canal texte contraint (§6 Spec USSD)
 
 // §2.3 Spec USSD — jamais draft/proforma/quote, jamais InvoicesService.findAllByOrganization
 // (partagée avec le dashboard PWA, où proformas/devis doivent au contraire
