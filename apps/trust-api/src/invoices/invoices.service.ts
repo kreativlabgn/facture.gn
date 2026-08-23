@@ -634,6 +634,22 @@ export class InvoicesService {
       throw new ConflictException(`Facture ${invoiceId} ne peut être annulée depuis le statut ${invoice.status}`);
     }
 
-    return this.prisma.invoice.update({ where: { id: invoiceId }, data: { status: "voided" } });
+    // Quality Audit 2026-08-23, finding #3 — amountPaid/status relus puis
+    // vérifiés à nouveau DANS la clause where de l'écriture (pas seulement en
+    // lecture ci-dessus) : un paiement qui s'enregistre entre la lecture et
+    // l'écriture ne doit jamais laisser une facture payée passer à voided
+    // (PRD §4.2). Message d'erreur générique en cas de count=0 — la lecture
+    // initiale a déjà distingué la cause probable (paiement vs statut) pour
+    // l'appelant qui vient de la voir il y a quelques millisecondes.
+    const claimed = await this.prisma.invoice.updateMany({
+      where: { id: invoiceId, status: { in: ["draft", "issued"] }, amountPaid: 0n },
+      data: { status: "voided" },
+    });
+    if (claimed.count === 0) {
+      throw new ConflictException(
+        `Facture ${invoiceId} ne peut être annulée — statut ou paiement modifié entretemps, réessayer`,
+      );
+    }
+    return this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
   }
 }

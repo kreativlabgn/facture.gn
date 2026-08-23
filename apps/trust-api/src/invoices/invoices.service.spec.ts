@@ -19,15 +19,42 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
         invoiceState = { ...invoiceState, ...data };
         return Promise.resolve(invoiceState);
       }),
+      // Quality Audit 2026-08-23, finding #3 — void() réclame désormais la
+      // transition via updateMany+where (compte=1 par défaut) avant de relire
+      // la facture ; comme update() ci-dessus, mute invoiceState pour que le
+      // findUniqueOrThrow() final reflète bien status:"voided".
+      updateMany: vi.fn().mockImplementation(({ data }: any) => {
+        invoiceState = { ...invoiceState, ...data };
+        return Promise.resolve({ count: 1 });
+      }),
       ...overrides.invoice,
       // Toujours la version enveloppée, même si overrides en fournit une — sinon
       // invoiceState ne serait jamais initialisé et les update() suivants perdraient
-      // les champs de la facture chargée au départ.
-      findUniqueOrThrow: vi.fn().mockImplementation(async (...args: any[]) => {
-        const result = seedFindUniqueOrThrow ? await seedFindUniqueOrThrow(...args) : invoiceState;
-        invoiceState = { ...invoiceState, ...result };
-        return result;
-      }),
+      // les champs de la facture chargée au départ. Quality Audit 2026-08-23,
+      // finding #3 — le seed n'est consulté QU'À LA PREMIÈRE lecture : void()
+      // relit désormais l'état APRÈS updateMany() (Prisma ne renvoie pas la ligne
+      // depuis updateMany) — un seed re-consulté à chaque appel écraserait
+      // silencieusement la mutation avec sa valeur statique d'origine.
+      findUniqueOrThrow: (() => {
+        let calls = 0;
+        return vi.fn().mockImplementation(async (...args: any[]) => {
+          calls += 1;
+          // 1er appel : renvoie le seed BRUT (pas la version enveloppée) — un
+          // test comme C10 ("sans transformation") attend une égalité stricte
+          // avec la forme exacte fournie, sans le documentType par défaut de
+          // invoiceState mélangé dedans.
+          if (calls === 1) {
+            const result = seedFindUniqueOrThrow ? await seedFindUniqueOrThrow(...args) : invoiceState;
+            invoiceState = { ...invoiceState, ...result };
+            return result;
+          }
+          // Appels suivants (ex. void(), finding #3, qui relit après
+          // updateMany() puisque Prisma ne renvoie pas la ligne depuis
+          // updateMany) : reflète l'état réellement mutable, jamais le seed
+          // statique d'origine.
+          return invoiceState;
+        });
+      })(),
     },
     organization: {
       // commercialTier: freemium par défaut (grille commission, ADR-074) — reflète
@@ -732,6 +759,27 @@ describe("InvoicesService — machine à états", () => {
     );
 
     await expect(service.void("inv-1")).rejects.toThrow(/avoir/);
+  });
+
+  it("refuse d'annuler si updateMany ne réclame rien (paiement/statut modifié entretemps, Quality Audit 2026-08-23, finding #3)", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", amountPaid: 0n }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.void("inv-1")).rejects.toThrow(ConflictException);
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", status: { in: ["draft", "issued"] }, amountPaid: 0n },
+      data: { status: "voided" },
+    });
   });
 
   it("traduit une violation de contrainte unique sur (organization_id, number) en erreur explicite, jamais un 500 brut", async () => {
