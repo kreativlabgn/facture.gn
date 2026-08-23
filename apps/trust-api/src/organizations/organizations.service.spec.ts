@@ -232,6 +232,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
         commercialAgentUserId: "agent-1",
         organizationId: "org-1",
         consentRecordedAt: expect.any(Date),
+        expiresAt: expect.any(Date),
       },
     });
   });
@@ -268,6 +269,31 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
     expect(signingKeyService.provisionRootKey).toHaveBeenCalledWith("org-1", expect.anything());
+  });
+});
+
+describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23, finding #8)", () => {
+  it("révoque l'AssistedSession active entre l'agent et l'organisation", async () => {
+    const prisma: any = {
+      assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any);
+
+    await service.revokeAssistedSession("org-1", "agent-1");
+
+    expect(prisma.assistedSession.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", commercialAgentUserId: "agent-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("échoue proprement si aucune AssistedSession active ne correspond (déjà révoquée ou jamais existante)", async () => {
+    const prisma: any = {
+      assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    };
+    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any);
+
+    await expect(service.revokeAssistedSession("org-1", "agent-1")).rejects.toThrow(/Aucune AssistedSession/);
   });
 });
 

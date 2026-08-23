@@ -1665,6 +1665,21 @@ describe("InvoicesService — facture assistée par un agent terrain (F2, ADR-04
     await expect(service.createAssisted(assistedInvoiceDto as any, "agent-1")).rejects.toThrow(/AssistedSession/);
   });
 
+  it("refuse si l'AssistedSession a été révoquée (Security Audit 2026-08-23, finding #8)", async () => {
+    // Le filtre revokedAt:null vit dans le where Prisma — un vrai driver ne
+    // renverrait jamais cette ligne, simulé ici par null (même précédent que le
+    // test "autre organisation" ci-dessous).
+    const prisma = createFakePrismaForCreateAssisted({ assistedSession: null });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.createAssisted(assistedInvoiceDto as any, "agent-1")).rejects.toThrow(/AssistedSession active/);
+  });
+
   it("refuse si l'AssistedSession existe mais pour une autre organisation", async () => {
     const prisma = createFakePrismaForCreateAssisted();
     prisma.assistedSession.findFirst = vi.fn().mockResolvedValue(null); // simule le filtre where non satisfait

@@ -13,6 +13,11 @@ import type { InviteOrganizationMemberDto } from "./dto/invite-organization-memb
 const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
+// Security Audit 2026-08-23, finding #8 — durée arbitraire faute de spec ADR/
+// Backlog fixant une durée pour l'inscription assistée, ajustable en ce point
+// unique. Un consentement d'inscription ponctuel ne doit pas rester une porte
+// d'émission permanente pour l'agent terrain.
+const ASSISTED_SESSION_TTL_MS = 90 * 24 * 60 * 60_000;
 
 // G4, ADR-097 — mapping statique, jugement de classification documenté ici plutôt
 // qu'un contrat de spec figé (voir PLAN "Risques"). "paiement" = tout événement lié
@@ -172,7 +177,12 @@ export class OrganizationsService {
           });
 
           await tx.assistedSession.create({
-            data: { commercialAgentUserId, organizationId: organization.id, consentRecordedAt: new Date() },
+            data: {
+              commercialAgentUserId,
+              organizationId: organization.id,
+              consentRecordedAt: new Date(),
+              expiresAt: new Date(Date.now() + ASSISTED_SESSION_TTL_MS),
+            },
           });
 
           // A3, ADR-026 — même discipline que create() : jamais une organisation
@@ -385,5 +395,22 @@ export class OrganizationsService {
   // jamais rétroactif).
   async revokeSigningKey(organizationId: string) {
     return this.signingKeyService.revoke(organizationId);
+  }
+
+  // Security Audit 2026-08-23, finding #8 — self-service owner/admin, même posture
+  // que revokeSigningKey() ci-dessus (une capacité compromise doit pouvoir être
+  // coupée immédiatement, jamais un workflow d'approbation). updateMany+where
+  // (jamais update inconditionnel) : une révocation concurrente ou une session déjà
+  // expirée ne doit jamais réémettre un revokedAt "gagnant" trompeur.
+  async revokeAssistedSession(organizationId: string, commercialAgentUserId: string) {
+    const claimed = await this.prisma.assistedSession.updateMany({
+      where: { organizationId, commercialAgentUserId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      throw new NotFoundException(
+        `Aucune AssistedSession active entre l'agent ${commercialAgentUserId} et l'organisation ${organizationId}`,
+      );
+    }
   }
 }

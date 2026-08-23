@@ -138,12 +138,21 @@ export class InvoicesService {
       throw new ForbiddenException("Seul un agent terrain peut assister une organisation sans accès permanent");
     }
 
+    // Security Audit 2026-08-23, finding #8 — revokedAt/expiresAt filtrés
+    // directement dans la requête (jamais une AssistedSession révoquée ou expirée
+    // ne doit pouvoir autoriser une émission, même si une ligne existe toujours en
+    // base pour la traçabilité historique).
     const session = await this.prisma.assistedSession.findFirst({
-      where: { commercialAgentUserId, organizationId: dto.organizationId },
+      where: {
+        commercialAgentUserId,
+        organizationId: dto.organizationId,
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
     });
     if (!session) {
       throw new ForbiddenException(
-        `Aucune AssistedSession entre l'agent ${commercialAgentUserId} et l'organisation ${dto.organizationId}`,
+        `Aucune AssistedSession active entre l'agent ${commercialAgentUserId} et l'organisation ${dto.organizationId}`,
       );
     }
 
