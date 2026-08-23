@@ -735,6 +735,12 @@ model Customer {
   creditLimitRequests CreditLimitChangeRequest[]
   recurringTemplates  RecurringInvoiceTemplate[]
 
+  // F13, revue post-fix #3 — seul point d'entrée du repo qui interroge Customer
+  // par téléphone à travers TOUTES les organisations (ClientPortalService),
+  // contrairement au reste du repo où Customer est toujours filtré par
+  // organizationId d'abord (scan borné à une PME). Sans index, scan séquentiel
+  // complet à l'échelle de la plateforme à chaque appel.
+  @@index([phone])
   @@map("customer")
 }
 
