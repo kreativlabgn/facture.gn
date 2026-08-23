@@ -968,7 +968,14 @@ export class UssdSessionService {
       throw error;
     }
 
-    const message = `Facture ${invoice.number} émise (Commande Publique).`;
+    // Revue post-fix #4 — customerId est TOUJOURS renseigné ici (client entité
+    // publique obligatoirement sélectionné, handlePublicOrderCustomerSelect
+    // ci-dessus), donc C9 (notification best-effort) part TOUJOURS. Même
+    // principe que l'Option 4 (:655) : le message reflète fidèlement ce qui a
+    // réellement eu lieu, jamais un message générique qui omettrait un effet
+    // de bord réel.
+    const smsNote = customerId ? " Lien de paiement envoyé par SMS." : "";
+    const message = `Facture ${invoice.number} émise (Commande Publique).${smsNote}`;
     await this.setState(session.id, "emit_terminal", { emitTerminalMessage: message });
     return { continue: false, text: message };
   }

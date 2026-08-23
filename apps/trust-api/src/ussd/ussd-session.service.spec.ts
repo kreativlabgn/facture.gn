@@ -1356,7 +1356,12 @@ describe("UssdSessionService — option 6, commande publique (K3, §2.6 Spec USS
       const result = await service.handleRequest(SESSION_ID, PHONE, "TELEMO-2026-000123");
 
       expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", "TELEMO-2026-000123");
-      expect(result.text).toContain("FG-2026-000001");
+      // Revue post-fix #4 — texte exact (pas seulement .toContain(numéro)) :
+      // customerId est TOUJOURS renseigné sur l'Option 6 (client entité
+      // publique obligatoirement sélectionné), donc C9 part TOUJOURS. Le
+      // message doit le mentionner, comme l'Option 4 (:655-656), pour que
+      // cette régression ne puisse plus passer inaperçue.
+      expect(result.text).toBe("Facture FG-2026-000001 émise (Commande Publique). Lien de paiement envoyé par SMS.");
     });
 
     it("référence marché laissée vide → émission SANS référence, exactement le même parcours (Backlog K3, non-négociable)", async () => {
@@ -1373,7 +1378,10 @@ describe("UssdSessionService — option 6, commande publique (K3, §2.6 Spec USS
       const result = await service.handleRequest(SESSION_ID, PHONE, "");
 
       expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", undefined);
-      expect(result.text).toContain("FG-2026-000001");
+      // Revue post-fix #4 — texte exact : même sans référence marché, le
+      // client entité publique reste toujours renseigné, donc la mention SMS
+      // reste toujours présente (identique au cas avec référence ci-dessus).
+      expect(result.text).toBe("Facture FG-2026-000001 émise (Commande Publique). Lien de paiement envoyé par SMS.");
     });
 
     it("transite vers emit_terminal après émission — jamais un rejeu qui réémettrait (même garde que l'Option 4)", async () => {
