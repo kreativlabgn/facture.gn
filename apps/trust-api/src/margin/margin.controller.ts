@@ -1,8 +1,10 @@
-import { Controller, Get, Param } from "@nestjs/common";
+import { Controller, Get, Param, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { OrganizationAccessService } from "../common/rbac/organization-access.service";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { MarginService } from "./margin.service";
+import { listMarginLinesQuerySchema, type ListMarginLinesQueryDto } from "./dto/list-margin-lines-query.dto";
 
 const MARGIN_ELIGIBLE_ROLES = ["owner", "admin"] as const;
 
@@ -19,9 +21,13 @@ export class MarginController {
   ) {}
 
   @Get("lines")
-  async listLines(@Param("id") organizationId: string, @CurrentUser() user: CurrentUserPayload) {
+  async listLines(
+    @Param("id") organizationId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query(new ZodValidationPipe(listMarginLinesQuerySchema)) query: ListMarginLinesQueryDto,
+  ) {
     await this.organizationAccess.assertAccess(organizationId, user.id, [...MARGIN_ELIGIBLE_ROLES], "business_manager");
-    return this.marginService.listLines(organizationId);
+    return this.marginService.listLines(organizationId, { take: query.take, skip: query.skip });
   }
 
   @Get("by-product")
