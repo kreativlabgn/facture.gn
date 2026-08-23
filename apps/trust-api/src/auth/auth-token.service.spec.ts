@@ -24,6 +24,19 @@ describe("JwtAuthTokenService", () => {
     expect(payload).not.toHaveProperty("role");
   });
 
+  it("génère un jti unique par token signé (Security Audit 2026-08-23, finding #14)", async () => {
+    const { privateKey, publicKey } = generateTestKeyPair();
+    const service = new JwtAuthTokenService(privateKey, publicKey);
+
+    const tokenA = await service.sign({ sub: "user-1" });
+    const tokenB = await service.sign({ sub: "user-1" });
+    const payloadA = await service.verify(tokenA);
+    const payloadB = await service.verify(tokenB);
+
+    expect(payloadA.jti).toEqual(expect.any(String));
+    expect(payloadA.jti).not.toBe(payloadB.jti);
+  });
+
   it("rejette un token signé avec une autre paire de clés", async () => {
     const pairA = generateTestKeyPair();
     const pairB = generateTestKeyPair();

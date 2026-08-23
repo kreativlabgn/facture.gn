@@ -2,6 +2,11 @@ import { createParamDecorator, type ExecutionContext } from "@nestjs/common";
 
 export interface CurrentUserPayload {
   id: string;
+  // Security Audit 2026-08-23, finding #14 — peuplés par JwtAuthGuard depuis le
+  // payload JWT vérifié, nécessaires à AuthController.logout() pour révoquer
+  // précisément CE token (jamais recalculés/devinés côté service).
+  jti?: string;
+  exp?: number;
 }
 
 // req.user est attaché par JwtAuthGuard — jamais accessible sur une route @Public().

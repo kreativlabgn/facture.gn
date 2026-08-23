@@ -3,12 +3,14 @@ import { Reflector } from "@nestjs/core";
 import { AUTH_TOKEN_SERVICE } from "./auth.tokens";
 import type { AuthTokenService } from "./auth-token.service";
 import { IS_PUBLIC_KEY } from "./public.decorator";
+import { TokenRevocationService } from "./token-revocation.service";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     @Inject(AUTH_TOKEN_SERVICE) private readonly tokenService: AuthTokenService,
+    private readonly tokenRevocation: TokenRevocationService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -28,12 +30,23 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Token d'authentification manquant");
     }
 
+    let payload;
     try {
-      const payload = await this.tokenService.verify(token);
-      request.user = { id: payload.sub };
-      return true;
+      payload = await this.tokenService.verify(token);
     } catch {
       throw new UnauthorizedException("Token d'authentification invalide ou expiré");
     }
+
+    // Security Audit 2026-08-23, finding #14 — consultée à CHAQUE requête (pas
+    // seulement au login) : c'est la seule façon d'invalider un token avant son
+    // expiration naturelle (12h) suite à POST /auth/logout ou une compromission
+    // détectée. Un token expiré est déjà rejeté par verify() ci-dessus, donc cette
+    // vérification supplémentaire ne concerne que les tokens encore valides.
+    if (await this.tokenRevocation.isRevoked(payload.jti)) {
+      throw new UnauthorizedException("Token d'authentification révoqué");
+    }
+
+    request.user = { id: payload.sub, jti: payload.jti, exp: payload.exp };
+    return true;
   }
 }

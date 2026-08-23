@@ -63,6 +63,17 @@ export class AuthController {
     return this.authService.resolveRecovery(id, user.id, "rejected");
   }
 
+  // Security Audit 2026-08-23, finding #14 — JWT requis (jamais @Public()) :
+  // révoque exclusivement le token courant de l'appelant (jti/exp portés par
+  // CurrentUserPayload, peuplés par JwtAuthGuard). Ni un rate limit dédié ni un
+  // Throttle particulier : une révocation ne peut jamais être abusée pour nuire
+  // à un tiers (chacun ne révoque que son propre token).
+  @Post("logout")
+  @ApiBearerAuth()
+  logout(@CurrentUser() user: CurrentUserPayload) {
+    return this.authService.logout(user.jti as string, user.exp as number);
+  }
+
   // JWT requis (B6) — jamais @Public() : on ajoute un numéro au compte déjà
   // authentifié, pas à un compte anonyme. Pipe scopé à @Body() (pas @UsePipes() au
   // niveau méthode, qui s'appliquerait aussi à @CurrentUser() et échouerait le même

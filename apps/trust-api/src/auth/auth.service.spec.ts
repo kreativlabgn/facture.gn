@@ -31,11 +31,16 @@ function createFakeTokenService() {
   };
 }
 
+// Security Audit 2026-08-23, finding #14.
+function createFakeTokenRevocation(overrides: { revoke?: ReturnType<typeof vi.fn> } = {}) {
+  return { revoke: overrides.revoke ?? vi.fn().mockResolvedValue(undefined), isRevoked: vi.fn() };
+}
+
 describe("AuthService", () => {
   describe("register", () => {
     it("rejette un msisdn déjà utilisé", async () => {
       const prisma = createFakePrisma({ existingPhone: { id: "phone-1" } });
-      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await expect(
         service.register({ name: "Aissatou Diallo", msisdn: "+224622334455", password: "MotDePasse-Solide-2026" }),
@@ -45,7 +50,7 @@ describe("AuthService", () => {
     it("hash le mot de passe avant de créer l'utilisateur — jamais en clair", async () => {
       const prisma = createFakePrisma();
       const passwordService = createFakePasswordService();
-      const service = new AuthService(prisma, passwordService, createFakeTokenService());
+      const service = new AuthService(prisma, passwordService, createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await service.register({ name: "Aissatou Diallo", msisdn: "+224622334455", password: "MotDePasse-Solide-2026" });
 
@@ -60,7 +65,7 @@ describe("AuthService", () => {
 
     it("crée le numéro principal (user_phone) lié au nouvel utilisateur", async () => {
       const prisma = createFakePrisma();
-      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await service.register({ name: "Aissatou Diallo", msisdn: "+224622334455", password: "MotDePasse-Solide-2026" });
 
@@ -73,7 +78,7 @@ describe("AuthService", () => {
   describe("login", () => {
     it("refuse un msisdn inconnu avec un message générique (anti-énumération)", async () => {
       const prisma = createFakePrisma({ userPhoneWithUser: null });
-      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await expect(
         service.login({ msisdn: "+224699999999", password: "peu importe" }),
@@ -84,7 +89,7 @@ describe("AuthService", () => {
       const prisma = createFakePrisma({
         userPhoneWithUser: { user: { id: "user-1", passwordHash: "$argon2id$hashed" } },
       });
-      const service = new AuthService(prisma, createFakePasswordService(false), createFakeTokenService());
+      const service = new AuthService(prisma, createFakePasswordService(false), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await expect(
         service.login({ msisdn: "+224622334455", password: "mauvais-mot-de-passe" }),
@@ -96,12 +101,24 @@ describe("AuthService", () => {
         userPhoneWithUser: { user: { id: "user-1", passwordHash: "$argon2id$hashed" } },
       });
       const tokenService = createFakeTokenService();
-      const service = new AuthService(prisma, createFakePasswordService(true), tokenService);
+      const service = new AuthService(prisma, createFakePasswordService(true), tokenService, createFakeTokenRevocation() as any);
 
       const result = await service.login({ msisdn: "+224622334455", password: "MotDePasse-Solide-2026" });
 
       expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-1" });
       expect(result).toEqual({ accessToken: "signed.jwt.token" });
+    });
+  });
+
+  describe("logout (Security Audit 2026-08-23, finding #14)", () => {
+    it("révoque le jti du token courant avec son expiration convertie en Date", async () => {
+      const prisma = createFakePrisma();
+      const tokenRevocation = createFakeTokenRevocation();
+      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), tokenRevocation as any);
+
+      await service.logout("jti-abc", 1893456000);
+
+      expect(tokenRevocation.revoke).toHaveBeenCalledWith("jti-abc", new Date(1893456000 * 1000));
     });
   });
 
@@ -148,7 +165,7 @@ describe("AuthService", () => {
           organization: { id: "org-1" },
           membership: { role: "owner", revokedAt: null },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         await service.requestRecovery({ msisdn: "+224622334455", organizationNif: "GN12345678" });
 
@@ -159,7 +176,7 @@ describe("AuthService", () => {
 
       it("ne crée aucune demande si le msisdn est inconnu, mais retourne le même message générique", async () => {
         const prisma = createFakePrismaForRecovery({ phone: null, organization: { id: "org-1" } });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         const result = await service.requestRecovery({ msisdn: "+224699999999", organizationNif: "GN12345678" });
 
@@ -169,7 +186,7 @@ describe("AuthService", () => {
 
       it("ne crée aucune demande si le nif ne correspond à aucune organisation, même message générique", async () => {
         const prisma = createFakePrismaForRecovery({ phone: { userId: "user-1" }, organization: null });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         const result = await service.requestRecovery({ msisdn: "+224622334455", organizationNif: "NIF-INCONNU" });
 
@@ -183,7 +200,7 @@ describe("AuthService", () => {
           organization: { id: "org-1" },
           membership: { role: "admin", revokedAt: null },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         const result = await service.requestRecovery({ msisdn: "+224622334455", organizationNif: "GN12345678" });
 
@@ -198,7 +215,7 @@ describe("AuthService", () => {
           recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
           membership: { role: "cashier", revokedAt: null },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         await expect(
           service.resolveRecovery("recovery-1", "user-2", "approved"),
@@ -209,7 +226,7 @@ describe("AuthService", () => {
         const prisma = createFakePrismaForRecovery({
           recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         await expect(
           service.resolveRecovery("recovery-1", "user-1", "approved"),
@@ -223,7 +240,7 @@ describe("AuthService", () => {
         });
         const passwordService = createFakePasswordService();
         passwordService.generateTemporaryPassword = vi.fn().mockReturnValue("temp-Pw-XyZ12345");
-        const service = new AuthService(prisma, passwordService, createFakeTokenService());
+        const service = new AuthService(prisma, passwordService, createFakeTokenService(), createFakeTokenRevocation() as any);
 
         const result = await service.resolveRecovery("recovery-1", "user-2", "approved");
 
@@ -239,7 +256,7 @@ describe("AuthService", () => {
           recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
           membership: { role: "owner", revokedAt: null },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         const result = await service.resolveRecovery("recovery-1", "user-2", "rejected");
 
@@ -253,7 +270,7 @@ describe("AuthService", () => {
           membership: { role: "owner", revokedAt: null },
           updateManyCount: 0,
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         await expect(
           service.resolveRecovery("recovery-1", "user-2", "approved"),
@@ -265,7 +282,7 @@ describe("AuthService", () => {
           recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
           membership: { role: "admin", revokedAt: null },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
         const before = Date.now();
 
         await service.resolveRecovery("recovery-1", "user-2", "approved");
@@ -283,7 +300,7 @@ describe("AuthService", () => {
           recoveryRequest: { id: "recovery-1", userId: "user-1", organizationId: "org-1", status: "pending" },
           membership: { role: "owner", revokedAt: null },
         });
-        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
         await service.resolveRecovery("recovery-1", "user-2", "rejected");
 
@@ -307,7 +324,7 @@ describe("AuthService", () => {
     it("crée un second numéro non-primaire quand le mot de passe fourni est correct", async () => {
       const prisma = createFakePrismaForAddPhone();
       const passwordService = createFakePasswordService(true);
-      const service = new AuthService(prisma as any, passwordService, createFakeTokenService());
+      const service = new AuthService(prisma as any, passwordService, createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await service.addPhone("user-1", "+224699887766", "MotDePasse-Actuel-2026");
 
@@ -319,7 +336,7 @@ describe("AuthService", () => {
 
     it("refuse un mot de passe incorrect — un JWT volé seul ne doit jamais suffire à planter un numéro (revue sécurité)", async () => {
       const prisma = createFakePrismaForAddPhone();
-      const service = new AuthService(prisma as any, createFakePasswordService(false), createFakeTokenService());
+      const service = new AuthService(prisma as any, createFakePasswordService(false), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await expect(service.addPhone("user-1", "+224699887766", "mauvais-mot-de-passe")).rejects.toThrow(
         UnauthorizedException,
@@ -333,7 +350,7 @@ describe("AuthService", () => {
         meta: { target: ["msisdn"] },
       });
       const prisma = createFakePrismaForAddPhone(vi.fn().mockRejectedValue(uniqueViolation));
-      const service = new AuthService(prisma as any, createFakePasswordService(true), createFakeTokenService());
+      const service = new AuthService(prisma as any, createFakePasswordService(true), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await expect(service.addPhone("user-1", "+224699887766", "MotDePasse-Actuel-2026")).rejects.toThrow(
         /existe déjà/,
@@ -346,7 +363,7 @@ describe("AuthService", () => {
       const prisma: any = {
         user: { update: vi.fn().mockResolvedValue({ id: "user-1", isCommercialAgent: true }) },
       };
-      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService());
+      const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any);
 
       await service.grantCommercialAgentStatus("user-1");
 
