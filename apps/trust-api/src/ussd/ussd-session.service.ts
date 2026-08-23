@@ -2,6 +2,8 @@ import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundExce
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { VerificationService } from "../verification/verification.service";
+import { PASSWORD_SERVICE } from "../auth/auth.tokens";
+import type { PasswordService } from "../auth/password.service";
 import { UssdAuthService } from "./ussd-auth.service";
 import { UssdInvoiceService } from "./ussd-invoice.service";
 import { UssdPaymentService } from "./ussd-payment.service";
@@ -31,7 +33,14 @@ interface SessionContext {
   pendingOption?: string;
   authUserId?: string;
   authOrganizationId?: string;
-  pendingPin?: string;
+  // Security Audit 2026-08-23, finding #6 — remplace l'ancien pendingPin (stocké en
+  // clair) : hash argon2id du PIN candidat, jamais la valeur brute persistée en DB
+  // pendant la fenêtre de confirmation.
+  pendingPinHash?: string;
+  // Security Audit 2026-08-23, finding #4 — message figé de l'issue d'une émission
+  // (succès ou rejet), rejoué tel quel par l'état terminal "emit_terminal" en cas
+  // de rejeu de la même requête, jamais une seconde émission.
+  emitTerminalMessage?: string;
   emitAmountCentimes?: string;
   payInvoiceId?: string;
   payInvoiceNumber?: string;
@@ -99,6 +108,7 @@ export class UssdSessionService {
     private readonly ussdPayment: UssdPaymentService,
     private readonly ussdInvoiceList: UssdInvoiceListService,
     private readonly ussdAccount: UssdAccountService,
+    @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -145,6 +155,14 @@ export class UssdSessionService {
         return this.handleEmitAmount(session, input);
       case "emit_awaiting_customer_phone":
         return this.handleEmitCustomerPhone(session, context, input);
+      // Security Audit 2026-08-23, finding #4 — un rejeu (même sessionId) qui
+      // arrive pendant une émission déjà en vol, ou après une émission déjà
+      // terminée, ne doit JAMAIS redéclencher emitInvoice() : simple replay du
+      // résultat déjà connu, aucun accès Prisma supplémentaire.
+      case "emit_processing":
+        return { continue: false, text: "Traitement en cours, veuillez patienter." };
+      case "emit_terminal":
+        return { continue: false, text: context.emitTerminalMessage ?? "Cette opération a déjà été traitée." };
       case "pay_awaiting_invoice_number":
         return this.handlePayInvoiceNumber(session, input);
       case "pay_awaiting_confirmation":
@@ -270,14 +288,21 @@ export class UssdSessionService {
       return { continue: true, text: "PIN incorrect. Réessayez :" };
     }
 
-    return this.completeAuthentication(session.id, context);
+    return this.completeAuthentication(session.id, context, session.state);
   }
 
+  // Security Audit 2026-08-23, finding #6 — le PIN candidat est haché (argon2id,
+  // même service que UssdAuthService/PasswordService) AVANT d'être persisté dans
+  // contextData : jamais le PIN en clair en base, même pendant la fenêtre de
+  // confirmation à l'étape suivante (aucune purge de UssdSession n'existe dans ce
+  // repo — une ligne abandonnée avant confirmation resterait sinon lisible en clair
+  // indéfiniment via un dump/backup/replica).
   private async handleNewPin(session: UssdSessionRow, context: SessionContext, input: string): Promise<UssdResponse> {
     if (!PIN_FORMAT.test(input)) {
       return { continue: true, text: "PIN invalide — 4 chiffres attendus. Réessayez :" };
     }
-    await this.setState(session.id, "auth_new_pin_confirm", { ...context, pendingPin: input });
+    const pendingPinHash = await this.passwordService.hash(input);
+    await this.setState(session.id, "auth_new_pin_confirm", { ...context, pendingPinHash });
     return { continue: true, text: "Confirmez votre PIN :" };
   }
 
@@ -286,15 +311,20 @@ export class UssdSessionService {
     context: SessionContext,
     input: string,
   ): Promise<UssdResponse> {
-    if (input !== context.pendingPin) {
+    const matches = context.pendingPinHash ? await this.passwordService.verify(context.pendingPinHash, input) : false;
+    if (!matches) {
       return { continue: false, text: "Les PIN saisis ne correspondent pas. Recommencez depuis *620#." };
     }
 
     await this.ussdAuth.createPin(context.authUserId as string, input);
-    return this.completeAuthentication(session.id, context);
+    return this.completeAuthentication(session.id, context, session.state);
   }
 
-  private async completeAuthentication(sessionId: string, context: SessionContext): Promise<UssdResponse> {
+  private async completeAuthentication(
+    sessionId: string,
+    context: SessionContext,
+    currentState: string,
+  ): Promise<UssdResponse> {
     // §5 Spec USSD — raccourci d'émission anonyme : montant déjà connu
     // (stocké dès handleAnonymousEmissionShortcut), jamais de collecte de
     // téléphone client (anonyme), jamais de resolveOrCreateCustomer.
@@ -307,12 +337,25 @@ export class UssdSessionService {
         return { continue: false, text: "Aucune organisation habilitée à émettre n'a été trouvée pour ce compte." };
       }
 
+      // Security Audit 2026-08-23, finding #4 (durci en revue post-fix #2) —
+      // transition ATOMIQUE (where:{state: currentState}) vers un état
+      // intermédiaire AVANT l'appel emitInvoice() : un rejeu USSD réellement
+      // concurrent (timeout réseau agrégateur) ne peut plus gagner la ligne deux
+      // fois, voir tryClaimProcessingState() pour le détail de la garde.
+      const claimed = await this.tryClaimProcessingState(sessionId, currentState, context);
+      if (!claimed) {
+        return { continue: false, text: "Traitement en cours, veuillez patienter." };
+      }
+
       const amountCentimes = BigInt(context.emitAmountCentimes as string);
       try {
         const invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, undefined);
-        return { continue: false, text: `Facture ${invoice.number} émise.` };
+        const message = `Facture ${invoice.number} émise.`;
+        await this.setState(sessionId, "emit_terminal", { emitTerminalMessage: message });
+        return { continue: false, text: message };
       } catch (error) {
         if (error instanceof ForbiddenException) {
+          await this.setState(sessionId, "emit_terminal", { emitTerminalMessage: error.message });
           return { continue: false, text: error.message };
         }
         throw error;
@@ -356,12 +399,26 @@ export class UssdSessionService {
     }
 
     if (context.pendingOption === "5") {
+      // Security Audit 2026-08-23, finding #7 — même re-résolution que les options
+      // 1/3/4 ci-dessous : context.authOrganizationId reste undefined pour le
+      // chemin d'authentification le plus courant (téléphone déjà reconnu,
+      // UssdAuthService.resolveByPhone() ne le renvoie jamais), donc jamais fait
+      // confiance seul pour peupler session.organizationId — sinon tout le menu
+      // "Gérer mon compte" (PIN, mandats, invitation) hériterait d'une organisation
+      // non résolue.
+      const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
+        context.authUserId as string,
+        context.authOrganizationId,
+      );
+      if (!organizationId) {
+        return { continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." };
+      }
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
         data: {
           state: "manage_account_menu",
           userId: context.authUserId,
-          organizationId: context.authOrganizationId,
+          organizationId,
           contextData: {},
         },
       });
@@ -426,6 +483,15 @@ export class UssdSessionService {
     const customerId = await this.ussdInvoice.resolveOrCreateCustomer(organizationId, phone || undefined);
     const amountCentimes = BigInt(context.emitAmountCentimes as string);
 
+    // Security Audit 2026-08-23, finding #4 (durci en revue post-fix #2) — même
+    // garde ATOMIQUE que la branche anon_emit de completeAuthentication()
+    // ci-dessus : where:{state: "emit_awaiting_customer_phone"} garantit qu'une
+    // seule requête concurrente peut gagner la transition, jamais les deux.
+    const claimed = await this.tryClaimProcessingState(session.id, "emit_awaiting_customer_phone", context);
+    if (!claimed) {
+      return { continue: false, text: "Traitement en cours, veuillez patienter." };
+    }
+
     // D4 — VelocityTierService.assertWithinLimits() (appelé par emitInvoice,
     // avant toute création) lève ForbiddenException au-delà des plafonds T0-T3.
     let invoice;
@@ -433,6 +499,7 @@ export class UssdSessionService {
       invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, customerId);
     } catch (error) {
       if (error instanceof ForbiddenException) {
+        await this.setState(session.id, "emit_terminal", { emitTerminalMessage: error.message });
         return { continue: false, text: error.message };
       }
       throw error;
@@ -441,7 +508,9 @@ export class UssdSessionService {
     // C9 (déjà câblée dans InvoicesService.issue()) n'envoie que si customerId
     // est renseigné — le message reflète fidèlement ce qui a réellement eu lieu.
     const smsNote = customerId ? " Lien de paiement envoyé par SMS." : "";
-    return { continue: false, text: `Facture ${invoice.number} émise.${smsNote}` };
+    const message = `Facture ${invoice.number} émise.${smsNote}`;
+    await this.setState(session.id, "emit_terminal", { emitTerminalMessage: message });
+    return { continue: false, text: message };
   }
 
   // §2.3 Spec USSD — labels français exacts du texte spec, jamais le nom de
@@ -607,11 +676,13 @@ export class UssdSessionService {
     return { continue: false, text: `Mandat de ${selected.name} révoqué.` };
   }
 
+  // Security Audit 2026-08-23, finding #6 — même durcissement que handleNewPin() ci-dessus.
   private async handleAccountNewPin(session: UssdSessionRow, context: SessionContext, input: string): Promise<UssdResponse> {
     if (!PIN_FORMAT.test(input)) {
       return { continue: true, text: "PIN invalide — 4 chiffres attendus. Réessayez :" };
     }
-    await this.setState(session.id, "account_new_pin_confirm", { ...context, pendingPin: input });
+    const pendingPinHash = await this.passwordService.hash(input);
+    await this.setState(session.id, "account_new_pin_confirm", { ...context, pendingPinHash });
     return { continue: true, text: "Confirmez le nouveau PIN :" };
   }
 
@@ -622,7 +693,8 @@ export class UssdSessionService {
     context: SessionContext,
     input: string,
   ): Promise<UssdResponse> {
-    if (input !== context.pendingPin) {
+    const matches = context.pendingPinHash ? await this.passwordService.verify(context.pendingPinHash, input) : false;
+    if (!matches) {
       return { continue: false, text: "Les PIN saisis ne correspondent pas. Recommencez depuis le menu Gérer mon compte." };
     }
 
@@ -659,6 +731,27 @@ export class UssdSessionService {
       where: { id: sessionId },
       data: { state, contextData: context as Prisma.InputJsonValue },
     });
+  }
+
+  // Security Audit 2026-08-23, revue post-fix #2 (finding #4) — setState() seul
+  // est un update() INCONDITIONNEL : deux requêtes réellement concurrentes pour le
+  // même sessionId (le vrai scénario de rejeu réseau agrégateur, pas seulement un
+  // rejeu séquentiel après commit) liraient toutes deux le même état initial avant
+  // qu'aucune n'ait écrit "emit_processing", et passeraient donc TOUTES LES DEUX
+  // jusqu'à emitInvoice() — double émission. Le where:{state: expectedState} rend
+  // la transition atomique au niveau DB : une seule des deux requêtes concurrentes
+  // peut gagner la ligne (count===1), l'autre voit count===0 et n'appelle jamais
+  // emitInvoice().
+  private async tryClaimProcessingState(
+    sessionId: string,
+    expectedState: string,
+    context: SessionContext,
+  ): Promise<boolean> {
+    const claimed = await this.prisma.ussdSession.updateMany({
+      where: { id: sessionId, state: expectedState },
+      data: { state: "emit_processing", contextData: context as Prisma.InputJsonValue },
+    });
+    return claimed.count === 1;
   }
 }
 

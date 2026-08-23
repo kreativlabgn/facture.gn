@@ -138,12 +138,21 @@ export class InvoicesService {
       throw new ForbiddenException("Seul un agent terrain peut assister une organisation sans accès permanent");
     }
 
+    // Security Audit 2026-08-23, finding #8 — revokedAt/expiresAt filtrés
+    // directement dans la requête (jamais une AssistedSession révoquée ou expirée
+    // ne doit pouvoir autoriser une émission, même si une ligne existe toujours en
+    // base pour la traçabilité historique).
     const session = await this.prisma.assistedSession.findFirst({
-      where: { commercialAgentUserId, organizationId: dto.organizationId },
+      where: {
+        commercialAgentUserId,
+        organizationId: dto.organizationId,
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
     });
     if (!session) {
       throw new ForbiddenException(
-        `Aucune AssistedSession entre l'agent ${commercialAgentUserId} et l'organisation ${dto.organizationId}`,
+        `Aucune AssistedSession active entre l'agent ${commercialAgentUserId} et l'organisation ${dto.organizationId}`,
       );
     }
 
@@ -488,21 +497,33 @@ export class InvoicesService {
     // un signal secondaire best-effort, ici il est la SEULE preuve d'audit de qui a
     // déclenché la régénération — un lien mis à jour sans sa trace correspondante
     // serait un vrai trou d'audit, jamais un lien changé sans que ce soit tracé.
+    //
+    // Security Audit 2026-08-23, finding #3 — updateMany+where (jamais update
+    // inconditionnel), même pattern que regenerateLinkForRemainingBalance()
+    // (payments.service.ts) : l'appel tryGenerate() ci-dessus peut prendre 10-20s
+    // (timeout Djomy + retries Moneroo), pendant lesquelles un paiement concurrent
+    // a pu solder la facture. Sans cette revérification transactionnelle, un
+    // nouveau lien payant pouvait être publié sur une facture déjà réglée.
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.invoice.update({
-        where: { id: invoiceId },
+      const claimed = await tx.invoice.updateMany({
+        where: { id: invoiceId, status: { in: ["issued", "partially_paid"] } },
         data: {
           paymentLinkUrl: paymentLink.paymentLinkUrl,
           paymentLinkId: paymentLink.providerRef,
           paymentLinkExpiresAt: paymentLink.expiresAt,
         },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          `Facture ${invoiceId} n'est plus dans un état permettant un nouveau lien de paiement (réglée entre-temps)`,
+        );
+      }
 
       await tx.invoiceEvent.create({
         data: { invoiceId, type: "payment_link_regenerated", actorId },
       });
 
-      return updated;
+      return tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     });
   }
 

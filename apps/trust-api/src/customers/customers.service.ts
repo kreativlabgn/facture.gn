@@ -71,9 +71,30 @@ export class CustomersService {
       throw new NotFoundException(`Compte acheteur public ${publicBuyerAccountId} introuvable`);
     }
 
-    return this.prisma.customer.update({
-      where: { id: customerId },
-      data: { isPublicEntity: true, publicBuyerAccountId },
+    // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed toujours
+    // remis à false ici, même en cas de re-pointage vers un autre compte : la
+    // confirmation appartient exclusivement au compte CIBLÉ
+    // (PublicBuyerPortalService.confirmCustomerLink()), jamais acquise par la
+    // seule initiative de la PME qui pose ce lien.
+    //
+    // Security Audit 2026-08-23, revue post-fix #1 (finding #1 CRITIQUE) — sans
+    // la réinitialisation d'Invoice.validatedByAdministration ci-dessous, une
+    // validation obtenue sous l'ANCIEN rattachement (même frauduleuse, via un
+    // faux compte auto-créé désormais bloqué par validateLiquidation()) restait
+    // valable après un repointage vers un vrai compte déjà "verified" — exactement
+    // le contournement du finding critique. Une validation appartient au lien
+    // customer<->publicBuyerAccount qui l'a produite, jamais transférable à un
+    // nouveau lien sans repasser par une vraie validation.
+    return this.prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.update({
+        where: { id: customerId },
+        data: { isPublicEntity: true, publicBuyerAccountId, isPublicEntityConfirmed: false },
+      });
+      await tx.invoice.updateMany({
+        where: { customerId, validatedByAdministration: true },
+        data: { validatedByAdministration: false },
+      });
+      return customer;
     });
   }
 

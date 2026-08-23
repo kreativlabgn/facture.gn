@@ -181,10 +181,11 @@ describe("UssdAccountService — inviter un proche (F3, 5.5, DAT §3.5)", () => 
     expect(prisma.organizationMember.findFirst).toHaveBeenCalledWith({
       where: { organizationId: ORG_ID, userId: USER_ID, revokedAt: null },
     });
-    expect(organizationsService.inviteMember).toHaveBeenCalledWith(ORG_ID, {
-      msisdn: "+224655667788",
-      role: "viewer",
-    });
+    expect(organizationsService.inviteMember).toHaveBeenCalledWith(
+      ORG_ID,
+      { msisdn: "+224655667788", role: "viewer" },
+      USER_ID,
+    );
   });
 
   it("délègue également quand le demandeur est admin (pas seulement owner)", async () => {

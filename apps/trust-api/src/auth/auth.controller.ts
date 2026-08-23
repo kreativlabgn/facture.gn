@@ -1,4 +1,5 @@
 import { Body, Controller, Param, Post, UseGuards, UsePipes } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CommercialAgentAuthGuard } from "../common/commercial-agent-auth.guard";
@@ -15,7 +16,13 @@ import { addPhoneSchema, type AddPhoneDto } from "./dto/add-phone.dto";
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // Security Audit 2026-08-23, finding #10 — 5/min par IP (bien plus strict que le
+  // filet générique 100/min d'AppModule) : ces 3 routes @Public() sont les seules
+  // atteignables sans aucune authentification préalable, donc les seules
+  // exploitables pour un brute-force en ligne à grande échelle (login) ou un
+  // abus de création de compte / spam de récupération.
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("register")
   @UsePipes(new ZodValidationPipe(registerSchema))
   register(@Body() dto: RegisterDto) {
@@ -23,6 +30,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("login")
   @UsePipes(new ZodValidationPipe(loginSchema))
   login(@Body() dto: LoginDto) {
@@ -32,6 +40,7 @@ export class AuthController {
   // Public : c'est le seul moyen pour un owner qui a perdu l'accès de déclencher
   // une récupération (B3). Réponse anti-énumération gérée dans le service.
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("recovery-requests")
   @UsePipes(new ZodValidationPipe(requestRecoverySchema))
   requestRecovery(@Body() dto: RequestRecoveryDto) {
@@ -52,6 +61,17 @@ export class AuthController {
   @ApiBearerAuth()
   rejectRecovery(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
     return this.authService.resolveRecovery(id, user.id, "rejected");
+  }
+
+  // Security Audit 2026-08-23, finding #14 — JWT requis (jamais @Public()) :
+  // révoque exclusivement le token courant de l'appelant (jti/exp portés par
+  // CurrentUserPayload, peuplés par JwtAuthGuard). Ni un rate limit dédié ni un
+  // Throttle particulier : une révocation ne peut jamais être abusée pour nuire
+  // à un tiers (chacun ne révoque que son propre token).
+  @Post("logout")
+  @ApiBearerAuth()
+  logout(@CurrentUser() user: CurrentUserPayload) {
+    return this.authService.logout(user.jti as string, user.exp as number);
   }
 
   // JWT requis (B6) — jamais @Public() : on ajoute un numéro au compte déjà

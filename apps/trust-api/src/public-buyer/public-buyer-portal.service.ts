@@ -39,6 +39,33 @@ export class PublicBuyerPortalService {
       throw new ForbiddenException("Aucun accès à ce compte acheteur public");
     }
 
+    // Security Audit 2026-08-23, revue post-fix #1 (finding #1 CRITIQUE) — sans
+    // cette garde, N'IMPORTE QUEL PublicBuyerAccount auto-créé en self-service
+    // (statut "pending" par défaut, PublicBuyerAccountsService.create()) pouvait
+    // valider sa propre liquidation : rien ne distinguait un compte réellement
+    // institutionnel d'un faux compte créé par l'attaquant lui-même. Seul un
+    // compte "verified" (bascule opérationnelle hors code, voir schema.prisma)
+    // peut désormais produire une validation.
+    const publicBuyerAccount = await this.prisma.publicBuyerAccount.findUniqueOrThrow({
+      where: { id: publicBuyerAccountId },
+    });
+    if (publicBuyerAccount.verificationStatus !== "verified") {
+      throw new ForbiddenException(
+        `Compte acheteur public ${publicBuyerAccountId} non vérifié — impossible de valider une liquidation`,
+      );
+    }
+
+    // Security Audit 2026-08-23, finding #13 — une PME peut rattacher un client à
+    // N'IMPORTE QUEL compte acheteur public existant (flagPublicEntity() ne
+    // vérifie que l'existence du compte, jamais son consentement). Sans cette
+    // garde, un DAF pourrait valider par erreur la liquidation d'une facture d'un
+    // fournisseur avec lequel son administration n'a aucune relation réelle.
+    if (!customer?.isPublicEntityConfirmed) {
+      throw new ForbiddenException(
+        `Le rattachement du client de la facture ${invoiceId} à ce compte acheteur public n'a pas été confirmé`,
+      );
+    }
+
     if (invoice.validatedByAdministration) {
       return invoice;
     }
@@ -86,8 +113,11 @@ export class PublicBuyerPortalService {
     // draft exclu : jamais "reçue" tant que la PME ne l'a pas émise. voided exclu : plus
     // aucune dette réelle (PRD §4.2, amountDue n'est jamais remis à zéro au void()) —
     // sans ce filtre, l'encours total intègrerait des créances annulées.
+    // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed: true
+    // exclut les liens jamais confirmés par ce compte acheteur public, même précédent
+    // que la garde ajoutée à validateLiquidation() ci-dessus.
     const where = {
-      customer: { publicBuyerAccountId: membership.publicBuyerAccountId },
+      customer: { publicBuyerAccountId: membership.publicBuyerAccountId, isPublicEntityConfirmed: true },
       status: { notIn: ["draft", "voided"] as Array<"draft" | "voided"> },
     };
 
@@ -97,5 +127,29 @@ export class PublicBuyerPortalService {
     ]);
 
     return { invoices, outstandingTotal: aggregate._sum.amountDue ?? 0n };
+  }
+
+  // Security Audit 2026-08-23, finding #13 — seule façon de faire passer
+  // Customer.isPublicEntityConfirmed à true : un membre (public_buyer_validator)
+  // du COMPTE CIBLÉ par le lien doit explicitement le confirmer, jamais la PME qui
+  // l'a posé (flagPublicEntity()). Même autorisation inline que
+  // validateLiquidation()/listReceivedInvoices() ci-dessus — jamais RolesGuard.
+  async confirmCustomerLink(customerId: string, requesterUserId: string) {
+    const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+    if (!customer.publicBuyerAccountId) {
+      throw new ForbiddenException(`Client ${customerId} n'est rattaché à aucun compte acheteur public`);
+    }
+
+    const membership = await this.prisma.publicBuyerAccountMember.findFirst({
+      where: { publicBuyerAccountId: customer.publicBuyerAccountId, userId: requesterUserId },
+    });
+    if (!membership) {
+      throw new ForbiddenException("Aucun accès à ce compte acheteur public");
+    }
+
+    return this.prisma.customer.update({
+      where: { id: customerId },
+      data: { isPublicEntityConfirmed: true },
+    });
   }
 }

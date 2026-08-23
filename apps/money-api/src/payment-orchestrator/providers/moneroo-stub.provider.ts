@@ -42,6 +42,13 @@ export class MonerooStubProvider implements PaymentProvider {
   // TODO(Moneroo réel, ADR-075) : remplacer par la vraie vérification de signature
   // Moneroo quand des credentials existeront — voir le même correctif sur
   // DjomyStubProvider pour le raisonnement complet (dev-security-reviewer, C2 Phase 2b).
+  //
+  // Security Audit 2026-08-23, finding #11 (MOYEN) — même décision explicite de
+  // report que DjomyStubProvider (voir son commentaire détaillé) : câbler un vrai
+  // HMAC sur request.rawBody maintenant pour un format de payload stub inventé,
+  // qui sera entièrement redéfini à la vraie intégration Moneroo, n'apporte aucun
+  // bénéfice de sécurité durable pour le coût de plomberie (main.ts, WebhooksService,
+  // PaymentProvider). Déjà tracé comme blocker avant bascule réelle (TODO ci-dessus).
   handleWebhook(rawPayload: unknown): NormalizedWebhookResult {
     const payload = rawPayload as { provider_ref: string; stub_secret?: string };
     return {

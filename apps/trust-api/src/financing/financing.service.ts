@@ -12,8 +12,16 @@ export class FinancingService {
   // donnée dédiée (absence d'action, voir PLAN) : seule l'éligibilité et la
   // liste des partenaires Rail A sont retournées.
   async getFinancingOptions(invoiceId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    const financeable = isFinanceable(invoice);
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: { customer: { include: { publicBuyerAccount: true } } },
+    });
+    const financeable = isFinanceable({
+      ...invoice,
+      publicBuyerAccountVerified: invoice.customer?.publicBuyerAccount?.verificationStatus === "verified",
+      // Security Audit 2026-08-23, revue post-fix #1 — voir is-financeable.ts.
+      publicEntityConfirmed: invoice.customer?.isPublicEntityConfirmed === true,
+    });
     const partners = financeable
       ? await this.prisma.financialPartner.findMany({ where: { status: "active" } })
       : [];
@@ -27,8 +35,17 @@ export class FinancingService {
   // bank_transfer (aucune intégration dans ce repo, même limite déjà
   // documentée par refunds.service.ts et RevenueShareService).
   async chooseFinancing(invoiceId: string, dto: ChooseFinancingDto, requesterUserId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    if (!isFinanceable(invoice)) {
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: { customer: { include: { publicBuyerAccount: true } } },
+    });
+    const financeable = isFinanceable({
+      ...invoice,
+      publicBuyerAccountVerified: invoice.customer?.publicBuyerAccount?.verificationStatus === "verified",
+      // Security Audit 2026-08-23, revue post-fix #1 — voir is-financeable.ts.
+      publicEntityConfirmed: invoice.customer?.isPublicEntityConfirmed === true,
+    });
+    if (!financeable) {
       throw new ConflictException(`Facture ${invoiceId} non finançable`);
     }
 

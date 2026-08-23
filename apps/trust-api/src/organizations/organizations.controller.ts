@@ -119,8 +119,9 @@ export class OrganizationsController {
   inviteMember(
     @Param("id") organizationId: string,
     @Body(new ZodValidationPipe(inviteOrganizationMemberSchema)) dto: InviteOrganizationMemberDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.organizationsService.inviteMember(organizationId, dto);
+    return this.organizationsService.inviteMember(organizationId, dto, user.id);
   }
 
   // H2, ADR-049 — même trio owner/admin que les autres routes de gestion
@@ -143,5 +144,14 @@ export class OrganizationsController {
   @OrganizationIdSource("organization")
   revokeSigningKey(@Param("id") organizationId: string) {
     return this.organizationsService.revokeSigningKey(organizationId);
+  }
+
+  // Security Audit 2026-08-23, finding #8 — même trio owner/admin et même posture
+  // self-service que revokeSigningKey() ci-dessus.
+  @Post(":id/assisted-sessions/:agentUserId/revoke")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  revokeAssistedSession(@Param("id") organizationId: string, @Param("agentUserId") agentUserId: string) {
+    return this.organizationsService.revokeAssistedSession(organizationId, agentUserId);
   }
 }

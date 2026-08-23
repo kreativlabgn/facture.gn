@@ -9,6 +9,12 @@ function baseInvoice(overrides: Record<string, any> = {}) {
     validatedByAdministration: true,
     financedByPartnerId: null,
     status: "issued",
+    // Security Audit 2026-08-23, finding #1 — PublicBuyerAccount vérifié par
+    // défaut dans ces fixtures ; voir le test dédié plus bas pour le cas non-vérifié.
+    // Security Audit 2026-08-23, revue post-fix #1 — isPublicEntityConfirmed:true
+    // par défaut (lien confirmé par le compte cible) ; voir les tests dédiés plus
+    // bas pour le scénario de repointage post-validation (finding #1 CRITIQUE).
+    customer: { isPublicEntityConfirmed: true, publicBuyerAccount: { verificationStatus: "verified" } },
     ...overrides,
   };
 }
@@ -64,6 +70,32 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
     expect(prisma.financialPartner.findMany).not.toHaveBeenCalled();
+  });
+
+  it("ne liste aucun partenaire si le PublicBuyerAccount lié n'est pas vérifié, même validée par l'administration (Security Audit 2026-08-23, finding #1)", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({ customer: { publicBuyerAccount: { verificationStatus: "pending" } } }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1");
+
+    expect(result.financeable).toBe(false);
+    expect(result.partners).toEqual([]);
+  });
+
+  it("ne liste aucun partenaire si le lien customer<->public_buyer_account n'a jamais été confirmé par le compte cible, même si ce compte est verified (Security Audit 2026-08-23, revue post-fix #1, finding #1 CRITIQUE) — repointage post-validation vers un vrai compte", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({
+        customer: { isPublicEntityConfirmed: false, publicBuyerAccount: { verificationStatus: "verified" } },
+      }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1");
+
+    expect(result.financeable).toBe(false);
+    expect(result.partners).toEqual([]);
   });
 });
 
@@ -149,9 +181,46 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
         financedByPartnerId: null,
         validatedByAdministration: true,
         status: { not: "voided" },
+        customer: {
+          isPublicEntityConfirmed: true,
+          publicBuyerAccount: { verificationStatus: "verified" },
+        },
       },
       data: { financedByPartnerId: "partner-1", financedAt: expect.any(Date) },
     });
+  });
+
+  // Security Audit 2026-08-23, revue post-fix #1 (finding #1 CRITIQUE) — la
+  // revue globale a trouvé que le scénario d'attaque complet n'était prouvé par
+  // aucun test au niveau de chooseFinancing() (la mutation réelle qui déplace
+  // l'éligibilité au financement), seulement au niveau de getFinancingOptions()
+  // (simple affichage). Ces deux tests ferment ce trou.
+  it("rejette chooseFinancing() sur un PublicBuyerAccount pending — l'auto-attestation frauduleuse ne peut jamais obtenir de financement réel", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({
+        customer: { isPublicEntityConfirmed: true, publicBuyerAccount: { verificationStatus: "pending" } },
+      }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    await expect(
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejette chooseFinancing() si le lien n'a jamais été confirmé par le compte cible, même verified — ferme le contournement par repointage post-validation", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({
+        customer: { isPublicEntityConfirmed: false, publicBuyerAccount: { verificationStatus: "verified" } },
+      }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    await expect(
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("refuse une double demande concurrente — la seconde requête échoue proprement (K5)", async () => {

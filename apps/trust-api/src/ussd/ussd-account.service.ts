@@ -77,6 +77,6 @@ export class UssdAccountService {
       throw new ForbiddenException("Seul le propriétaire ou un administrateur peut inviter un proche");
     }
 
-    return this.organizationsService.inviteMember(organizationId, { msisdn, role: "viewer" });
+    return this.organizationsService.inviteMember(organizationId, { msisdn, role: "viewer" }, requesterUserId);
   }
 }

@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./common/prisma.module";
 import { CertificationModule } from "./certification/certification.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
@@ -33,6 +34,11 @@ import { RolesGuard } from "./common/rbac/roles.guard";
 
 @Module({
   imports: [
+    // Security Audit 2026-08-23, finding #10 — filet générique par IP (100 req/min,
+    // valeur raisonnable par défaut, ajustable) : aucun mécanisme de rate limiting
+    // HTTP n'existait auparavant. Vient EN PLUS des verrous applicatifs déjà
+    // existants (PIN USSD : PIN_MAX_ATTEMPTS/PIN_LOCKOUT_MS), jamais un remplacement.
+    ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     PrismaModule,
     AuthModule,
     CertificationModule,
@@ -63,8 +69,11 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     CommissionBypassModule,
   ],
   providers: [
-    // Ordre significatif : JwtAuthGuard peuple request.user avant que RolesGuard
-    // ne le lise pour résoudre le membership organisationnel.
+    // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même
+    // toute vérification d'identité coûteuse), puis JwtAuthGuard peuple
+    // request.user avant que RolesGuard ne le lise pour résoudre le membership
+    // organisationnel.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],

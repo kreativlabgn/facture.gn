@@ -1,11 +1,19 @@
+import { randomUUID } from "node:crypto";
 import { JwtService } from "@nestjs/jwt";
 
 export interface AuthTokenPayload {
   sub: string;
+  // Security Audit 2026-08-23, finding #14 — identifiant unique par token émis,
+  // seule clé consultée par TokenRevocationService/RevokedToken pour une
+  // révocation immédiate (POST /auth/logout). exp est ajouté automatiquement par
+  // jsonwebtoken à la signature (claim standard) et relu tel quel par verify() —
+  // jamais recalculé ici.
+  jti: string;
+  exp?: number;
 }
 
 export interface AuthTokenService {
-  sign(payload: AuthTokenPayload): Promise<string>;
+  sign(payload: Pick<AuthTokenPayload, "sub">): Promise<string>;
   verify(token: string): Promise<AuthTokenPayload>;
 }
 
@@ -29,8 +37,8 @@ export class JwtAuthTokenService implements AuthTokenService {
     });
   }
 
-  sign(payload: AuthTokenPayload): Promise<string> {
-    return this.jwt.signAsync(payload);
+  sign(payload: Pick<AuthTokenPayload, "sub">): Promise<string> {
+    return this.jwt.signAsync({ ...payload, jti: randomUUID() });
   }
 
   verify(token: string): Promise<AuthTokenPayload> {

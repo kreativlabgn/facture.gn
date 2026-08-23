@@ -232,6 +232,7 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
         commercialAgentUserId: "agent-1",
         organizationId: "org-1",
         consentRecordedAt: expect.any(Date),
+        expiresAt: expect.any(Date),
       },
     });
   });
@@ -268,6 +269,31 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
     await service.createAssisted("agent-1", ASSISTED_DTO);
 
     expect(signingKeyService.provisionRootKey).toHaveBeenCalledWith("org-1", expect.anything());
+  });
+});
+
+describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23, finding #8)", () => {
+  it("révoque l'AssistedSession active entre l'agent et l'organisation", async () => {
+    const prisma: any = {
+      assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any);
+
+    await service.revokeAssistedSession("org-1", "agent-1");
+
+    expect(prisma.assistedSession.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", commercialAgentUserId: "agent-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("échoue proprement si aucune AssistedSession active ne correspond (déjà révoquée ou jamais existante)", async () => {
+    const prisma: any = {
+      assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    };
+    const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any);
+
+    await expect(service.revokeAssistedSession("org-1", "agent-1")).rejects.toThrow(/Aucune AssistedSession/);
   });
 });
 
@@ -560,7 +586,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     const prisma = createFakePrismaForInvite();
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
-    const result = await service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" });
+    const result = await service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1");
 
     expect(prisma.userPhone.findUnique).toHaveBeenCalledWith({ where: { msisdn: "+224612345678" } });
     expect(prisma.organizationMember.create).toHaveBeenCalledWith({
@@ -574,7 +600,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224699999999", role: "tax_controller_readonly" }),
+      service.inviteMember("org-1", { msisdn: "+224699999999", role: "tax_controller_readonly" }, "user-owner-1"),
     ).rejects.toThrow(/introuvable/);
     expect(prisma.organizationMember.create).not.toHaveBeenCalled();
   });
@@ -586,7 +612,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1"),
     ).rejects.toThrow(/déjà membre/);
     expect(prisma.organizationMember.create).not.toHaveBeenCalled();
   });
@@ -603,7 +629,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1"),
     ).rejects.toThrow(/déjà membre/);
     expect(prisma.organizationMember.create).not.toHaveBeenCalled();
   });
@@ -619,8 +645,77 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }),
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "tax_controller_readonly" }, "user-owner-1"),
     ).rejects.toThrow(/déjà membre/);
+  });
+});
+
+describe("OrganizationsService.inviteMember — restriction admin/approver au owner (Security Audit 2026-08-23, finding #12)", () => {
+  function createFakePrismaForInviteRestriction(requesterRole: string | null) {
+    return {
+      userPhone: { findUnique: vi.fn().mockResolvedValue({ userId: "user-invite-1" }) },
+      organizationMember: {
+        // Distingue la vérification du DEMANDEUR (son propre membership, userId
+        // variable selon le test) de celle de L'INVITÉ (toujours "user-invite-1",
+        // doit rester null pour ne jamais déclencher le garde "déjà membre").
+        findUnique: vi.fn().mockImplementation(({ where }: any) => {
+          const { userId } = where.organizationId_userId;
+          if (userId === "user-invite-1") {
+            return Promise.resolve(null);
+          }
+          return Promise.resolve(requesterRole ? { organizationId: "org-1", role: requesterRole } : null);
+        }),
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn().mockResolvedValue({
+          id: "member-invite-1",
+          organizationId: "org-1",
+          userId: "user-invite-1",
+          role: "admin",
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "enterprise" }),
+      },
+    };
+  }
+
+  it("refuse qu'un admin invite un pair admin", async () => {
+    const prisma = createFakePrismaForInviteRestriction("admin");
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "admin" }, "user-admin-requester"),
+    ).rejects.toThrow(/Seul le owner/);
+    expect(prisma.organizationMember.create).not.toHaveBeenCalled();
+  });
+
+  it("refuse qu'un admin invite un approver", async () => {
+    const prisma = createFakePrismaForInviteRestriction("admin");
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await expect(
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "approver" }, "user-admin-requester"),
+    ).rejects.toThrow(/Seul le owner/);
+  });
+
+  it("autorise le owner à inviter un admin", async () => {
+    const prisma = createFakePrismaForInviteRestriction("owner");
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    const result = await service.inviteMember("org-1", { msisdn: "+224612345678", role: "admin" }, "user-owner-1");
+
+    expect(result.role).toBe("admin");
+  });
+
+  it("n'applique jamais cette restriction aux rôles moindres — un admin peut toujours inviter un cashier", async () => {
+    const prisma = createFakePrismaForInviteRestriction("admin");
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
+
+    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-admin-requester");
+
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId_userId: { organizationId: "org-1", userId: "user-admin-requester" } } }),
+    );
   });
 });
 
@@ -653,7 +748,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224612345678", role: "inventory_manager" }),
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "inventory_manager" }, "user-owner-1"),
     ).rejects.toThrow(ForbiddenException);
     expect(prisma.organizationMember.create).not.toHaveBeenCalled();
   });
@@ -663,7 +758,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224612345678", role: "approver" }),
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "approver" }, "user-owner-1"),
     ).rejects.toThrow(ForbiddenException);
   });
 
@@ -675,7 +770,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
     await expect(
-      service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }),
+      service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-owner-1"),
     ).rejects.toThrow(ForbiddenException);
     expect(prisma.organizationMember.create).not.toHaveBeenCalled();
   });
@@ -684,7 +779,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
     const prisma = createFakePrismaForInvite({ organization: { id: "org-1", commercialTier: "freemium" } });
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
-    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" });
+    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-owner-1");
 
     expect(prisma.organizationMember.count).toHaveBeenCalledWith({
       where: { organizationId: "org-1", revokedAt: null },
@@ -698,7 +793,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
     });
     const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any);
 
-    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" });
+    await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-owner-1");
 
     expect(prisma.organizationMember.create).toHaveBeenCalled();
   });

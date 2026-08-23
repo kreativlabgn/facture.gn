@@ -5,6 +5,7 @@ import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PASSWORD_SERVICE, AUTH_TOKEN_SERVICE } from "./auth.tokens";
 import type { PasswordService } from "./password.service";
 import type { AuthTokenService } from "./auth-token.service";
+import { TokenRevocationService } from "./token-revocation.service";
 import type { RegisterDto } from "./dto/register.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RequestRecoveryDto } from "./dto/request-recovery.dto";
@@ -26,6 +27,7 @@ export class AuthService {
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
     @Inject(AUTH_TOKEN_SERVICE) private readonly tokenService: AuthTokenService,
+    private readonly tokenRevocation: TokenRevocationService,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ userId: string }> {
@@ -179,6 +181,15 @@ export class AuthService {
       }
       throw error;
     }
+  }
+
+  // Security Audit 2026-08-23, finding #14 — révoque UNIQUEMENT le token présenté
+  // par cette requête (jti/exp déjà vérifiés et peuplés par JwtAuthGuard, jamais
+  // recalculés ici) : pas de "déconnexion de tous les appareils", ce n'est pas
+  // le périmètre de cette capacité minimale. exp en secondes epoch (claim JWT
+  // standard) → converti en Date pour RevokedToken.expiresAt.
+  async logout(jti: string, exp: number): Promise<void> {
+    await this.tokenRevocation.revoke(jti, new Date(exp * 1000));
   }
 
   // ADR-045, B5, ADR-107 — élève un utilisateur déjà enregistré (Chemin A) au

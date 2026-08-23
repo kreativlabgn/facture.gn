@@ -273,6 +273,22 @@ model User {
   @@map("user")
 }
 
+// Security Audit 2026-08-23, finding #14 — capacité MINIMALE de révocation
+// immédiate d'un JWT compromis (ex. POST /auth/logout). CE N'EST PAS un système
+// de refresh token rotatif (hors scope de ce correctif, chantier séparé) : le
+// token reste un access token classique signé RS256/TTL 12h (auth-token.service.ts,
+// inchangé), simplement vérifié contre cette liste à chaque requête. expiresAt
+// recopie l'expiration du JWT lui-même — permet un nettoyage périodique des lignes
+// devenues sans objet (aucun job de purge construit ici, même limite déjà
+// documentée pour UssdSession).
+model RevokedToken {
+  jti       String   @id
+  revokedAt DateTime @default(now()) @map("revoked_at")
+  expiresAt DateTime @map("expires_at")
+
+  @@map("revoked_token")
+}
+
 // 7 rôles organisationnels de base (ADR-027, MVP initial). accountant_external et
 // practice_admin (portant le MVP à 9, ADR-070) ne sont volontairement pas inclus ici :
 // ils dépendent du mécanisme de mandat cabinet/CGA (PROFESSIONAL_PRACTICE/MANDATE)
@@ -553,7 +569,15 @@ model AssistedSession {
   commercialAgentUserId String   @map("commercial_agent_user_id")
   organizationId    String   @map("organization_id")
   consentRecordedAt DateTime @map("consent_recorded_at")
-  createdAt         DateTime @default(now()) @map("created_at")
+  // Security Audit 2026-08-23, finding #8 — jusqu'ici aucun champ d'expiration ni
+  // de révocation : un agent conservait indéfiniment la capacité d'émettre de
+  // vraies factures certifiées au nom de l'organisation, même après la fin de sa
+  // mission. TTL de 90 jours arbitraire (aucune spec ADR/Backlog ne fixe de durée),
+  // ajustable en un point unique (voir ASSISTED_SESSION_TTL_MS). revokedAt permet
+  // en plus une révocation manuelle immédiate par un owner/admin de l'organisation.
+  expiresAt DateTime? @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   commercialAgent User         @relation(fields: [commercialAgentUserId], references: [id])
   organization    Organization @relation(fields: [organizationId], references: [id])
@@ -672,6 +696,14 @@ model Customer {
   // (CustomersService.flagPublicEntity()), même trio restreint que merge() (E4).
   isPublicEntity       Boolean @default(false) @map("is_public_entity")
   publicBuyerAccountId String? @map("public_buyer_account_id")
+  // Security Audit 2026-08-23, finding #13 — flagPublicEntity() posait jusqu'ici
+  // isPublicEntity/publicBuyerAccountId sur la seule initiative de la PME, sans
+  // aucun accord du compte acheteur public ciblé (qui peut être un compte réel et
+  // légitime). false à la création du lien, jamais true tant qu'un membre
+  // (public_buyer_validator) du compte visé n'a pas explicitement confirmé via
+  // PublicBuyerPortalService.confirmCustomerLink() — seul ce champ conditionne
+  // désormais la visibilité du client dans listReceivedInvoices()/validateLiquidation().
+  isPublicEntityConfirmed Boolean @default(false) @map("is_public_entity_confirmed")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -691,10 +723,27 @@ model Customer {
 // que ProfessionalPractice (ADR-068) : un DAF n'est jamais membre d'une
 // organisation PME, jamais un OrganizationRole. Self-service (même précédent que
 // ProfessionalPractice.create()) : aucune vérification institutionnelle en V1.
+// Security Audit 2026-08-23, finding #1 (CRITIQUE) — create() reste self-service
+// (aucune vérification institutionnelle en V1, décision produit d'origine
+// inchangée), mais un compte "pending" ne peut plus, à lui seul, rendre une
+// facture finançable (voir is-financeable.ts::financeableInvoiceWhere) : sans
+// cette barrière, n'importe qui pouvait créer un faux acheteur public, s'auto-
+// flaguer client, puis s'auto-valider comme administration. Bascule vers
+// "verified" volontairement SANS endpoint HTTP dédié — même précédent déjà
+// accepté dans ce repo pour FinancialPartner (seedé/activé hors API, aucun
+// besoin exprimé) : la vérification institutionnelle réelle d'un DAF est un
+// processus humain/ops (runbook), pas encore un flux produit spécifié.
+enum PublicBuyerAccountVerificationStatus {
+  pending
+  verified
+  rejected
+}
+
 model PublicBuyerAccount {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
+  id                 String                               @id @default(uuid())
+  name               String
+  verificationStatus PublicBuyerAccountVerificationStatus  @default(pending) @map("verification_status")
+  createdAt          DateTime                              @default(now()) @map("created_at")
 
   members   PublicBuyerAccountMember[]
   customers Customer[]
@@ -1018,6 +1067,11 @@ model Refund {
   method       RefundMethod
   providerRef  String?      @map("provider_ref")
   status       RefundStatus @default(pending)
+  // Security Audit 2026-08-23, finding #2 — même pattern que Payment.idempotencyKey :
+  // sans contrainte unique, deux requêtes concurrentes (double clic, retry réseau)
+  // passaient toutes deux la garde anti-sur-remboursement avant qu'aucune n'ait
+  // committé, produisant un sur-remboursement réel.
+  idempotencyKey String @unique @map("idempotency_key")
   createdAt    DateTime     @default(now()) @map("created_at")
   completedAt  DateTime?    @map("completed_at")
 

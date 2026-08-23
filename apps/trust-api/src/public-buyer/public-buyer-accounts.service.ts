@@ -37,7 +37,19 @@ export class PublicBuyerAccountsService {
   // Sélecteur PME (F16, flag-public-entity) — aucun concept "actif/inactif"
   // scaffoldé (même limite que ProfessionalPractice), tout compte existant est
   // retourné, trié pour un sélecteur lisible côté client.
+  //
+  // Security Audit 2026-08-23, revue post-fix #1 (finding #1 CRITIQUE) —
+  // select restreint à {id, name} : cet endpoint n'a aucun @Roles() (self-service
+  // volontaire, tout owner/admin PME doit pouvoir rattacher un client), donc
+  // n'importe qui d'authentifié peut lister tous les comptes. Ne JAMAIS exposer
+  // verificationStatus ici — un attaquant pourrait sinon l'utiliser pour repérer
+  // spécifiquement les comptes déjà "verified" comme cibles de repointage
+  // (flagPublicEntity() est désormais protégé indépendamment côté serveur, mais
+  // cet endpoint ne doit pas non plus faciliter la reconnaissance de cibles).
   async listActive() {
-    return this.prisma.publicBuyerAccount.findMany({ orderBy: { name: "asc" } });
+    return this.prisma.publicBuyerAccount.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    });
   }
 }

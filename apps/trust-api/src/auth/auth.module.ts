@@ -3,6 +3,7 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { Argon2PasswordService, type PasswordService } from "./password.service";
 import { JwtAuthTokenService, type AuthTokenService } from "./auth-token.service";
+import { TokenRevocationService } from "./token-revocation.service";
 import { PASSWORD_SERVICE, AUTH_TOKEN_SERVICE } from "./auth.tokens";
 
 // Clés RS256 (ADR-011) en PEM via l'environnement, `\n` littéraux à décoder — pattern
@@ -21,6 +22,7 @@ function readPemFromEnv(name: string): string {
   controllers: [AuthController],
   providers: [
     AuthService,
+    TokenRevocationService,
     {
       provide: PASSWORD_SERVICE,
       useFactory: (): PasswordService => new Argon2PasswordService(),
@@ -31,6 +33,6 @@ function readPemFromEnv(name: string): string {
         new JwtAuthTokenService(readPemFromEnv("JWT_PRIVATE_KEY"), readPemFromEnv("JWT_PUBLIC_KEY")),
     },
   ],
-  exports: [AUTH_TOKEN_SERVICE, PASSWORD_SERVICE],
+  exports: [AUTH_TOKEN_SERVICE, PASSWORD_SERVICE, TokenRevocationService],
 })
 export class AuthModule {}
