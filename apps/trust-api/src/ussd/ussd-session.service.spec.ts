@@ -8,11 +8,29 @@ const USER_ID = "user-1";
 const ORG_ID = "org-1";
 
 function createFakePrisma(overrides: { existingSession?: any } = {}) {
+  // Security Audit 2026-08-23, revue post-fix #2 (finding #4) — currentState est
+  // partagé par closure entre TOUTES les invocations de updateMany() sur cette
+  // instance de fake Prisma : deux appels à service.handleRequest() partageant la
+  // même instance (voir le test de vraie concurrence ci-dessous) exercent donc le
+  // vrai comportement conditionnel where:{state: expectedState} — une seule des
+  // deux transitions peut réussir (count===1), jamais les deux, exactement comme
+  // la contrainte réelle en base le garantirait.
+  let currentState: string | undefined = overrides.existingSession?.state;
   return {
     ussdSession: {
       findUnique: vi.fn().mockResolvedValue(overrides.existingSession ?? null),
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "session-row-1", ...data })),
-      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "session-row-1", ...data })),
+      update: vi.fn().mockImplementation(({ data }: any) => {
+        if (data.state !== undefined) currentState = data.state;
+        return Promise.resolve({ id: "session-row-1", ...data });
+      }),
+      updateMany: vi.fn().mockImplementation(({ where, data }: any) => {
+        if (currentState === where.state) {
+          currentState = data.state;
+          return Promise.resolve({ count: 1 });
+        }
+        return Promise.resolve({ count: 0 });
+      }),
     },
   };
 }
@@ -508,8 +526,15 @@ describe("UssdSessionService — option 4, émettre une facture (D1, §2.4 Spec 
 
     await service.handleRequest(SESSION_ID, PHONE, "");
 
-    expect(prisma.ussdSession.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ state: "emit_processing" }) }),
+    // Security Audit 2026-08-23, revue post-fix #2 — la transition vers
+    // emit_processing passe désormais par updateMany() (garde conditionnelle
+    // where:{state: expectedState}, voir tryClaimProcessingState()), plus par un
+    // update() inconditionnel.
+    expect(prisma.ussdSession.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "session-row-1", state: "emit_awaiting_customer_phone" },
+        data: expect.objectContaining({ state: "emit_processing" }),
+      }),
     );
     expect(prisma.ussdSession.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -519,6 +544,34 @@ describe("UssdSessionService — option 4, émettre une facture (D1, §2.4 Spec 
         }),
       }),
     );
+  });
+
+  it("deux requêtes réellement concurrentes pour le même sessionId n'émettent qu'UNE SEULE facture (Security Audit 2026-08-23, revue post-fix #2, finding #4)", async () => {
+    // Une seule instance de fake Prisma PARTAGÉE entre les deux appels
+    // concurrents — c'est ce partage qui rend le test capable de détecter une
+    // garde non atomique (contrairement à deux services/deux prisma séparés, qui
+    // ne pourraient jamais entrer en conflit l'un avec l'autre).
+    const prisma = createFakePrisma({
+      existingSession: existingSession({
+        state: "emit_awaiting_customer_phone",
+        contextData: { emitAmountCentimes: "50000000" },
+        userId: USER_ID,
+      }),
+    });
+    const ussdInvoice = createFakeUssdInvoice();
+    const service = new UssdSessionService(prisma as any, createFakeUssdAuth() as any, createFakeVerification() as any, ussdInvoice as any, createFakeUssdPayment() as any, createFakeUssdInvoiceList() as any, createFakeUssdAccount() as any, createFakePasswordService() as any);
+
+    const [first, second] = await Promise.all([
+      service.handleRequest(SESSION_ID, PHONE, ""),
+      service.handleRequest(SESSION_ID, PHONE, ""),
+    ]);
+
+    expect(ussdInvoice.emitInvoice).toHaveBeenCalledTimes(1);
+    const results = [first, second];
+    const winner = results.filter((r) => r.text.includes("FG-2026-000001"));
+    const loser = results.filter((r) => r.text === "Traitement en cours, veuillez patienter.");
+    expect(winner).toHaveLength(1);
+    expect(loser).toHaveLength(1);
   });
 
   it("un rejeu (état emit_processing déjà en vol) ne réémet jamais — répond simplement d'attendre", async () => {

@@ -288,7 +288,7 @@ export class UssdSessionService {
       return { continue: true, text: "PIN incorrect. Réessayez :" };
     }
 
-    return this.completeAuthentication(session.id, context);
+    return this.completeAuthentication(session.id, context, session.state);
   }
 
   // Security Audit 2026-08-23, finding #6 — le PIN candidat est haché (argon2id,
@@ -317,10 +317,14 @@ export class UssdSessionService {
     }
 
     await this.ussdAuth.createPin(context.authUserId as string, input);
-    return this.completeAuthentication(session.id, context);
+    return this.completeAuthentication(session.id, context, session.state);
   }
 
-  private async completeAuthentication(sessionId: string, context: SessionContext): Promise<UssdResponse> {
+  private async completeAuthentication(
+    sessionId: string,
+    context: SessionContext,
+    currentState: string,
+  ): Promise<UssdResponse> {
     // §5 Spec USSD — raccourci d'émission anonyme : montant déjà connu
     // (stocké dès handleAnonymousEmissionShortcut), jamais de collecte de
     // téléphone client (anonyme), jamais de resolveOrCreateCustomer.
@@ -333,11 +337,15 @@ export class UssdSessionService {
         return { continue: false, text: "Aucune organisation habilitée à émettre n'a été trouvée pour ce compte." };
       }
 
-      // Security Audit 2026-08-23, finding #4 — transition immédiate vers un état
-      // intermédiaire AVANT l'appel emitInvoice() : un rejeu USSD (timeout réseau
-      // agrégateur) qui arriverait pendant que la première émission est encore en
-      // vol ne doit jamais redéclencher une seconde émission de facture certifiée.
-      await this.setState(sessionId, "emit_processing", context);
+      // Security Audit 2026-08-23, finding #4 (durci en revue post-fix #2) —
+      // transition ATOMIQUE (where:{state: currentState}) vers un état
+      // intermédiaire AVANT l'appel emitInvoice() : un rejeu USSD réellement
+      // concurrent (timeout réseau agrégateur) ne peut plus gagner la ligne deux
+      // fois, voir tryClaimProcessingState() pour le détail de la garde.
+      const claimed = await this.tryClaimProcessingState(sessionId, currentState, context);
+      if (!claimed) {
+        return { continue: false, text: "Traitement en cours, veuillez patienter." };
+      }
 
       const amountCentimes = BigInt(context.emitAmountCentimes as string);
       try {
@@ -475,10 +483,14 @@ export class UssdSessionService {
     const customerId = await this.ussdInvoice.resolveOrCreateCustomer(organizationId, phone || undefined);
     const amountCentimes = BigInt(context.emitAmountCentimes as string);
 
-    // Security Audit 2026-08-23, finding #4 — même garde anti-rejeu que la branche
-    // anon_emit de completeAuthentication() ci-dessus : transition AVANT l'appel
-    // emitInvoice(), jamais après.
-    await this.setState(session.id, "emit_processing", context);
+    // Security Audit 2026-08-23, finding #4 (durci en revue post-fix #2) — même
+    // garde ATOMIQUE que la branche anon_emit de completeAuthentication()
+    // ci-dessus : where:{state: "emit_awaiting_customer_phone"} garantit qu'une
+    // seule requête concurrente peut gagner la transition, jamais les deux.
+    const claimed = await this.tryClaimProcessingState(session.id, "emit_awaiting_customer_phone", context);
+    if (!claimed) {
+      return { continue: false, text: "Traitement en cours, veuillez patienter." };
+    }
 
     // D4 — VelocityTierService.assertWithinLimits() (appelé par emitInvoice,
     // avant toute création) lève ForbiddenException au-delà des plafonds T0-T3.
@@ -719,6 +731,27 @@ export class UssdSessionService {
       where: { id: sessionId },
       data: { state, contextData: context as Prisma.InputJsonValue },
     });
+  }
+
+  // Security Audit 2026-08-23, revue post-fix #2 (finding #4) — setState() seul
+  // est un update() INCONDITIONNEL : deux requêtes réellement concurrentes pour le
+  // même sessionId (le vrai scénario de rejeu réseau agrégateur, pas seulement un
+  // rejeu séquentiel après commit) liraient toutes deux le même état initial avant
+  // qu'aucune n'ait écrit "emit_processing", et passeraient donc TOUTES LES DEUX
+  // jusqu'à emitInvoice() — double émission. Le where:{state: expectedState} rend
+  // la transition atomique au niveau DB : une seule des deux requêtes concurrentes
+  // peut gagner la ligne (count===1), l'autre voit count===0 et n'appelle jamais
+  // emitInvoice().
+  private async tryClaimProcessingState(
+    sessionId: string,
+    expectedState: string,
+    context: SessionContext,
+  ): Promise<boolean> {
+    const claimed = await this.prisma.ussdSession.updateMany({
+      where: { id: sessionId, state: expectedState },
+      data: { state: "emit_processing", contextData: context as Prisma.InputJsonValue },
+    });
+    return claimed.count === 1;
   }
 }
 
