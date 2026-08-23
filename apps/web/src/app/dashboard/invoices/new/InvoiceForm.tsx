@@ -90,6 +90,19 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
           </select>
         </div>
 
+        <div className="mb-4">
+          <label htmlFor="referenceMarche" className="mb-1.5 block font-display text-[10px] font-semibold tracking-wide text-navy-950 uppercase">
+            Référence marché (TELEMO) — optionnel
+          </label>
+          <input
+            type="text"
+            id="referenceMarche"
+            name="referenceMarche"
+            placeholder="TELEMO-2026-000123"
+            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+          />
+        </div>
+
         <div className="mt-5">
           <p className="mb-2 grid grid-cols-[1fr_70px_110px_32px] gap-2 font-display text-[10px] font-semibold tracking-wide text-navy-600 uppercase">
             <span>Description</span>

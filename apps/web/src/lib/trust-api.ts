@@ -189,6 +189,10 @@ export interface CreateInvoiceInput {
   documentType: "invoice" | "proforma" | "quote";
   customerId?: string;
   lines: CreateInvoiceLineInput[];
+  // K3, ADR-090 — "Référence marché TELEMO", recopiée à la main, aucune
+  // vérification automatique côté serveur. Optionnel : une facture sans
+  // référence suit exactement le même parcours qu'une facture avec référence.
+  referenceMarche?: string;
 }
 
 export interface InvoiceDetail {
