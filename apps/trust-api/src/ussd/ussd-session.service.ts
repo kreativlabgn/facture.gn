@@ -9,6 +9,7 @@ import { UssdInvoiceService } from "./ussd-invoice.service";
 import { UssdPaymentService } from "./ussd-payment.service";
 import { UssdInvoiceListService } from "./ussd-invoice-list.service";
 import { UssdAccountService } from "./ussd-account.service";
+import { ClientPortalService } from "../client-portal/client-portal.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
 const PIN_FORMAT = /^\d{4}$/;
@@ -94,6 +95,14 @@ type UssdState =
   // éliminer.
   | "authenticated_stub";
 
+// F13, ADR-096/ADR-108 — "6. Factures reçues" est délibérément distinct de
+// "3. Mes factures" : l'option 3 liste les factures ÉMISES par l'organisation
+// du collaborateur authentifié (ussdInvoiceList.listRecent, une seule org),
+// l'option 6 liste les factures REÇUES par ce numéro en tant que CLIENT, tous
+// émetteurs confondus (ClientPortalService.listOrganizations, identité
+// client_portal). Même sous-flux d'authentification PIN que les autres
+// options (ADR-108 : *620# reste inchangé, aucun OTP côté USSD) — seule la
+// question posée à la base diffère.
 const ROOT_MENU = [
   "facture.gn *620#",
   "",
@@ -102,6 +111,7 @@ const ROOT_MENU = [
   "3. Mes factures",
   "4. Émettre une facture",
   "5. Gérer mon compte",
+  "6. Factures reçues",
 ].join("\n");
 
 // §2.3 Spec USSD — libellés exacts du texte spec.
@@ -128,7 +138,7 @@ const MANAGE_ACCOUNT_MENU = [
 // Toute option autre que 2 (vérifier un reçu, §2.2 — aucune authentification
 // requise) exige le sous-flux d'authentification ci-dessous avant sa logique
 // propre — construite tâche par tâche par la suite de la feuille de route USSD.
-const AUTHENTICATED_OPTIONS = new Set(["1", "3", "4", "5"]);
+const AUTHENTICATED_OPTIONS = new Set(["1", "3", "4", "5", "6"]);
 
 // §1 Spec USSD — menu canonique, point d'entrée unique. Machine à états pilotée
 // par UssdSession.state (même style que la "machine à états" déjà pratiquée dans
@@ -146,6 +156,7 @@ export class UssdSessionService {
     private readonly ussdInvoiceList: UssdInvoiceListService,
     private readonly ussdAccount: UssdAccountService,
     @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
+    private readonly clientPortal: ClientPortalService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -337,6 +348,12 @@ export class UssdSessionService {
       return { continue: true, text: "PIN incorrect. Réessayez :" };
     }
 
+    // F13, revue post-fix #2 — PIN vérifié = possession du numéro prouvée,
+    // même garantie qu'un OTP (ADR-108). Sans ça, ClientPortalService (option
+    // 6, "Factures reçues") ne verrait jamais un utilisateur authentifié
+    // uniquement par *620#.
+    await this.ussdAuth.confirmPhoneOwnership(session.phone);
+
     return this.completeAuthentication(session.id, context, session.state);
   }
 
@@ -480,6 +497,23 @@ export class UssdSessionService {
       return { continue: true, text: MANAGE_ACCOUNT_MENU };
     }
 
+    // F13, ADR-096/ADR-108 — identité client_portal déjà résolue par le même
+    // sous-flux PIN que les autres options (authUserId), aucune organisation à
+    // résoudre ici (contrairement à 1/3/4/5) : ClientPortalService.listOrganizations
+    // traverse TOUTES les organisations où ce numéro correspond à un Customer.phone.
+    if (context.pendingOption === "6") {
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "authenticated_stub" satisfies UssdState,
+          userId: context.authUserId,
+          organizationId: context.authOrganizationId,
+          contextData: {},
+        },
+      });
+      return this.renderReceivedInvoices(context.authUserId as string);
+    }
+
     if (context.pendingOption === "1") {
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
@@ -581,6 +615,25 @@ export class UssdSessionService {
     const lines = invoices.map(
       (invoice) => `${invoice.number} — ${STATUS_LABELS[invoice.status] ?? invoice.status} — ${formatGnfPlainText(invoice.totalTtc.toString())}`,
     );
+    return { continue: false, text: lines.join("\n") };
+  }
+
+  // F13, ADR-096/ADR-108 — résumé un seul écran (un organisme par ligne, solde
+  // dû), pas de drill-down facture par facture sur ce canal : la fenêtre <90s
+  // et l'absence de pagination fiable sur USSD réservent le détail complet à la
+  // PWA (GET /client-portal/customers/:customerId/invoices). runningBalance à
+  // 0 affiché explicitement ("Aucun solde dû") plutôt qu'omis — un organisme où
+  // ce client existe mais n'a rien à payer reste une information utile.
+  private async renderReceivedInvoices(userId: string): Promise<UssdResponse> {
+    const organizations = await this.clientPortal.listOrganizations(userId);
+    if (organizations.length === 0) {
+      return { continue: false, text: "Aucune facture reçue pour le moment." };
+    }
+
+    const lines = organizations.map((org) => {
+      const balance = org.runningBalance > 0n ? formatGnfPlainText(org.runningBalance.toString()) : "Aucun solde dû";
+      return `${org.organizationName} — ${balance}`;
+    });
     return { continue: false, text: lines.join("\n") };
   }
 

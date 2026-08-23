@@ -28,6 +28,7 @@ import { RevenueShareModule } from "./revenue-share/revenue-share.module";
 import { FinancingModule } from "./financing/financing.module";
 import { RecurringTemplatesModule } from "./recurring-templates/recurring-templates.module";
 import { CommissionBypassModule } from "./commission-bypass/commission-bypass.module";
+import { ClientPortalModule } from "./client-portal/client-portal.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -67,6 +68,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     FinancingModule,
     RecurringTemplatesModule,
     CommissionBypassModule,
+    ClientPortalModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même

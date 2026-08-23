@@ -61,6 +61,23 @@ export class UssdAuthService {
     return { userId: owner.userId, organizationId: organization.id, hasPin: Boolean(user?.pinHash) };
   }
 
+  // F13, revue post-fix #2 — un PIN *620# vérifié avec succès prouve la
+  // possession du numéro exactement au même titre qu'un OTP SMS (ADR-108) :
+  // sans ceci, ClientPortalService.listOrganizations()/listInvoices() (qui ne
+  // considèrent que verifiedAt non-null) ne voient jamais un utilisateur
+  // authentifié uniquement par PIN, alors qu'il a prouvé la possession du
+  // numéro au moins aussi fermement qu'un OTP. Idempotent : ne réécrit rien si
+  // déjà vérifié (évite un update inutile à chaque connexion PIN).
+  async confirmPhoneOwnership(phone: string): Promise<void> {
+    const userPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: phone } });
+    if (userPhone && !userPhone.verifiedAt) {
+      await this.prisma.userPhone.update({
+        where: { id: userPhone.id },
+        data: { verifiedAt: new Date() },
+      });
+    }
+  }
+
   async createPin(userId: string, pin: string): Promise<void> {
     const pinHash = await this.passwordService.hash(pin);
     await this.prisma.user.update({
