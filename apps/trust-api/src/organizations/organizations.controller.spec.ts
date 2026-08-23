@@ -29,7 +29,7 @@ describe("OrganizationsController — POST /organizations/:id/verify-dgi (B2)", 
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL", async () => {
     const service = { verifyDgi: vi.fn().mockResolvedValue({ dgiVerificationStatus: "verified" }) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     const result = await controller.verifyDgi("org-1");
 
@@ -48,7 +48,7 @@ describe("OrganizationsController — GET /organizations/:id/audit-log (G4, ADR-
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL et les filtres de la query", async () => {
     const service = { listAuditLog: vi.fn().mockResolvedValue([]) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     await controller.listAuditLog("org-1", { category: "paiement" });
 
@@ -66,7 +66,7 @@ describe("OrganizationsController — POST /organizations/:id/commercial-tier (H
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL et le palier demandé", async () => {
     const service = { upgradeCommercialTier: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     const result = await controller.upgradeCommercialTier("org-1", { tier: "pro" });
 
@@ -92,7 +92,7 @@ describe("OrganizationsController — POST /organizations/:id/signing-key/revoke
 
   it("délègue au service avec l'id d'organisation du paramètre d'URL", async () => {
     const service = { revokeSigningKey: vi.fn().mockResolvedValue({ id: "signing-key-1", revokedAt: new Date() }) };
-    const controller = new OrganizationsController(service as any);
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
 
     const result = await controller.revokeSigningKey("org-1");
 

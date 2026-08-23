@@ -29,6 +29,7 @@ import { FinancingModule } from "./financing/financing.module";
 import { RecurringTemplatesModule } from "./recurring-templates/recurring-templates.module";
 import { CommissionBypassModule } from "./commission-bypass/commission-bypass.module";
 import { ClientPortalModule } from "./client-portal/client-portal.module";
+import { PendingMemberInvitesModule } from "./pending-member-invites/pending-member-invites.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -41,6 +42,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     // existants (PIN USSD : PIN_MAX_ATTEMPTS/PIN_LOCKOUT_MS), jamais un remplacement.
     ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    PendingMemberInvitesModule,
     AuthModule,
     CertificationModule,
     MoneyClientModule,
