@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
 import type { CreateMandateDto } from "./dto/create-mandate.dto";
 
 @Injectable()
@@ -138,7 +139,7 @@ export class MandatesService {
     }
 
     return this.prisma.mandate.findMany({
-      where: { practiceId, status: "active" },
+      where: { practiceId, status: "active", ...mandateNotExpiredWhere() },
       include: { organization: { select: { id: true, name: true } } },
     });
   }
@@ -158,7 +159,14 @@ export class MandatesService {
     }
 
     return this.prisma.mandate.findMany({
-      where: { practiceId, status: { in: ["pending", "active"] } },
+      // Quality Audit 2026-08-23, finding #2 — pending n'a jamais accordé
+      // d'accès (expiresAt n'est pertinent qu'une fois actif), donc pas de
+      // filtre d'expiration sur cette branche ; active en revanche doit
+      // rester soumis à la même garde que partout ailleurs.
+      where: {
+        practiceId,
+        OR: [{ status: "pending" }, { status: "active", ...mandateNotExpiredWhere() }],
+      },
       include: { organization: { select: { id: true, name: true } } },
     });
   }
@@ -231,7 +239,7 @@ export class MandatesService {
 
   async listActiveForOrganization(organizationId: string) {
     return this.prisma.mandate.findMany({
-      where: { organizationId, status: "active" },
+      where: { organizationId, status: "active", ...mandateNotExpiredWhere() },
       include: { practice: true },
     });
   }

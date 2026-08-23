@@ -1,6 +1,7 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { MandateGrantedRole, OrganizationRole, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../prisma.module";
+import { mandateNotExpiredWhere } from "./mandate-expiration";
 
 // Généralisé depuis FecService.assertAccess() (F9) — même double chemin
 // d'autorisation, désormais partagé par tout endroit qui doit laisser un
@@ -35,6 +36,7 @@ export class OrganizationAccessService {
       where: {
         organizationId,
         status: "active",
+        ...mandateNotExpiredWhere(),
         practice: { members: { some: { userId: requesterUserId, leftAt: null } } },
         ...(requiredMandateGrantedRole ? { grantedRole: requiredMandateGrantedRole } : {}),
       },

@@ -42,6 +42,10 @@ describe("OrganizationAccessService — accès par membership OU mandat actif", 
       where: {
         organizationId: ORG_ID,
         status: "active",
+        // Quality Audit 2026-08-23, finding #2 — un mandat expiré (expiresAt
+        // dans le passé) ne doit jamais accorder d'accès, même si status est
+        // encore "active" faute de cron de purge.
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
         practice: { members: { some: { userId: USER_ID, leftAt: null } } },
       },
     });
@@ -81,6 +85,7 @@ describe("OrganizationAccessService — filtre optionnel requiredMandateGrantedR
       where: {
         organizationId: ORG_ID,
         status: "active",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
         practice: { members: { some: { userId: USER_ID, leftAt: null } } },
         grantedRole: "business_manager",
       },
@@ -108,6 +113,7 @@ describe("OrganizationAccessService — filtre optionnel requiredMandateGrantedR
       where: {
         organizationId: ORG_ID,
         status: "active",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
         practice: { members: { some: { userId: USER_ID, leftAt: null } } },
       },
     });

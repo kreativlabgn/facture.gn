@@ -3,6 +3,7 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF, REVENUE_SHARE_RATE_BPS } from "./revenue-share-grid";
 import { getPartnerTierPrice } from "../practices/partner-tier-grid";
+import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
 
 const BPS_DENOMINATOR = 10_000n;
 
@@ -20,7 +21,7 @@ export class RevenueShareService {
     const { start, end } = resolvePeriodBounds(periodMonth);
 
     const activeMandates = await this.prisma.mandate.findMany({
-      where: { practiceId, status: "active" },
+      where: { practiceId, status: "active", ...mandateNotExpiredWhere() },
     });
 
     const credits = [];

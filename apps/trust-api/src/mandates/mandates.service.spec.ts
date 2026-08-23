@@ -437,7 +437,13 @@ describe("MandatesService — organisations accessibles (F7, ADR-070)", () => {
     const result = await service.listAccessibleOrganizations(PRACTICE_ID, REQUESTER_ID);
 
     expect(prisma.mandate.findMany).toHaveBeenCalledWith({
-      where: { practiceId: PRACTICE_ID, status: "active" },
+      // Quality Audit 2026-08-23, finding #2 — un mandat expiré ne doit
+      // jamais rester accessible au switch d'organisation cabinet.
+      where: {
+        practiceId: PRACTICE_ID,
+        status: "active",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
       include: { organization: { select: { id: true, name: true } } },
     });
     expect(result).toEqual([
@@ -478,7 +484,16 @@ describe("MandatesService — lister tous les mandats d'un cabinet (pending + ac
     const result = await service.listAll(PRACTICE_ID, REQUESTER_ID);
 
     expect(prisma.mandate.findMany).toHaveBeenCalledWith({
-      where: { practiceId: PRACTICE_ID, status: { in: ["pending", "active"] } },
+      // Quality Audit 2026-08-23, finding #2 — pending n'accorde jamais
+      // d'accès (pas de filtre d'expiration pertinent), active reste soumis
+      // à la même garde que partout ailleurs.
+      where: {
+        practiceId: PRACTICE_ID,
+        OR: [
+          { status: "pending" },
+          { status: "active", OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+        ],
+      },
       include: { organization: { select: { id: true, name: true } } },
     });
     expect(result).toHaveLength(2);
@@ -521,7 +536,13 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
     await service.listActiveForOrganization(ORG_ID);
 
     expect(prisma.mandate.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG_ID, status: "active" },
+      // Quality Audit 2026-08-23, finding #2 — même garde d'expiration côté
+      // vue organisation.
+      where: {
+        organizationId: ORG_ID,
+        status: "active",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
       include: { practice: true },
     });
   });
