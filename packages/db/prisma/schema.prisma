@@ -612,15 +612,21 @@ model AssistedSession {
 // (PracticesService.inviteMember) et F14 (OrganizationsService.inviteMember) :
 // les deux résolvent l'invité par UserPhone et échouent si le numéro n'a aucun
 // compte facture.gn. organizationId/practiceId mutuellement exclusifs (une seule
-// cible par invitation, jamais les deux) — comme AssistedSession/Mandate sont
-// chacun scopés à un seul type de cible, jamais imposé par une contrainte DB
-// (convention déjà acceptée dans ce repo, vérifié en service). role en String
-// (pas un enum Prisma) : OrganizationRole et PracticeMemberRole sont deux enums
-// disjoints, validé côté service contre le bon enum selon la cible — même
-// compromis déjà accepté pour UssdSession.state (typage TypeScript uniquement).
-// expiresAt : leçon apprise deux fois cette session (AssistedSession puis
-// Mandate ont eu ce champ scaffoldé sans jamais être appliqué à la lecture) —
-// voir pending-member-invite.service.ts::resolveForNewUser(), filtré dès la
+// cible par invitation, jamais les deux) — imposé au niveau base par une
+// contrainte CHECK dédiée (pending_member_invite_xor_target_check,
+// 20260823160000), même précédent que invoice_conversion_requires_proforma_check
+// (20260809130000) : au-delà de la vérification applicative à ses deux seuls
+// points d'écriture actuels. Au plus une invitation VIVANTE par (msisdn, cible)
+// également garanti au niveau base (index uniques partiels, même migration,
+// même précédent que payment_one_arrhes_per_invoice) — revue post-fix #1, une
+// fenêtre de course applicative permettait deux invitations concurrentes sur le
+// même numéro. role en String (pas un enum Prisma) : OrganizationRole et
+// PracticeMemberRole sont deux enums disjoints, validé côté service contre le
+// bon enum selon la cible — même compromis déjà accepté pour UssdSession.state
+// (typage TypeScript uniquement). expiresAt : leçon apprise deux fois cette
+// session (AssistedSession puis Mandate ont eu ce champ scaffoldé sans jamais
+// être appliqué à la lecture) — voir
+// pending-member-invite.service.ts::resolveForNewUser(), filtré dès la
 // première version. TTL 14 jours arbitraire (aucune spec ne fixe de durée),
 // ajustable en un point unique (PENDING_MEMBER_INVITE_TTL_MS).
 model PendingMemberInvite {

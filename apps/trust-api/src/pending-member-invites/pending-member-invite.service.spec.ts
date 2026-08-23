@@ -6,8 +6,14 @@ function createFakeSmsProvider() {
   return { send: vi.fn().mockResolvedValue(undefined) };
 }
 
-function createFakePrisma(overrides: Record<string, unknown> = {}) {
-  const prisma: any = {
+// Merge PAR SOUS-OBJET (pas un spread superficiel au niveau racine) : un test
+// qui override `pendingMemberInvite: { findFirst: ... }` conserve les autres
+// méthodes par défaut (`count`, `create`, ...) au lieu de les remplacer par
+// `undefined` — évite qu'un futur appel ajouté au service (ex. le `.count`
+// du quota, revue post-fix #4) casse silencieusement tous les tests qui
+// n'override que le champ qui les intéresse.
+function createFakePrisma(overrides: Record<string, Record<string, unknown>> = {}) {
+  const defaults: Record<string, Record<string, unknown>> = {
     organizationMember: {
       findUnique: vi.fn().mockResolvedValue({ role: "owner" }),
       count: vi.fn().mockResolvedValue(1),
@@ -29,12 +35,16 @@ function createFakePrisma(overrides: Record<string, unknown> = {}) {
     pendingMemberInvite: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockResolvedValue({ id: "invite-1" }),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
-    ...overrides,
   };
+  const prisma: any = {};
+  for (const key of Object.keys(defaults)) {
+    prisma[key] = { ...defaults[key], ...(overrides[key] ?? {}) };
+  }
   return prisma;
 }
 
@@ -109,6 +119,60 @@ describe("PendingMemberInviteService", () => {
         service.inviteToOrganization("org-1", { msisdn: "+224600000001", role: "cashier" }, "requester-1"),
       ).rejects.toThrow(ConflictException);
       expect(prisma.pendingMemberInvite.create).not.toHaveBeenCalled();
+    });
+
+    it("compte les invitations en attente en plus des membres actifs pour le quota (revue post-fix #4)", async () => {
+      const prisma = createFakePrisma({
+        organization: {
+          findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", name: "Boutique", commercialTier: "starter" }),
+        },
+        organizationMember: {
+          findUnique: vi.fn().mockResolvedValue({ role: "owner" }),
+          count: vi.fn().mockResolvedValue(3),
+        },
+        pendingMemberInvite: { findFirst: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(1) },
+      });
+      const service = new PendingMemberInviteService(prisma, createFakeSmsProvider() as any);
+
+      // starter autorise 4 membres (voir plan-features-grid.ts) : 3 actifs + 1
+      // invitation déjà en attente = 4, la place restante est déjà engagée —
+      // une nouvelle invitation doit être rejetée même si aucun membre actif
+      // supplémentaire n'existe encore.
+      await expect(
+        service.inviteToOrganization("org-1", { msisdn: "+224600000001", role: "cashier" }, "requester-1"),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.pendingMemberInvite.create).not.toHaveBeenCalled();
+    });
+
+    it("échoue proprement (409, pas 500 brut) si deux invitations concurrentes créent le doublon que le findFirst n'a pas vu (revue post-fix #1)", async () => {
+      const p2002 = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+      const prisma = createFakePrisma({
+        pendingMemberInvite: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockRejectedValue(p2002),
+        },
+      });
+      const service = new PendingMemberInviteService(prisma, createFakeSmsProvider() as any);
+
+      await expect(
+        service.inviteToOrganization("org-1", { msisdn: "+224600000001", role: "cashier" }, "requester-1"),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it("propage toute autre erreur de création telle quelle (pas absorbée par le catch de concurrence)", async () => {
+      const prisma = createFakePrisma({
+        pendingMemberInvite: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockRejectedValue(new Error("DB down")),
+        },
+      });
+      const service = new PendingMemberInviteService(prisma, createFakeSmsProvider() as any);
+
+      await expect(
+        service.inviteToOrganization("org-1", { msisdn: "+224600000001", role: "cashier" }, "requester-1"),
+      ).rejects.toThrow("DB down");
     });
 
     it("crée l'invitation et notifie l'invité par SMS, best-effort", async () => {
@@ -191,7 +255,7 @@ describe("PendingMemberInviteService", () => {
           findMany: vi.fn().mockResolvedValue([
             { id: "invite-1", organizationId: "org-1", practiceId: null, role: "cashier" },
           ]),
-          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
         organizationMember: { create: vi.fn().mockResolvedValue({ id: "member-1" }) },
         practiceMember: { create: vi.fn() },
@@ -200,14 +264,16 @@ describe("PendingMemberInviteService", () => {
 
       await service.resolveForNewUser(tx, "new-user-1", "+224600000001");
 
+      // Claim (updateMany+where) AVANT la création du membership — revue
+      // post-fix #3 : ordre inverse de la version initiale.
+      expect(tx.pendingMemberInvite.updateMany).toHaveBeenCalledWith({
+        where: { id: "invite-1", acceptedAt: null, revokedAt: null },
+        data: { acceptedAt: expect.any(Date), resolvedUserId: "new-user-1" },
+      });
       expect(tx.organizationMember.create).toHaveBeenCalledWith({
         data: { organizationId: "org-1", userId: "new-user-1", role: "cashier" },
       });
       expect(tx.practiceMember.create).not.toHaveBeenCalled();
-      expect(tx.pendingMemberInvite.update).toHaveBeenCalledWith({
-        where: { id: "invite-1" },
-        data: { acceptedAt: expect.any(Date), resolvedUserId: "new-user-1" },
-      });
     });
 
     it("résout une invitation cabinet en attente vers un PracticeMember", async () => {
@@ -216,7 +282,7 @@ describe("PendingMemberInviteService", () => {
           findMany: vi.fn().mockResolvedValue([
             { id: "invite-1", organizationId: null, practiceId: "practice-1", role: "accountant_external" },
           ]),
-          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
         organizationMember: { create: vi.fn() },
         practiceMember: { create: vi.fn().mockResolvedValue({ id: "practice-member-1" }) },
@@ -238,7 +304,7 @@ describe("PendingMemberInviteService", () => {
             { id: "invite-org", organizationId: "org-1", practiceId: null, role: "cashier" },
             { id: "invite-practice", organizationId: null, practiceId: "practice-1", role: "accountant_external" },
           ]),
-          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
         organizationMember: { create: vi.fn().mockResolvedValue({ id: "member-1" }) },
         practiceMember: { create: vi.fn().mockResolvedValue({ id: "practice-member-1" }) },
@@ -249,12 +315,12 @@ describe("PendingMemberInviteService", () => {
 
       expect(tx.organizationMember.create).toHaveBeenCalledTimes(1);
       expect(tx.practiceMember.create).toHaveBeenCalledTimes(1);
-      expect(tx.pendingMemberInvite.update).toHaveBeenCalledTimes(2);
+      expect(tx.pendingMemberInvite.updateMany).toHaveBeenCalledTimes(2);
     });
 
     it("ne résout rien si aucune invitation n'est en attente pour ce numéro (chemin normal inchangé)", async () => {
       const tx: any = {
-        pendingMemberInvite: { findMany: vi.fn().mockResolvedValue([]), update: vi.fn() },
+        pendingMemberInvite: { findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn() },
         organizationMember: { create: vi.fn() },
         practiceMember: { create: vi.fn() },
       };
@@ -264,7 +330,7 @@ describe("PendingMemberInviteService", () => {
 
       expect(tx.organizationMember.create).not.toHaveBeenCalled();
       expect(tx.practiceMember.create).not.toHaveBeenCalled();
-      expect(tx.pendingMemberInvite.update).not.toHaveBeenCalled();
+      expect(tx.pendingMemberInvite.updateMany).not.toHaveBeenCalled();
     });
 
     it("une invitation expirée ou révoquée n'est jamais retournée par la requête de résolution (filtrée en base)", async () => {
@@ -272,7 +338,7 @@ describe("PendingMemberInviteService", () => {
       // now, revokedAt: null, acceptedAt: null) — ce test vérifie que le where
       // exact est bien construit, pas seulement le comportement en aval.
       const tx: any = {
-        pendingMemberInvite: { findMany: vi.fn().mockResolvedValue([]), update: vi.fn() },
+        pendingMemberInvite: { findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn() },
         organizationMember: { create: vi.fn() },
         practiceMember: { create: vi.fn() },
       };
@@ -288,6 +354,64 @@ describe("PendingMemberInviteService", () => {
           expiresAt: { gt: expect.any(Date) },
         },
       });
+    });
+
+    it("ne crée AUCUN membership si l'invitation a été révoquée entre le findMany et le claim (revue post-fix #3)", async () => {
+      const tx: any = {
+        pendingMemberInvite: {
+          findMany: vi.fn().mockResolvedValue([
+            { id: "invite-1", organizationId: "org-1", practiceId: null, role: "cashier" },
+          ]),
+          // count:0 — une révocation concurrente a gagné la course entre la
+          // lecture et le claim.
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+        organizationMember: { create: vi.fn() },
+        practiceMember: { create: vi.fn() },
+      };
+      const service = new PendingMemberInviteService(createFakePrisma(), createFakeSmsProvider() as any);
+
+      await service.resolveForNewUser(tx, "new-user-1", "+224600000001");
+
+      expect(tx.organizationMember.create).not.toHaveBeenCalled();
+      expect(tx.practiceMember.create).not.toHaveBeenCalled();
+    });
+
+    it("ignore une invitation dont le membership existe déjà (P2002), sans faire échouer la résolution des autres (revue post-fix #1)", async () => {
+      const p2002 = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+      const tx: any = {
+        pendingMemberInvite: {
+          findMany: vi.fn().mockResolvedValue([
+            { id: "invite-dup", organizationId: "org-1", practiceId: null, role: "cashier" },
+            { id: "invite-ok", organizationId: null, practiceId: "practice-1", role: "accountant_external" },
+          ]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        organizationMember: { create: vi.fn().mockRejectedValue(p2002) },
+        practiceMember: { create: vi.fn().mockResolvedValue({ id: "practice-member-1" }) },
+      };
+      const service = new PendingMemberInviteService(createFakePrisma(), createFakeSmsProvider() as any);
+
+      // Ne doit jamais lever — la transaction AuthService.register() qui
+      // englobe cet appel ne doit jamais échouer pour un doublon de membership.
+      await expect(service.resolveForNewUser(tx, "new-user-1", "+224600000001")).resolves.toBeUndefined();
+      expect(tx.practiceMember.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("propage toute autre erreur de création de membership (pas absorbée par le catch de doublon)", async () => {
+      const tx: any = {
+        pendingMemberInvite: {
+          findMany: vi.fn().mockResolvedValue([
+            { id: "invite-1", organizationId: "org-1", practiceId: null, role: "cashier" },
+          ]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        organizationMember: { create: vi.fn().mockRejectedValue(new Error("DB down")) },
+        practiceMember: { create: vi.fn() },
+      };
+      const service = new PendingMemberInviteService(createFakePrisma(), createFakeSmsProvider() as any);
+
+      await expect(service.resolveForNewUser(tx, "new-user-1", "+224600000001")).rejects.toThrow("DB down");
     });
   });
 

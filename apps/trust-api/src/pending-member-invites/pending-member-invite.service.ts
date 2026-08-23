@@ -8,6 +8,16 @@ import { SMS_PROVIDER } from "../notifications/notifications.tokens";
 import type { InviteOrganizationPendingDto } from "./dto/invite-organization-pending.dto";
 import type { InvitePracticePendingDto } from "./dto/invite-practice-pending.dto";
 
+// F10, revue post-fix #1 — cette table n'a qu'une seule paire de contraintes
+// uniques possible à chaque point d'écriture ci-dessous (index partiels
+// pending_member_invite_one_live_per_org/_practice, 20260823160000) : catch
+// générique (pas isUniqueConstraintViolation, qui suppose un mapping de champ
+// que Prisma ne peut pas établir pour un index créé hors schéma) — même
+// précédent que OrganizationsService.inviteMember() (organizations.service.ts).
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
+}
+
 // F10 — TTL arbitraire (aucune spec ne fixe de durée), plus court que les 90
 // jours d'AssistedSession car une invitation de collaborateur non répondue
 // perd rapidement sa pertinence. Ajustable en un point unique.
@@ -55,7 +65,16 @@ export class PendingMemberInviteService {
       const activeMemberCount = await this.prisma.organizationMember.count({
         where: { organizationId, revokedAt: null },
       });
-      if (activeMemberCount >= maxMembers) {
+      // F10, revue post-fix #4 — le quota ne comptait auparavant que les
+      // membres déjà actifs, jamais les invitations en attente : un owner
+      // pouvait empiler plus d'invitations que de places réellement libres
+      // (aucune des invitations en cours n'incrémente le compte actif tant
+      // qu'elle n'est pas résolue), dépassant durablement le quota du palier
+      // si plusieurs invités s'inscrivent ensuite.
+      const pendingInviteCount = await this.prisma.pendingMemberInvite.count({
+        where: { organizationId, ...pendingInviteNotExpiredWhere() },
+      });
+      if (activeMemberCount + pendingInviteCount >= maxMembers) {
         throw new ForbiddenException(
           `Palier ${organization.commercialTier} limité à ${maxMembers} collaborateur(s) — upgrade requis`,
         );
@@ -76,15 +95,28 @@ export class PendingMemberInviteService {
       throw new ConflictException(`Une invitation est déjà en attente pour le numéro ${dto.msisdn}`);
     }
 
-    const invite = await this.prisma.pendingMemberInvite.create({
-      data: {
-        msisdn: dto.msisdn,
-        role: dto.role,
-        organizationId,
-        invitedByUserId: requesterUserId,
-        expiresAt: new Date(Date.now() + PENDING_MEMBER_INVITE_TTL_MS),
-      },
-    });
+    // F10, revue post-fix #1 — le findFirst ci-dessus ne protège pas contre
+    // deux invitations concurrentes du même numéro (fenêtre de course entre la
+    // lecture et l'écriture) : l'index unique partiel
+    // pending_member_invite_one_live_per_org (20260823160000) reste le seul
+    // garde-fou réel sous concurrence.
+    let invite;
+    try {
+      invite = await this.prisma.pendingMemberInvite.create({
+        data: {
+          msisdn: dto.msisdn,
+          role: dto.role,
+          organizationId,
+          invitedByUserId: requesterUserId,
+          expiresAt: new Date(Date.now() + PENDING_MEMBER_INVITE_TTL_MS),
+        },
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException(`Une invitation est déjà en attente pour le numéro ${dto.msisdn}`);
+      }
+      throw error;
+    }
 
     await this.notifyInvitee(dto.msisdn, organization.name);
 
@@ -114,15 +146,26 @@ export class PendingMemberInviteService {
 
     const practice = await this.prisma.professionalPractice.findUniqueOrThrow({ where: { id: practiceId } });
 
-    const invite = await this.prisma.pendingMemberInvite.create({
-      data: {
-        msisdn: dto.msisdn,
-        role: dto.role,
-        practiceId,
-        invitedByUserId: requesterUserId,
-        expiresAt: new Date(Date.now() + PENDING_MEMBER_INVITE_TTL_MS),
-      },
-    });
+    // F10, revue post-fix #1 — même garde que inviteToOrganization : l'index
+    // unique partiel pending_member_invite_one_live_per_practice
+    // (20260823160000) reste le seul garde-fou réel sous concurrence.
+    let invite;
+    try {
+      invite = await this.prisma.pendingMemberInvite.create({
+        data: {
+          msisdn: dto.msisdn,
+          role: dto.role,
+          practiceId,
+          invitedByUserId: requesterUserId,
+          expiresAt: new Date(Date.now() + PENDING_MEMBER_INVITE_TTL_MS),
+        },
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException(`Une invitation est déjà en attente pour le numéro ${dto.msisdn}`);
+      }
+      throw error;
+    }
 
     await this.notifyInvitee(dto.msisdn, practice.name);
 
@@ -141,20 +184,46 @@ export class PendingMemberInviteService {
     });
 
     for (const invite of pendingInvites) {
-      if (invite.organizationId) {
-        await tx.organizationMember.create({
-          data: { organizationId: invite.organizationId, userId, role: invite.role as OrganizationRole },
-        });
-      } else if (invite.practiceId) {
-        await tx.practiceMember.create({
-          data: { practiceId: invite.practiceId, userId, role: invite.role as PracticeMemberRole },
-        });
-      }
-
-      await tx.pendingMemberInvite.update({
-        where: { id: invite.id },
+      // F10, revue post-fix #3 — claim AVANT de créer le membership (pas
+      // après, contrairement à la version initiale) : updateMany+where
+      // (acceptedAt/revokedAt encore null), même garde que
+      // revokeForOrganization/revokeForPractice dans ce même fichier. Une
+      // invitation révoquée entre le findMany ci-dessus et cet instant
+      // (fenêtre de course réelle, isolation Read Committed) ne doit jamais
+      // produire de membership — sans ce claim, l'ordre inverse (créer le
+      // membership puis marquer l'invitation acceptée) pouvait accorder un
+      // accès à une invitation déjà révoquée.
+      const claimed = await tx.pendingMemberInvite.updateMany({
+        where: { id: invite.id, acceptedAt: null, revokedAt: null },
         data: { acceptedAt: new Date(), resolvedUserId: userId },
       });
+      if (claimed.count === 0) {
+        continue;
+      }
+
+      try {
+        if (invite.organizationId) {
+          await tx.organizationMember.create({
+            data: { organizationId: invite.organizationId, userId, role: invite.role as OrganizationRole },
+          });
+        } else if (invite.practiceId) {
+          await tx.practiceMember.create({
+            data: { practiceId: invite.practiceId, userId, role: invite.role as PracticeMemberRole },
+          });
+        }
+      } catch (error) {
+        // F10, revue post-fix #1 — le claim ci-dessus garantit qu'une seule
+        // invitation VIVANTE existait par (msisdn, cible) au moment de
+        // l'invitation (index unique partiel, 20260823160000), mais un état
+        // antérieur à cette contrainte (ou tout autre chemin résiduel) peut
+        // encore produire un membership déjà existant ici : ignore cette
+        // invitation spécifique (déjà satisfaite par un autre membership)
+        // plutôt que de faire échouer TOUTE la transaction d'inscription
+        // AuthService.register() pour un utilisateur par ailleurs innocent.
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
+      }
     }
   }
 
