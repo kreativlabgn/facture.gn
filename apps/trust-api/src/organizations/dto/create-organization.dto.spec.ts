@@ -11,6 +11,8 @@ describe("createOrganizationSchema", () => {
     });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(["regimeFiscal"]);
   });
 
   it("accepte une organisation avec régime fiscal explicite", () => {
@@ -35,6 +37,8 @@ describe("createOrganizationSchema", () => {
     });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(["regimeFiscal"]);
   });
 });
 
@@ -58,6 +62,9 @@ describe("createOrganizationSchema — NIF/eTax optionnels à l'inscription (B1/
     });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(["nif"]);
+    expect(result.error.issues[0]?.message).toContain("ADR-035");
   });
 
   it("rejette un eTax fourni sans NIF — exigés conjointement (ADR-035)", () => {
@@ -69,6 +76,9 @@ describe("createOrganizationSchema — NIF/eTax optionnels à l'inscription (B1/
     });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(["nif"]);
+    expect(result.error.issues[0]?.message).toContain("ADR-035");
   });
 
   it("accepte NIF et eTax fournis ensemble", () => {
@@ -78,6 +88,41 @@ describe("createOrganizationSchema — NIF/eTax optionnels à l'inscription (B1/
       legalForm: "commercial",
       nif: "GN12345678",
       etaxNumber: "ETAX-001",
+    });
+
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("createOrganizationSchema — exonération association réservée aux associations (I4, ADR-057)", () => {
+  it("rejette regimeFiscal=non_assujetti_association pour une organisation legalForm=commercial", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Boutique Aissatou",
+      regimeFiscal: "non_assujetti_association",
+      legalForm: "commercial",
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(["regimeFiscal"]);
+    expect(result.error.issues[0]?.message).toContain("I4, ADR-057");
+  });
+
+  it("accepte regimeFiscal=non_assujetti_association pour une organisation legalForm=association", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Association Culturelle Fatoumata",
+      regimeFiscal: "non_assujetti_association",
+      legalForm: "association",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepte une association avec un régime non exonéré (activité commerciale accessoire imposable)", () => {
+    const result = createOrganizationSchema.safeParse({
+      name: "Association Culturelle Fatoumata",
+      regimeFiscal: "normal_tva",
+      legalForm: "association",
     });
 
     expect(result.success).toBe(true);
