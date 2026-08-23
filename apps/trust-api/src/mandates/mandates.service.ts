@@ -91,10 +91,21 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — updateMany+where réclame la
+    // transition atomiquement (au lieu d'un update() inconditionnel) : sous
+    // deux acceptations/révocations concurrentes du même mandat, seule la
+    // requête qui voit encore status="pending" au moment de l'écriture
+    // committe — jamais une perte silencieuse de traçabilité d'audit
+    // (grantedBy/grantedAt) sur un champ de conformité (accès cabinet
+    // comptable aux données financières d'une PME).
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "pending" },
       data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 
   // F6, ADR-069 — "Révocation par cabinet = tous les collaborateurs perdent
@@ -119,10 +130,16 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — voir accept() ci-dessus pour la
+    // justification complète du pattern.
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "active" },
       data: { status: "revoked", revokedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 
   // F7, ADR-070 — "Scope MVP réduit (consultation + FEC + switch)" exige
@@ -218,10 +235,16 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — voir accept() plus haut pour la
+    // justification complète du pattern.
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "pending" },
       data: { status: "active", grantedBy: actorUserId, grantedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 
   // Option 5 USSD (§2.5 Spec USSD) — pendant que create()/accept()/revoke()
@@ -266,9 +289,15 @@ export class MandatesService {
       );
     }
 
-    return this.prisma.mandate.update({
-      where: { id: mandateId },
+    // Quality Audit 2026-08-23, finding #4 — voir accept() plus haut pour la
+    // justification complète du pattern.
+    const claimed = await this.prisma.mandate.updateMany({
+      where: { id: mandateId, status: "active" },
       data: { status: "revoked", revokedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Mandat ${mandateId} déjà traité par une autre requête`);
+    }
+    return this.prisma.mandate.findUniqueOrThrow({ where: { id: mandateId } });
   }
 }
