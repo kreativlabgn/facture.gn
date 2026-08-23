@@ -15,6 +15,35 @@ function createFakePrisma(overrides: { customer?: any; findManyResult?: any[] } 
   };
 }
 
+// Revue post-fix #3 — un fake Prisma qui APPLIQUE réellement le filtrage
+// décrit par `where` sur un jeu de données en mémoire, contrairement à
+// createFakePrisma ci-dessus (findManyResult renvoie n'importe quelle liste
+// préparée, que le service ait ou non correctement scopé sa requête).
+// Nécessaire pour prouver l'absence d'IDOR : un mock qui vérifie seulement
+// la FORME du where passerait même si organizationId était oublié dans le
+// code du service.
+function createScopedCustomerFakePrisma(customers: any[]) {
+  return {
+    customer: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      findMany: vi.fn().mockImplementation(({ where, orderBy, take }: any) => {
+        let result = customers.filter((c) => c.organizationId === where.organizationId);
+        if (where.isPublicEntity !== undefined) {
+          result = result.filter((c) => c.isPublicEntity === where.isPublicEntity);
+        }
+        if (orderBy?.createdAt === "asc") {
+          result = [...result].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        }
+        if (typeof take === "number") {
+          result = result.slice(0, take);
+        }
+        return Promise.resolve(result);
+      }),
+    },
+  };
+}
+
 function createFakeOrganizationsService(memberships: any[] = []) {
   return { listMine: vi.fn().mockResolvedValue(memberships) };
 }
@@ -199,5 +228,30 @@ describe("UssdInvoiceService — clients entité publique déjà rattachés (K3,
     const service = new UssdInvoiceService(prisma as any, createFakeOrganizationsService() as any, createFakeInvoicesService() as any, createFakeVelocityTier() as any);
 
     await expect(service.listPublicEntityCustomers(ORG_ID)).resolves.toEqual([]);
+  });
+
+  // Revue post-fix #3 — jusqu'ici les tests ne vérifiaient que la FORME du
+  // where transmis à un mock inconditionnellement obéissant. Ici, un vrai
+  // jeu de données à 2 organisations, filtré par un fake Prisma qui applique
+  // réellement le where (createScopedCustomerFakePrisma) : prouve que
+  // l'appel avec organizationId d'une seule organisation exclut bien les
+  // clients entité publique de l'autre organisation.
+  it("exclut les clients entité publique d'une autre organisation (IDOR)", async () => {
+    const customers = [
+      { id: "cust-org-a", organizationId: "org-a", isPublicEntity: true, name: "Ministère A", createdAt: "2026-01-01" },
+      { id: "cust-org-b", organizationId: "org-b", isPublicEntity: true, name: "Ministère B", createdAt: "2026-01-02" },
+    ];
+    const prisma = createScopedCustomerFakePrisma(customers);
+    const service = new UssdInvoiceService(
+      prisma as any,
+      createFakeOrganizationsService() as any,
+      createFakeInvoicesService() as any,
+      createFakeVelocityTier() as any,
+    );
+
+    const result = await service.listPublicEntityCustomers("org-a");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("cust-org-a");
   });
 });

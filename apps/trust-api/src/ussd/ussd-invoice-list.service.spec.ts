@@ -7,6 +7,41 @@ function createFakePrisma(invoices: any[] = []) {
   return { invoice: { findMany: vi.fn().mockResolvedValue(invoices) } };
 }
 
+// Revue post-fix #3 — un fake Prisma qui APPLIQUE réellement le filtrage
+// décrit par `where` sur un jeu de données en mémoire, contrairement à
+// createFakePrisma ci-dessus (qui renvoie n'importe quelle liste préparée,
+// que le service ait ou non correctement scopé sa requête). Nécessaire pour
+// prouver l'absence d'IDOR : un mock qui vérifie seulement la FORME du where
+// passerait même si organizationId était oublié dans le code du service.
+function createScopedFakePrisma(invoices: any[]) {
+  return {
+    invoice: {
+      findMany: vi.fn().mockImplementation(({ where, orderBy, take }: any) => {
+        let result = invoices.filter((inv) => inv.organizationId === where.organizationId);
+        if (where.documentType !== undefined) {
+          result = result.filter((inv) => inv.documentType === where.documentType);
+        }
+        if (where.customer?.isPublicEntity !== undefined) {
+          result = result.filter((inv) => inv.customer?.isPublicEntity === where.customer.isPublicEntity);
+        }
+        if (where.status?.not !== undefined) {
+          result = result.filter((inv) => inv.status !== where.status.not);
+        }
+        if (where.status?.in !== undefined) {
+          result = result.filter((inv) => where.status.in.includes(inv.status));
+        }
+        if (orderBy?.issuedAt === "desc") {
+          result = [...result].sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
+        }
+        if (typeof take === "number") {
+          result = result.slice(0, take);
+        }
+        return Promise.resolve(result);
+      }),
+    },
+  };
+}
+
 describe("UssdInvoiceListService — mes factures (§2.3 Spec USSD)", () => {
   it("filtre sur documentType invoice et les statuts affichables, limite à 5, plus récentes d'abord", async () => {
     const prisma = createFakePrisma([{ id: "inv-1" }]);
@@ -67,5 +102,39 @@ describe("UssdInvoiceListService — statut de validation commande publique (K3,
     const service = new UssdInvoiceListService(prisma as any);
 
     await expect(service.listPublicOrderStatus(ORG_ID)).resolves.toEqual(invoices);
+  });
+
+  // Revue post-fix #3 — jusqu'ici les tests ne vérifiaient que la FORME du
+  // where transmis à un mock inconditionnellement obéissant. Ici, un vrai
+  // jeu de données à 2 organisations, filtré par un fake Prisma qui applique
+  // réellement le where (createScopedFakePrisma) : prouve que l'appel avec
+  // organizationId d'une seule organisation exclut bien les factures de
+  // l'autre, même quand son client est aussi isPublicEntity: true.
+  it("exclut les factures d'une autre organisation, même avec customer.isPublicEntity: true (IDOR)", async () => {
+    const invoices = [
+      {
+        id: "inv-org-a",
+        organizationId: "org-a",
+        documentType: "invoice",
+        status: "issued",
+        customer: { isPublicEntity: true },
+        issuedAt: "2026-08-01",
+      },
+      {
+        id: "inv-org-b",
+        organizationId: "org-b",
+        documentType: "invoice",
+        status: "issued",
+        customer: { isPublicEntity: true },
+        issuedAt: "2026-08-02",
+      },
+    ];
+    const prisma = createScopedFakePrisma(invoices);
+    const service = new UssdInvoiceListService(prisma as any);
+
+    const result = await service.listPublicOrderStatus("org-a");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("inv-org-a");
   });
 });
