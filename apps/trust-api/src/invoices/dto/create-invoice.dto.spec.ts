@@ -158,3 +158,44 @@ describe("createInvoiceSchema — productId optionnel par ligne (E7, ADR-084)", 
     expect(result.success).toBe(false);
   });
 });
+
+describe("createInvoiceSchema — référence marché (K3, ADR-090)", () => {
+  const base = {
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    documentType: "invoice" as const,
+    lines: [{ description: "Fourniture de bureau — marché public", quantity: 10, unitPrice: "50000" }],
+  };
+
+  it("accepte une référence marché normale", () => {
+    const result = createInvoiceSchema.safeParse({
+      ...base,
+      referenceMarche: "TELEMO-2026-000123",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.referenceMarche).toBe("TELEMO-2026-000123");
+    }
+  });
+
+  it("accepte une facture sans référence marché — même parcours qu'avec référence (Backlog K3)", () => {
+    const result = createInvoiceSchema.safeParse(base);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.referenceMarche).toBeUndefined();
+    }
+  });
+
+  it("accepte une chaîne vide telle quelle — AUCUNE vérification automatique (ADR-090), pas de .min(1)", () => {
+    const result = createInvoiceSchema.safeParse({
+      ...base,
+      referenceMarche: "",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.referenceMarche).toBe("");
+    }
+  });
+});
