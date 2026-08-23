@@ -40,11 +40,20 @@ export class OrganizationSigningKeyService {
     });
   }
 
+  // Quality Audit 2026-08-23, revue post-fix #1 — tx optionnel (même précédent
+  // que provisionRootKey ci-dessus) : cette méthode n'effectue AUCUNE écriture
+  // (lecture de la clé + calcul de signature Ed25519 pur, en mémoire), donc il
+  // n'y a pas de "trou" possible ici contrairement à nextNumber() — mais lire
+  // via tx plutôt que le client global garde la lecture de la clé dans la même
+  // snapshot Postgres que le reste de la transaction issue() (cohérence avec
+  // une révocation concurrente de la clé, ADR-025), sans changer le contrat.
   async certifyForOrganization(
     organizationId: string,
     payload: CertifiablePayload,
+    tx?: Prisma.TransactionClient,
   ): Promise<CertificationResult & { signingKeyId: string }> {
-    const key = await this.prisma.organizationSigningKey.findUniqueOrThrow({ where: { organizationId } });
+    const client = tx ?? this.prisma;
+    const key = await client.organizationSigningKey.findUniqueOrThrow({ where: { organizationId } });
     // A4, ADR-025 — garde additive, jamais rétroactive : bloque uniquement de
     // NOUVELLES signatures, ne touche jamais verifyWithKey() (intégrité des
     // factures déjà signées avant la révocation).

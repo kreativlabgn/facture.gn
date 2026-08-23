@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
 import { resolveNifForCertification } from "../certification/certification.service";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
@@ -213,8 +213,13 @@ export class InvoicesService {
     // qu'une fois la gagnante COMMITÉE, et n'appelle donc jamais nextNumber() ni
     // certifyForOrganization() — jamais de trou, jamais de certification Ed25519
     // signée puis silencieusement écrasée.
-    const { issuedInvoice, organization } = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM invoice WHERE id = ${invoiceId} FOR UPDATE`;
+    let transactionResult: {
+      issuedInvoice: Awaited<ReturnType<PrismaClient["invoice"]["update"]>>;
+      organization: Awaited<ReturnType<PrismaClient["organization"]["findUniqueOrThrow"]>>;
+    };
+    try {
+      transactionResult = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM invoice WHERE id = ${invoiceId} FOR UPDATE`;
 
       const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
       if (invoice.status !== "draft") {
@@ -247,21 +252,31 @@ export class InvoicesService {
       }
 
       const issuedAt = new Date();
-      const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear());
+      // Quality Audit 2026-08-23, revue post-fix #1 — tx passé explicitement :
+      // sans lui, nextNumber() écrit sur le client Prisma global (autocommit,
+      // hors du SELECT...FOR UPDATE ci-dessus), donc un numéro de séquence
+      // légal serait consommé de façon irréversible même si tx.invoice.update()
+      // échoue plus loin — exactement le trou Article 23 OHADA que ce verrou
+      // est censé éliminer.
+      const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear(), tx);
 
       const previousInvoice = await tx.invoice.findFirst({
         where: { organizationId: invoice.organizationId, status: { not: "draft" } },
         orderBy: { issuedAt: "desc" },
       });
 
-      const certification = await this.certification.certifyForOrganization(invoice.organizationId, {
-        invoiceId: invoice.id,
-        organizationNif: resolveNifForCertification(organization.nif),
-        number,
-        totalTtc: invoice.totalTtc,
-        issuedAt: issuedAt.toISOString(),
-        previousHash: previousInvoice?.hash ?? "GENESIS",
-      });
+      const certification = await this.certification.certifyForOrganization(
+        invoice.organizationId,
+        {
+          invoiceId: invoice.id,
+          organizationNif: resolveNifForCertification(organization.nif),
+          number,
+          totalTtc: invoice.totalTtc,
+          issuedAt: issuedAt.toISOString(),
+          previousHash: previousInvoice?.hash ?? "GENESIS",
+        },
+        tx,
+      );
 
       let issuedInvoice;
       try {
@@ -302,7 +317,16 @@ export class InvoicesService {
       }
 
       return { issuedInvoice, organization };
-    });
+      });
+    } catch (error) {
+      if (isTransactionTimeout(error)) {
+        throw new ConflictException(
+          `Émission de la facture ${invoiceId} en cours sur une autre requête — réessayer`,
+        );
+      }
+      throw error;
+    }
+    const { issuedInvoice, organization } = transactionResult;
 
     // Meilleur effort, jamais couplé à la certification (déjà committée ci-dessus) :
     // DAT §12 fixe deux SLA distinctes ("Émission facture < 2s" / "Génération lien

@@ -647,13 +647,51 @@ describe("InvoicesService — machine à états", () => {
 
     const result = await service.issue("inv-1");
 
-    expect(numbering.nextNumber).toHaveBeenCalledWith("org-1", expect.any(Number));
+    // Quality Audit 2026-08-23, revue post-fix #1 — 3e argument (tx) désormais
+    // passé explicitement, voir invoice-numbering.service.ts/organization-signing-key.service.ts.
+    expect(numbering.nextNumber).toHaveBeenCalledWith("org-1", expect.any(Number), expect.anything());
     expect(certification.certifyForOrganization).toHaveBeenCalledWith(
       "org-1",
       expect.objectContaining({ previousHash: "GENESIS" }),
+      expect.anything(),
     );
     expect(result.status).toBe("issued");
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
+  });
+
+  it("passe le tx de la transaction en cours à nextNumber()/certifyForOrganization(), jamais le client Prisma global (Quality Audit 2026-08-23, revue post-fix #1)", async () => {
+    // Sans ce câblage, nextNumber() écrirait en autocommit sur le client global
+    // — un numéro de séquence serait consommé de façon irréversible même si
+    // l'écriture finale de la transaction échoue ensuite. createFakePrisma()
+    // définit $transaction: (callback) => callback(prisma) — le tx REÇU PAR LE
+    // CALLBACK est donc, par construction, ce même objet `prisma` : si
+    // InvoicesService appelait encore this.prisma au lieu du tx reçu, ce test
+    // resterait identique en valeur mais on vérifie ici précisément l'identité
+    // de l'objet passé en 3e argument, pas simplement sa présence.
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+      },
+    });
+    const numbering = createFakeNumbering();
+    const certification = createFakeSigningKeyService();
+    const service = new InvoicesService(
+      prisma as any,
+      numbering as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.issue("inv-1");
+
+    expect(numbering.nextNumber.mock.calls[0][2]).toBe(prisma);
+    expect(certification.certifyForOrganization.mock.calls[0][2]).toBe(prisma);
   });
 
   it("persiste signingKeyId — la facture référence la clé racine de son organisation, jamais la clé globale légataire (A3, ADR-026)", async () => {
@@ -708,6 +746,7 @@ describe("InvoicesService — machine à états", () => {
     expect(certification.certifyForOrganization).toHaveBeenCalledWith(
       "org-1",
       expect.objectContaining({ organizationNif: "UNVERIFI" }),
+      expect.anything(),
     );
   });
 
@@ -834,6 +873,22 @@ describe("InvoicesService — machine à états", () => {
     );
 
     await expect(service.issue("inv-1")).rejects.toThrow(/certification/);
+  });
+
+  it("convertit un timeout de transaction Prisma (P2028, contention sur FOR UPDATE) en 409 explicite, pas un 500 brut (Quality Audit 2026-08-23, revue post-fix #1)", async () => {
+    const p2028 = Object.assign(new Error("Transaction already closed"), { code: "P2028" });
+    const prisma: any = {
+      $transaction: vi.fn().mockRejectedValue(p2028),
+    };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).rejects.toThrow(ConflictException);
+    await expect(service.issue("inv-1")).rejects.toThrow(/réessayer/);
   });
 
   it("sous deux appels concurrents réels sur la même facture draft, une seule certification est committée, jamais un trou dans la séquence (Quality Audit 2026-08-23, finding #1)", async () => {
