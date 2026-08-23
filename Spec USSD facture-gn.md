@@ -27,9 +27,10 @@ facture.gn *620#
 3. Mes factures
 4. Émettre une facture
 5. Gérer mon compte
+7. Factures reçues
 ```
 
-L'option 5 (Gérer mon compte) est un sous-menu étendu pour inclure la gestion des mandats cabinet/CGA.
+L'option 5 (Gérer mon compte) est un sous-menu étendu pour inclure la gestion des mandats cabinet/CGA. L'option 6 (Commande Publique, ADR-086, §2.6) reste réservée à K3, non construite à ce jour — le menu affiche un trou volontaire entre 5 et 7 tant que K3 n'est pas livrée.
 
 ---
 
@@ -80,6 +81,12 @@ Saisie condensée : montant, puis référence marché (optionnel — champ libel
 Consulte si le DAF de l'administration cliente a validé la liquidation (Niveau 2, ADR-080). Aucune information sur les visas Trésor ni le paiement effectif — ce niveau (3) n'est pas construit, pour ne pas rouvrir le risque R-02. Une fois validée, la PME choisit son rail de paiement (financement immédiat ou attente Trésor) depuis la PWA — pas depuis l'USSD, le choix implique une comparaison d'offres mieux servie par un écran riche.
 
 Authentification identique aux options 1-5 : téléphone reconnu → PIN direct, sinon code compte + PIN. Aucun mécanisme de sécurité spécifique à un système tiers.
+
+### 2.7 Option 7 — Factures reçues (F13, ADR-096/ADR-108)
+
+Résumé par organisation (nom + solde dû, `Aucun solde dû` si nul) des factures REÇUES par ce numéro en tant que client, tous émetteurs facture.gn confondus — distinct de l'Option 3 (« Mes factures »), qui liste les factures ÉMISES par l'organisation du collaborateur authentifié sur ce même canal. Même sous-flux d'authentification standard que les autres options (téléphone reconnu → PIN, ou code compte + PIN) : la vérification PIN vaut preuve de possession du numéro au même titre qu'un OTP côté PWA (ADR-108) — aucun second facteur *620#-spécifique. Écran unique, résultat en lecture seule, aucune action de paiement ni d'émission depuis ce canal.
+
+Numérotée 7 (pas 6) pour ne jamais entrer en conflit avec l'Option 6 « Commande Publique » (K3, ADR-086, §2.6) — réservée depuis l'origine de ce document, alors non construite au moment de la livraison de F13.
 
 ---
 
