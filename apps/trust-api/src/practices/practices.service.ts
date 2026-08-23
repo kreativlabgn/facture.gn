@@ -6,6 +6,7 @@ import type {
   RevenueShareSettlementMode,
 } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { assertPracticeAdmin } from "../common/rbac/practice-access";
 import type { CreatePracticeDto } from "./dto/create-practice.dto";
 import type { InviteMemberDto } from "./dto/invite-member.dto";
 
@@ -112,7 +113,7 @@ export class PracticesService {
   // (H2) : self-service, jamais un workflow d'approbation. tier jamais accepté
   // à create() (voir schema.prisma) mais changeable ici après coup.
   async upgradePartnerTier(practiceId: string, tier: ProfessionalPracticeTier, requesterUserId: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId);
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId);
     return this.prisma.professionalPractice.update({ where: { id: practiceId }, data: { tier } });
   }
 
@@ -123,19 +124,10 @@ export class PracticesService {
     mode: RevenueShareSettlementMode,
     requesterUserId: string,
   ) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId);
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId);
     return this.prisma.professionalPractice.update({
       where: { id: practiceId },
       data: { revenueShareSettlementMode: mode },
     });
-  }
-
-  private async assertPracticeAdmin(practiceId: string, requesterUserId: string): Promise<void> {
-    const membership = await this.prisma.practiceMember.findFirst({
-      where: { practiceId, userId: requesterUserId, leftAt: null },
-    });
-    if (!membership || membership.role !== "practice_admin") {
-      throw new ForbiddenException("Seul un practice_admin du cabinet peut effectuer cette action");
-    }
   }
 }

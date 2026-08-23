@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 import { REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF, REVENUE_SHARE_RATE_BPS } from "./revenue-share-grid";
 import { getPartnerTierPrice } from "../practices/partner-tier-grid";
 import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
+import { assertPracticeAdmin } from "../common/rbac/practice-access";
 
 const BPS_DENOMINATOR = 10_000n;
 
@@ -16,7 +17,7 @@ export class RevenueShareService {
   // Génération manuelle : aucun cron dans ce repo (voir PLAN "Clarifications"),
   // l'appelant choisit explicitement la période à clôturer.
   async generate(practiceId: string, requesterUserId: string, periodMonth: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId);
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "générer le revenue share");
 
     const { start, end } = resolvePeriodBounds(periodMonth);
 
@@ -128,15 +129,6 @@ export class RevenueShareService {
     const amountDueCentimes = remaining > 0n ? remaining : 0n;
 
     return { practiceId, periodMonth, tier: practice.tier, amountDueCentimes };
-  }
-
-  private async assertPracticeAdmin(practiceId: string, requesterUserId: string): Promise<void> {
-    const membership = await this.prisma.practiceMember.findFirst({
-      where: { practiceId, userId: requesterUserId, leftAt: null },
-    });
-    if (!membership || membership.role !== "practice_admin") {
-      throw new ForbiddenException("Seul un practice_admin du cabinet peut générer le revenue share");
-    }
   }
 }
 

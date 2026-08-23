@@ -2,27 +2,12 @@ import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundExce
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
+import { assertPracticeAdmin } from "../common/rbac/practice-access";
 import type { CreateMandateDto } from "./dto/create-mandate.dto";
 
 @Injectable()
 export class MandatesService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
-
-  // Un mandat est une action PRACTICE-scopée, pas organisation-scopée (ADR-068) —
-  // RolesGuard ne s'applique pas (il résout exclusivement une organisation via
-  // OrganizationMember). Autorisation vérifiée en ligne, même précédent que
-  // OrganizationsService.createAssisted() (isCommercialAgent relu depuis la DB).
-  // Factorisé ici car utilisé par create() (F5) ET revoke() (F6) — même garde,
-  // 2e occurrence identique, seuil "règle de trois" atteint (anticipé lors de la
-  // revue F5).
-  private async assertPracticeAdmin(practiceId: string, userId: string, action: string) {
-    const member = await this.prisma.practiceMember.findFirst({
-      where: { practiceId, userId, leftAt: null },
-    });
-    if (!member || member.role !== "practice_admin") {
-      throw new ForbiddenException(`Seul un practice_admin du cabinet peut ${action}`);
-    }
-  }
 
   // Garde anti-doublon applicative (même précédent que C7/C13) — un mandat
   // revoked/expired ne bloque jamais une nouvelle demande, seuls pending/active
@@ -45,7 +30,7 @@ export class MandatesService {
   // (pending → active) et la révocation (F6) sont des stories séparées, aucune
   // transition de status n'est construite ici.
   async create(practiceId: string, dto: CreateMandateDto, requesterUserId: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId, "demander un mandat au nom de celui-ci");
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "demander un mandat au nom de celui-ci");
 
     const organization = await this.prisma.organization.findUnique({ where: { id: dto.organizationId } });
     if (!organization) {
@@ -115,7 +100,7 @@ export class MandatesService {
   // revoked/expired sont déjà terminaux. grantedBy/grantedAt ne sont jamais
   // effacés : trace historique de qui avait accepté, conservée après révocation.
   async revoke(practiceId: string, mandateId: string, requesterUserId: string) {
-    await this.assertPracticeAdmin(practiceId, requesterUserId, "révoquer un mandat au nom de celui-ci");
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "révoquer un mandat au nom de celui-ci");
 
     const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
     // Même mandat introuvable si le mandat existe mais est détenu par une autre
@@ -216,7 +201,7 @@ export class MandatesService {
   // elle-même créé via create() (F5), ce qui contournerait le consentement
   // organisationnel qu'ADR-069 est censé garantir.
   async acceptAsPractice(practiceId: string, mandateId: string, actorUserId: string) {
-    await this.assertPracticeAdmin(practiceId, actorUserId, "accepter une adhésion au nom de celui-ci");
+    await assertPracticeAdmin(this.prisma, practiceId, actorUserId, "accepter une adhésion au nom de celui-ci");
 
     const mandate = await this.prisma.mandate.findUnique({ where: { id: mandateId } });
     if (!mandate || mandate.practiceId !== practiceId) {
