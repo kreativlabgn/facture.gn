@@ -1378,11 +1378,26 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
   });
 });
 
-function createFakePrismaForRegeneratePaymentLink(invoice: any, organization: any = {}) {
+function createFakePrismaForRegeneratePaymentLink(
+  invoice: any,
+  organization: any = {},
+  overrides: { updateManyCount?: number } = {},
+) {
+  // Security Audit 2026-08-23, finding #3 — état mutable : updateMany() applique
+  // réellement les données (comme un vrai `where` transactionnel), pour que le
+  // findUniqueOrThrow() final reflète le lien fraîchement régénéré. updateManyCount
+  // permet de simuler explicitement une facture réglée entre-temps (count=0).
+  let invoiceState = { ...invoice };
   const prisma: any = {
     invoice: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue(invoice),
-      update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...invoice, ...data })),
+      findUniqueOrThrow: vi.fn().mockImplementation(() => Promise.resolve(invoiceState)),
+      updateMany: vi.fn().mockImplementation(({ data }: any) => {
+        const count = overrides.updateManyCount ?? 1;
+        if (count > 0) {
+          invoiceState = { ...invoiceState, ...data };
+        }
+        return Promise.resolve({ count });
+      }),
     },
     // commercialTier: freemium par défaut (grille commission, ADR-074).
     organization: {
@@ -1483,7 +1498,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     );
 
     await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
-    expect(prisma.invoice.update).not.toHaveBeenCalled();
+    expect(prisma.invoice.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuse la régénération sur une facture draft — rien n'a encore été émis", async () => {
@@ -1575,6 +1590,29 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
       expect.objectContaining({ amountGnf: 122_520n }),
     );
+  });
+
+  it("rejette (ConflictException) si la facture a été réglée pendant l'appel provider — jamais un lien écrit sur une facture déjà payée (Security Audit 2026-08-23, finding #3)", async () => {
+    const prisma = createFakePrismaForRegeneratePaymentLink(
+      {
+        id: "inv-1",
+        organizationId: "org-1",
+        status: "partially_paid",
+        totalTtc: 350_000n,
+        amountDue: 200_000n,
+      },
+      {},
+      { updateManyCount: 0 },
+    );
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(resolvedPaymentLink) as any,
+    );
+
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 });
 
