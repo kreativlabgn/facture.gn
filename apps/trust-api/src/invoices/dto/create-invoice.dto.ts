@@ -41,6 +41,11 @@ export const createInvoiceSchema = z
     referenceAmount: z.coerce.bigint().positive().optional(),
     fxRate: z.string().regex(/^\d+(\.\d+)?$/, "Taux de change attendu au format décimal (ex. 9440.50)").optional(),
     fxRateDate: z.coerce.date().optional(),
+    // K3, ADR-090 — "Référence marché TELEMO", recopiée à la main par la PME au
+    // moment de l'émission, AUCUNE vérification automatique. Optionnel : une
+    // facture sans référence suit exactement le même parcours qu'une facture
+    // avec référence (Backlog K3).
+    referenceMarche: z.string().min(1).optional(),
   })
   .refine(
     (data) =>

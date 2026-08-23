@@ -143,6 +143,9 @@ export class InvoicesService {
         referenceAmount: dto.referenceAmount,
         fxRate: dto.fxRate,
         fxRateDate: dto.fxRateDate,
+        // K3, ADR-090 — recopiée telle quelle, jamais vérifiée côté serveur (même
+        // discipline que referenceCurrency ci-dessus). undefined si non fournie.
+        referenceMarche: dto.referenceMarche,
         lines: {
           create: dto.lines.map((line) => ({
             description: line.description,
