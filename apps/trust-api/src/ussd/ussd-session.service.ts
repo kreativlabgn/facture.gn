@@ -83,7 +83,16 @@ type UssdState =
   | "account_new_pin"
   | "account_new_pin_confirm"
   | "account_mandate_select"
-  | "account_invite_viewer_phone";
+  | "account_invite_viewer_phone"
+  // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — état "stub
+  // générique" pour toute option authentifiée pas encore construite (voir
+  // completeAuthentication()) : manquait de l'union d'origine, ces deux
+  // écritures passaient par un prisma.ussdSession.update() brut jamais typé
+  // contre UssdState, et le switch de dispatch() ci-dessous n'avait aucun case
+  // pour ce state, tombant silencieusement sur "Session invalide" en cas de
+  // rejeu — exactement la classe de panne silencieuse que ce fix visait à
+  // éliminer.
+  | "authenticated_stub";
 
 const ROOT_MENU = [
   "facture.gn *620#",
@@ -211,6 +220,12 @@ export class UssdSessionService {
         return this.handleAccountMandateSelect(session, context, input);
       case "account_invite_viewer_phone":
         return this.handleAccountInviteViewerPhone(session, input);
+      // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — même
+      // pattern que emit_terminal ci-dessus : un rejeu (sessionId réutilisé
+      // avant expiresAt) sur une option authentifiée pas encore construite
+      // reçoit un message terminal propre, jamais "Session invalide".
+      case "authenticated_stub":
+        return { continue: false, text: "Cette opération a déjà été traitée." };
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -418,7 +433,11 @@ export class UssdSessionService {
       await this.prisma.ussdSession.update({
         where: { id: sessionId },
         data: {
-          state: "authenticated_stub",
+          // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — le
+          // littéral ci-dessous est désormais vérifié contre UssdState via ce
+          // type explicite (Prisma.InputJsonValue/String côté colonne DB
+          // n'aurait rien signalé sur une faute de frappe sans ça).
+          state: "authenticated_stub" satisfies UssdState,
           userId: context.authUserId,
           organizationId: context.authOrganizationId,
           contextData: {},
@@ -477,7 +496,9 @@ export class UssdSessionService {
     await this.prisma.ussdSession.update({
       where: { id: sessionId },
       data: {
-        state: "authenticated_stub",
+        // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — voir
+        // commentaire jumeau plus haut dans ce fichier (pendingOption==="3").
+        state: "authenticated_stub" satisfies UssdState,
         userId: context.authUserId,
         organizationId: context.authOrganizationId,
         contextData: {},
