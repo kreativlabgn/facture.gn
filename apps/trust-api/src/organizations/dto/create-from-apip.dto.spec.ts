@@ -13,6 +13,12 @@ function validPayload(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("createFromApipSchema — exonération association réservée aux associations (I4, ADR-057)", () => {
+  it("accepte une organisation legalForm=commercial avec un régime non exonéré (cas nominal, non lié à I4)", () => {
+    const result = createFromApipSchema.safeParse(validPayload());
+
+    expect(result.success).toBe(true);
+  });
+
   it("rejette regimeFiscal=non_assujetti_association pour une organisation legalForm=commercial", () => {
     const result = createFromApipSchema.safeParse(
       validPayload({ regimeFiscal: "non_assujetti_association", legalForm: "commercial" }),
