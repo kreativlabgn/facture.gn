@@ -190,7 +190,7 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
     expect(prisma.publicBuyerAccount.findUnique).toHaveBeenCalledWith({ where: { id: "pba-1" } });
     expect(prisma.customer.update).toHaveBeenCalledWith({
       where: { id: "cust-1" },
-      data: { isPublicEntity: true, publicBuyerAccountId: "pba-1" },
+      data: { isPublicEntity: true, publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false },
     });
     expect(result.isPublicEntity).toBe(true);
     expect(result.publicBuyerAccountId).toBe("pba-1");

@@ -71,9 +71,14 @@ export class CustomersService {
       throw new NotFoundException(`Compte acheteur public ${publicBuyerAccountId} introuvable`);
     }
 
+    // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed toujours
+    // remis à false ici, même en cas de re-pointage vers un autre compte : la
+    // confirmation appartient exclusivement au compte CIBLÉ
+    // (PublicBuyerPortalService.confirmCustomerLink()), jamais acquise par la
+    // seule initiative de la PME qui pose ce lien.
     return this.prisma.customer.update({
       where: { id: customerId },
-      data: { isPublicEntity: true, publicBuyerAccountId },
+      data: { isPublicEntity: true, publicBuyerAccountId, isPublicEntityConfirmed: false },
     });
   }
 

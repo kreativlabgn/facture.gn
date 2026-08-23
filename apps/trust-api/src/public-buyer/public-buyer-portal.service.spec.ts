@@ -40,7 +40,12 @@ function createFakePrisma(
       ...overrides.invoice,
     },
     customer: {
-      findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1" }),
+      // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed: true par
+      // défaut ici (lien déjà confirmé par le compte acheteur public) ; voir les
+      // tests dédiés plus bas pour le cas non-confirmé et confirmCustomerLink().
+      findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
+      update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
       ...overrides.customer,
     },
     $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
@@ -143,6 +148,18 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it("refuse de valider la liquidation tant que le lien client<->compte acheteur public n'a pas été confirmé (Security Audit 2026-08-23, finding #13)", async () => {
+    const prisma = createFakePrisma({
+      customer: {
+        findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(service.validateLiquidation("inv-1", REQUESTER_USER_ID)).rejects.toThrow(/confirmé/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("la réponse idempotente n'a jamais de relation customer imbriquée (forme identique à la validation fraîche)", async () => {
     const prisma = createFakePrisma({
       invoice: {
@@ -173,7 +190,10 @@ describe("PublicBuyerPortalService — encours fournisseurs (J2, ADR-080/098)", 
       where: { userId: REQUESTER_USER_ID },
     });
     expect(prisma.invoice.findMany).toHaveBeenCalledWith({
-      where: { customer: { publicBuyerAccountId: "pba-1" }, status: { notIn: ["draft", "voided"] } },
+      where: {
+        customer: { publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true },
+        status: { notIn: ["draft", "voided"] },
+      },
       orderBy: { issuedAt: "desc" },
       take: 50,
       skip: 0,
@@ -211,10 +231,64 @@ describe("PublicBuyerPortalService — encours fournisseurs (J2, ADR-080/098)", 
     const result = await service.listReceivedInvoices(REQUESTER_USER_ID, {});
 
     expect(prisma.invoice.aggregate).toHaveBeenCalledWith({
-      where: { customer: { publicBuyerAccountId: "pba-1" }, status: { notIn: ["draft", "voided"] } },
+      where: {
+        customer: { publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true },
+        status: { notIn: ["draft", "voided"] },
+      },
       _sum: { amountDue: true },
     });
     expect(result.outstandingTotal).toBe(12_500_000n);
     expect(result.invoices).toHaveLength(2);
+  });
+});
+
+describe("PublicBuyerPortalService.confirmCustomerLink (Security Audit 2026-08-23, finding #13)", () => {
+  it("pose isPublicEntityConfirmed=true quand l'appelant est membre du compte acheteur public ciblé", async () => {
+    const prisma = createFakePrisma({
+      customer: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    const result = await service.confirmCustomerLink("cust-1", REQUESTER_USER_ID);
+
+    expect(prisma.publicBuyerAccountMember.findFirst).toHaveBeenCalledWith({
+      where: { publicBuyerAccountId: "pba-1", userId: REQUESTER_USER_ID },
+    });
+    expect(prisma.customer.update).toHaveBeenCalledWith({
+      where: { id: "cust-1" },
+      data: { isPublicEntityConfirmed: true },
+    });
+    expect(result.isPublicEntityConfirmed).toBe(true);
+  });
+
+  it("refuse un appelant qui n'est pas membre du compte acheteur public ciblé (IDOR)", async () => {
+    const prisma = createFakePrisma({
+      publicBuyerAccountMember: { findFirst: vi.fn().mockResolvedValue(null) },
+      customer: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(service.confirmCustomerLink("cust-1", OTHER_PBA_MEMBER_USER_ID)).rejects.toThrow(/accès/i);
+    expect(prisma.customer.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse un client jamais rattaché à un compte acheteur public", async () => {
+    const prisma = createFakePrisma({
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: null, isPublicEntityConfirmed: false }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(service.confirmCustomerLink("cust-1", REQUESTER_USER_ID)).rejects.toThrow(/rattaché/i);
+    expect(prisma.customer.update).not.toHaveBeenCalled();
   });
 });

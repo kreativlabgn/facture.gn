@@ -9,6 +9,9 @@ function baseInvoice(overrides: Record<string, any> = {}) {
     validatedByAdministration: true,
     financedByPartnerId: null,
     status: "issued",
+    // Security Audit 2026-08-23, finding #1 — PublicBuyerAccount vérifié par
+    // défaut dans ces fixtures ; voir le test dédié plus bas pour le cas non-vérifié.
+    customer: { publicBuyerAccount: { verificationStatus: "verified" } },
     ...overrides,
   };
 }
@@ -64,6 +67,18 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
     expect(prisma.financialPartner.findMany).not.toHaveBeenCalled();
+  });
+
+  it("ne liste aucun partenaire si le PublicBuyerAccount lié n'est pas vérifié, même validée par l'administration (Security Audit 2026-08-23, finding #1)", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({ customer: { publicBuyerAccount: { verificationStatus: "pending" } } }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1");
+
+    expect(result.financeable).toBe(false);
+    expect(result.partners).toEqual([]);
   });
 });
 
@@ -149,6 +164,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
         financedByPartnerId: null,
         validatedByAdministration: true,
         status: { not: "voided" },
+        customer: { publicBuyerAccount: { verificationStatus: "verified" } },
       },
       data: { financedByPartnerId: "partner-1", financedAt: expect.any(Date) },
     });

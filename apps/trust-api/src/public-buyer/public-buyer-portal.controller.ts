@@ -31,4 +31,13 @@ export class PublicBuyerPortalController {
   ) {
     return this.publicBuyerPortalService.listReceivedInvoices(user.id, { take: query.take, skip: query.skip });
   }
+
+  // Security Audit 2026-08-23, finding #13 — confirmation explicite d'un lien
+  // client<->compte acheteur public posé par une PME (flagPublicEntity()), par un
+  // membre du compte CIBLÉ. Même absence de @Roles()/@OrganizationIdSource que le
+  // reste de ce controller — customerId ne pointe jamais une facture/organisation.
+  @Post("customers/:customerId/confirm-link")
+  confirmCustomerLink(@Param("customerId") customerId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.publicBuyerPortalService.confirmCustomerLink(customerId, user.id);
+  }
 }
