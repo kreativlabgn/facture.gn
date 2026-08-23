@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
@@ -12,6 +13,9 @@ import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Security Audit 2026-08-23, finding #15 — voir apps/trust-api/src/main.ts.
+  app.use(helmet());
 
   // Security Audit 2026-08-23, finding #5 — voir apps/trust-api/src/main.ts : même
   // gate, SwaggerModule.setup() n'est jamais couvert par les guards Nest.

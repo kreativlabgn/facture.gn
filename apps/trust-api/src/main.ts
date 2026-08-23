@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
@@ -17,6 +18,12 @@ async function bootstrap() {
   // JSON.stringify(request.body) reconstruit ne serait pas bit-à-bit identique
   // au corps réellement signé par l'expéditeur (ordre des clés, espacement).
   const app = await NestFactory.create(AppModule, { rawBody: true });
+
+  // Security Audit 2026-08-23, finding #15 — config par défaut de helmet (HSTS,
+  // X-Content-Type-Options, X-Frame-Options DENY, etc.), aucune sur-configuration :
+  // suffisant en défense en profondeur, l'API ne sert que du JSON (pas de rendu
+  // HTML propre à durcir via une CSP dédiée ici).
+  app.use(helmet());
 
   // Security Audit 2026-08-23, finding #5 — SwaggerModule.setup() monte son propre
   // routeur Express directement, EN DEHORS du pipeline de guards Nest (le
