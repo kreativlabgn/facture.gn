@@ -14,10 +14,10 @@
     "lint": "eslint --config ../../eslint.config.js \"src/**/*.ts\""
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0"
+    "@prisma/client": "5.22.0"
   },
   "devDependencies": {
-    "prisma": "^5.20.0",
+    "prisma": "5.22.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

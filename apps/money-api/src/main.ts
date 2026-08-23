@@ -13,13 +13,17 @@ import { AppModule } from "./app.module";
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  const config = new DocumentBuilder()
-    .setTitle("facture.gn — Money API")
-    .setDescription("Money Context : orchestrateur de paiement multi-provider (Djomy/Moneroo)")
-    .setVersion("0.0.0")
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup("docs", app, document);
+  // Security Audit 2026-08-23, finding #5 — voir apps/trust-api/src/main.ts : même
+  // gate, SwaggerModule.setup() n'est jamais couvert par les guards Nest.
+  if (process.env.NODE_ENV !== "production") {
+    const config = new DocumentBuilder()
+      .setTitle("facture.gn — Money API")
+      .setDescription("Money Context : orchestrateur de paiement multi-provider (Djomy/Moneroo)")
+      .setVersion("0.0.0")
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup("docs", app, document);
+  }
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3001;
   await app.listen(port);

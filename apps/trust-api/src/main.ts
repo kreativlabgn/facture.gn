@@ -18,14 +18,22 @@ async function bootstrap() {
   // au corps réellement signé par l'expéditeur (ordre des clés, espacement).
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
-  const config = new DocumentBuilder()
-    .setTitle("facture.gn — Trust API")
-    .setDescription("Trust Context : IAM, organisations, facturation core, certification")
-    .setVersion("0.0.0")
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup("docs", app, document);
+  // Security Audit 2026-08-23, finding #5 — SwaggerModule.setup() monte son propre
+  // routeur Express directement, EN DEHORS du pipeline de guards Nest (le
+  // JwtAuthGuard/RolesGuard global d'app.module.ts ne le protège pas) : en
+  // production, /docs exposait sans authentification la totalité des schémas
+  // DTO et la liste des routes sensibles (api-keys, commercial-agents/grant...) —
+  // une carte de reconnaissance gratuite pour un attaquant.
+  if (process.env.NODE_ENV !== "production") {
+    const config = new DocumentBuilder()
+      .setTitle("facture.gn — Trust API")
+      .setDescription("Trust Context : IAM, organisations, facturation core, certification")
+      .setVersion("0.0.0")
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup("docs", app, document);
+  }
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await app.listen(port);
