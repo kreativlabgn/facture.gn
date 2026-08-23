@@ -178,89 +178,110 @@ export class InvoicesService {
   }
 
   async issue(invoiceId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    if (invoice.status !== "draft") {
-      throw new ConflictException(
-        `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,
-      );
-    }
-    // ADR-064 : un proforma (prix indicatif, jamais engageant) ou un devis ne peuvent
-    // jamais être émis directement comme facture certifiée — seule la conversion
-    // (convertToInvoice) produit une vraie facture à partir d'un proforma.
-    if (invoice.documentType !== "invoice") {
-      throw new ConflictException(
-        `Seule une facture peut être émise, pas un document de type ${invoice.documentType}`,
-      );
-    }
+    // Quality Audit 2026-08-23, finding #1 (CRITIQUE) — tout le bloc critique
+    // (vérification de statut → nextNumber() → certification Ed25519 → écriture)
+    // tourne désormais sous un verrou de ligne Postgres réel (SELECT ... FOR
+    // UPDATE), pas seulement un updateMany+where comme convertToInvoice() :
+    // contrairement à convertToInvoice(), issue() DOIT appeler
+    // InvoiceNumberingService.nextNumber() (upsert atomique "sans trou", Article
+    // 23 OHADA) avant de savoir si l'écriture finale va réussir — un simple
+    // updateMany en fin de méthode aurait laissé les DEUX requêtes concurrentes
+    // consommer chacune un numéro de séquence, créant un trou légal même si une
+    // seule facture est effectivement émise. Le FOR UPDATE sérialise les deux
+    // transactions sur CETTE facture : la perdante ne voit le statut "issued"
+    // qu'une fois la gagnante COMMITÉE, et n'appelle donc jamais nextNumber() ni
+    // certifyForOrganization() — jamais de trou, jamais de certification Ed25519
+    // signée puis silencieusement écrasée.
+    const { issuedInvoice, organization } = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM invoice WHERE id = ${invoiceId} FOR UPDATE`;
 
-    const organization = await this.prisma.organization.findUniqueOrThrow({
-      where: { id: invoice.organizationId },
-    });
+      const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      if (invoice.status !== "draft") {
+        throw new ConflictException(
+          `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,
+        );
+      }
+      // ADR-064 : un proforma (prix indicatif, jamais engageant) ou un devis ne
+      // peuvent jamais être émis directement comme facture certifiée — seule la
+      // conversion (convertToInvoice) produit une vraie facture à partir d'un
+      // proforma.
+      if (invoice.documentType !== "invoice") {
+        throw new ConflictException(
+          `Seule une facture peut être émise, pas un document de type ${invoice.documentType}`,
+        );
+      }
 
-    // G2 (réinterprété, voir plan freeze-after-account-recovery) — fenêtre de
-    // vigilance posée par AuthService.resolveRecovery() sur une récupération de
-    // compte owner approuvée. paymentsFrozenUntil expiré (passé) est déjà
-    // inoffensif, aucune comparaison de statut nécessaire.
-    if (organization.paymentsFrozenUntil && organization.paymentsFrozenUntil > new Date()) {
-      throw new ForbiddenException(
-        `Émission gelée temporairement suite à une récupération de compte récente (jusqu'au ${organization.paymentsFrozenUntil.toISOString()})`,
-      );
-    }
-
-    const issuedAt = new Date();
-    const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear());
-
-    const previousInvoice = await this.prisma.invoice.findFirst({
-      where: { organizationId: invoice.organizationId, status: { not: "draft" } },
-      orderBy: { issuedAt: "desc" },
-    });
-
-    const certification = await this.certification.certifyForOrganization(invoice.organizationId, {
-      invoiceId: invoice.id,
-      organizationNif: resolveNifForCertification(organization.nif),
-      number,
-      totalTtc: invoice.totalTtc,
-      issuedAt: issuedAt.toISOString(),
-      previousHash: previousInvoice?.hash ?? "GENESIS",
-    });
-
-    let issuedInvoice;
-    try {
-      issuedInvoice = await this.prisma.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          number,
-          certificationId: certification.certificationId,
-          hash: certification.hash,
-          previousHash: certification.previousHash,
-          signature: Buffer.from(certification.signature, "hex"),
-          signingKeyId: certification.signingKeyId,
-          status: "issued",
-          issuedAt,
-          amountDue: invoice.totalTtc,
-        },
+      const organization = await tx.organization.findUniqueOrThrow({
+        where: { id: invoice.organizationId },
       });
-    } catch (error) {
-      // Filet de sécurité : InvoiceNumberingService (upsert atomique par organisation/
-      // année) ne devrait jamais produire ce conflit, mais un 409 explicite vaut mieux
-      // qu'un 500 brut si la séquence dérivait un jour sous concurrence extrême.
-      if (isUniqueConstraintViolation(error, "number")) {
-        throw new ConflictException(
-          `Le numéro ${number} existe déjà pour cette organisation — réémission impossible`,
+
+      // G2 (réinterprété, voir plan freeze-after-account-recovery) — fenêtre de
+      // vigilance posée par AuthService.resolveRecovery() sur une récupération de
+      // compte owner approuvée. paymentsFrozenUntil expiré (passé) est déjà
+      // inoffensif, aucune comparaison de statut nécessaire.
+      if (organization.paymentsFrozenUntil && organization.paymentsFrozenUntil > new Date()) {
+        throw new ForbiddenException(
+          `Émission gelée temporairement suite à une récupération de compte récente (jusqu'au ${organization.paymentsFrozenUntil.toISOString()})`,
         );
       }
-      // Filet de sécurité : certification_id est unique globalement (GN-{NIF8}-{YYYY}-
-      // {HASH6}). Les organisations sans NIF (B1/B4) partagent toutes le même segment
-      // NIF8 (UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER), ce qui réduit l'espace de
-      // collision de HASH6 à l'échelle de toute la plateforme pour une année donnée —
-      // un 409 explicite vaut mieux qu'un 500 brut si deux hash coïncident.
-      if (isUniqueConstraintViolation(error, "certification_id")) {
-        throw new ConflictException(
-          "Collision d'identifiant de certification — réémission impossible, réessayer",
-        );
+
+      const issuedAt = new Date();
+      const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear());
+
+      const previousInvoice = await tx.invoice.findFirst({
+        where: { organizationId: invoice.organizationId, status: { not: "draft" } },
+        orderBy: { issuedAt: "desc" },
+      });
+
+      const certification = await this.certification.certifyForOrganization(invoice.organizationId, {
+        invoiceId: invoice.id,
+        organizationNif: resolveNifForCertification(organization.nif),
+        number,
+        totalTtc: invoice.totalTtc,
+        issuedAt: issuedAt.toISOString(),
+        previousHash: previousInvoice?.hash ?? "GENESIS",
+      });
+
+      let issuedInvoice;
+      try {
+        issuedInvoice = await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            number,
+            certificationId: certification.certificationId,
+            hash: certification.hash,
+            previousHash: certification.previousHash,
+            signature: Buffer.from(certification.signature, "hex"),
+            signingKeyId: certification.signingKeyId,
+            status: "issued",
+            issuedAt,
+            amountDue: invoice.totalTtc,
+          },
+        });
+      } catch (error) {
+        // Filet de sécurité : InvoiceNumberingService (upsert atomique par organisation/
+        // année) ne devrait jamais produire ce conflit, mais un 409 explicite vaut mieux
+        // qu'un 500 brut si la séquence dérivait un jour sous concurrence extrême.
+        if (isUniqueConstraintViolation(error, "number")) {
+          throw new ConflictException(
+            `Le numéro ${number} existe déjà pour cette organisation — réémission impossible`,
+          );
+        }
+        // Filet de sécurité : certification_id est unique globalement (GN-{NIF8}-{YYYY}-
+        // {HASH6}). Les organisations sans NIF (B1/B4) partagent toutes le même segment
+        // NIF8 (UNVERIFIED_ORGANIZATION_NIF_PLACEHOLDER), ce qui réduit l'espace de
+        // collision de HASH6 à l'échelle de toute la plateforme pour une année donnée —
+        // un 409 explicite vaut mieux qu'un 500 brut si deux hash coïncident.
+        if (isUniqueConstraintViolation(error, "certification_id")) {
+          throw new ConflictException(
+            "Collision d'identifiant de certification — réémission impossible, réessayer",
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
+
+      return { issuedInvoice, organization };
+    });
 
     // Meilleur effort, jamais couplé à la certification (déjà committée ci-dessus) :
     // DAT §12 fixe deux SLA distinctes ("Émission facture < 2s" / "Génération lien
