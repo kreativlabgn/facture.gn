@@ -55,6 +55,21 @@ export class DjomyStubProvider implements PaymentProvider {
   // par WhatsApp/SMS) — sans cette garde, n'importe qui recevant un lien de paiement
   // pourrait forger un webhook "payé" et faire créditer une facture jamais payée
   // (trouvé par dev-security-reviewer, C2 Phase 2b).
+  //
+  // Security Audit 2026-08-23, finding #11 (MOYEN) — décision explicite de laisser
+  // ce mécanisme tel quel dans ce lot de correctifs : un secret statique comparé au
+  // corps entier (au lieu d'un HMAC-SHA256 calculé sur le corps brut, pattern déjà
+  // utilisé par PartnerWebhookAuthGuard/ADR-082 pour APIP) ne protège que "connaît
+  // le secret", pas "ce payload précis n'a pas été altéré". Un vrai HMAC exigerait
+  // de faire transiter request.rawBody (Buffer) depuis WebhooksController jusqu'ici
+  // — main.ts (rawBody: true), WebhooksService.handleIncomingWebhook(), et
+  // PaymentProvider.handleWebhook() devraient tous changer de contrat, pour un
+  // format de payload qui sera de toute façon entièrement redéfini à la vraie
+  // intégration (le format actuel {provider_ref, stub_secret} est inventé, pas
+  // documenté par Djomy). Câbler cette plomberie maintenant pour un contrat
+  // temporaire aurait un coût réel sans bénéfice de sécurité durable — DÉJÀ un
+  // blocker connu et tracé avant bascule réelle (voir TODO ci-dessus), pas un gap
+  // silencieux. À corriger AU MOMENT de la vraie intégration Djomy, pas avant.
   handleWebhook(rawPayload: unknown): NormalizedWebhookResult {
     const payload = rawPayload as { provider_ref: string; stub_secret?: string };
     return {
