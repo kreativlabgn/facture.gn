@@ -39,24 +39,47 @@ export class CustomersService {
   // existante de l'organisation uniquement (pas de "lot en cours" ici, une seule ligne)
   // — jamais de fusion automatique, juste le signal possibleDuplicateOf pour résolution
   // manuelle ultérieure (merge(), E4).
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — findFirst+create
+  // englobés dans une transaction Prisma (auparavant deux appels séparés, sans
+  // aucune garde de concurrence) pour réduire la fenêtre de course entre la
+  // lecture du doublon potentiel et l'écriture : deux créations concurrentes du
+  // même téléphone pouvaient produire deux Customer avec possibleDuplicateOf:
+  // null de part et d'autre, faisant silencieusement disparaître exactement le
+  // signal que E3 est censée fournir pour le scénario offline (ressaisie après
+  // coupure réseau).
+  //
+  // LIMITE ASSUMÉE, documentée honnêtement (cohérent avec ADR-038 : "signal
+  // best-effort, jamais une garantie stricte") : sous isolation Read Committed
+  // (défaut PostgreSQL, inchangé ici), cette transaction ne bloque PAS un
+  // findFirst() concurrent exécuté par une AUTRE transaction déjà en vol avant
+  // que celle-ci ne commit — deux create() strictement simultanés peuvent
+  // encore, dans de rares fenêtres, ne voir ni l'un ni l'autre le doublon de
+  // l'autre. Une contrainte unique DB classique est délibérément exclue : ADR-038
+  // exclut explicitement l'unicité stricte ici (deux clients légitimement
+  // différents PEUVENT partager nom/téléphone, ce n'est qu'un SIGNAL, jamais une
+  // règle d'unicité) — voir le test de concurrence dédié dans
+  // customers.service.spec.ts, qui prouve honnêtement ce que cette transaction
+  // garantit (et ne garantit pas) sous course réelle.
   async create(dto: CreateCustomerDto) {
-    const existingMatch = dto.phone
-      ? await this.prisma.customer.findFirst({
-          where: { organizationId: dto.organizationId, phone: dto.phone },
-        })
-      : null;
+    return this.prisma.$transaction(async (tx) => {
+      const existingMatch = dto.phone
+        ? await tx.customer.findFirst({
+            where: { organizationId: dto.organizationId, phone: dto.phone },
+          })
+        : null;
 
-    return this.prisma.customer.create({
-      data: {
-        organizationId: dto.organizationId,
-        name: dto.name,
-        phone: dto.phone,
-        nif: dto.nif,
-        creditLimit: dto.creditLimit,
-        // undefined → Prisma applique le défaut schema ("sms"), jamais dupliqué ici.
-        notificationChannel: dto.notificationChannel,
-        possibleDuplicateOf: existingMatch?.id ?? null,
-      },
+      return tx.customer.create({
+        data: {
+          organizationId: dto.organizationId,
+          name: dto.name,
+          phone: dto.phone,
+          nif: dto.nif,
+          creditLimit: dto.creditLimit,
+          // undefined → Prisma applique le défaut schema ("sms"), jamais dupliqué ici.
+          notificationChannel: dto.notificationChannel,
+          possibleDuplicateOf: existingMatch?.id ?? null,
+        },
+      });
     });
   }
 

@@ -27,21 +27,30 @@ export class ProductsService {
   // comportement de transformation Zod ni faire dépendre les tests de service du DTO.
   // Un seul trim, réutilisé pour la comparaison ET la création (jamais deux normalisations
   // divergentes).
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — findFirst+create
+  // englobés dans une transaction Prisma, même fix et même limite assumée que
+  // CustomersService.create() (voir son commentaire détaillé) : réduit la
+  // fenêtre de course sans l'éliminer totalement sous isolation Read Committed,
+  // cohérent avec ADR-038 ("signal best-effort, jamais une garantie stricte").
+  // Aucune contrainte unique DB ajoutée pour la même raison qu'expliqué là-bas.
   async create(dto: CreateProductDto) {
     const name = dto.name.trim();
-    const existingMatch = await this.prisma.product.findFirst({
-      where: {
-        organizationId: dto.organizationId,
-        name: { equals: name, mode: "insensitive" },
-      },
-    });
 
-    return this.prisma.product.create({
-      data: {
-        organizationId: dto.organizationId,
-        name,
-        possibleDuplicateOf: existingMatch?.id ?? null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const existingMatch = await tx.product.findFirst({
+        where: {
+          organizationId: dto.organizationId,
+          name: { equals: name, mode: "insensitive" },
+        },
+      });
+
+      return tx.product.create({
+        data: {
+          organizationId: dto.organizationId,
+          name,
+          possibleDuplicateOf: existingMatch?.id ?? null,
+        },
+      });
     });
   }
 

@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ProductsService } from "./products.service";
 
 function createFakePrisma(overrides: { existingMatch?: any } = {}) {
-  return {
+  const prisma: any = {
+    // Cross-Story Audit 2026-08-24, finding #3 — create() englobe désormais
+    // findFirst+create dans une transaction : callback(prisma) réutilise
+    // directement les mêmes mocks product.findFirst/create (tx === prisma ici).
+    $transaction: vi.fn((callback: any) => callback(prisma)),
     product: {
       // findFirst simule fidèlement le filtrage Prisma réel sur organizationId : un
       // existingMatch configuré pour une AUTRE organisation que celle demandée dans le
@@ -22,6 +26,7 @@ function createFakePrisma(overrides: { existingMatch?: any } = {}) {
       delete: vi.fn(),
     },
   };
+  return prisma;
 }
 
 describe("ProductsService.create (E10)", () => {
@@ -125,6 +130,45 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
 
     expect(prisma.product.update).not.toHaveBeenCalled();
     expect(prisma.product.delete).not.toHaveBeenCalled();
+  });
+
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — même test de
+  // concurrence réelle et même limite honnêtement documentée que
+  // CustomersService.create() (voir son commentaire jumeau dans
+  // customers.service.spec.ts) : état partagé par closure (tableau réel, pas un
+  // count forcé), Promise.all, la transaction réduit la fenêtre de course sans
+  // l'éliminer sous isolation Read Committed (best-effort assumé, ADR-038).
+  it("Cross-Story Audit 2026-08-24, finding #3 — sous deux create() réellement concurrents du même nom, la transaction réduit la fenêtre de course SANS l'éliminer (best-effort assumé, ADR-038)", async () => {
+    const products: any[] = [];
+    let createCallCount = 0;
+    const prisma: any = {
+      $transaction: vi.fn((callback: any) => callback(prisma)),
+      product: {
+        findFirst: vi.fn(async ({ where }: any) =>
+          products.find(
+            (p) => p.organizationId === where.organizationId && p.name.toLowerCase() === where.name.equals.toLowerCase(),
+          ) ?? null,
+        ),
+        create: vi.fn(async ({ data }: any) => {
+          createCallCount += 1;
+          const row = { id: `product-race-${createCallCount}`, ...data };
+          products.push(row);
+          return row;
+        }),
+      },
+    };
+    const service = new ProductsService(prisma as any);
+
+    const [resultA, resultB]: any[] = await Promise.all([
+      service.create({ organizationId: "org-1", name: "Riz 25kg" }),
+      service.create({ organizationId: "org-1", name: "Riz 25kg" }),
+    ]);
+
+    expect(products).toHaveLength(2);
+    // Limite honnêtement documentée : sous cette course, ni l'une ni l'autre ne
+    // voit le doublon de l'autre.
+    expect(resultA.possibleDuplicateOf).toBeNull();
+    expect(resultB.possibleDuplicateOf).toBeNull();
   });
 });
 

@@ -5,7 +5,12 @@ import { CustomersService } from "./customers.service";
 function createFakePrisma(
   overrides: { customer?: any; invoice?: any; publicBuyerAccount?: any } = {},
 ) {
-  return {
+  const prisma: any = {
+    // Cross-Story Audit 2026-08-24, finding #3 — create() englobe désormais
+    // findFirst+create dans une transaction ; ce helper générique (utilisé par
+    // create()/findOneWithBalance()/flagPublicEntity()) doit donc lui aussi
+    // exposer $transaction pour rester réutilisable par les tests de create().
+    $transaction: vi.fn((callback: any) => callback(prisma)),
     customer: {
       create: vi.fn().mockResolvedValue({
         id: "cust-1",
@@ -42,6 +47,7 @@ function createFakePrisma(
       ...overrides.publicBuyerAccount,
     },
   };
+  return prisma;
 }
 
 describe("CustomersService — création (C6, ADR-039)", () => {
@@ -81,7 +87,13 @@ describe("CustomersService — création (C6, ADR-039)", () => {
 describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-038)", () => {
   function createFakePrismaForCreate(opts: { existingMatch?: any } = {}) {
     let createCallCount = 0;
-    return {
+    const prisma: any = {
+      // Cross-Story Audit 2026-08-24, finding #3 — create() englobe désormais
+      // findFirst+create dans une transaction : callback(prisma) réutilise
+      // directement les mêmes mocks customer.findFirst/create (tx === prisma
+      // ici), même pattern que createFakePrismaForMerge()/createFakePrismaForFlag()
+      // plus bas dans ce fichier.
+      $transaction: vi.fn((callback: any) => callback(prisma)),
       customer: {
         // findFirst simule fidèlement le filtrage Prisma réel sur organizationId : un
         // existingMatch configuré pour une AUTRE organisation que celle demandée dans le
@@ -107,6 +119,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
         delete: vi.fn(),
       },
     };
+    return prisma;
   }
 
   it("pose possibleDuplicateOf quand le téléphone matche un client déjà en base de l'organisation", async () => {
@@ -187,6 +200,56 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
       data: expect.objectContaining({ possibleDuplicateOf: null }),
     });
     expect(result.possibleDuplicateOf).toBeNull();
+  });
+
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — test de concurrence
+  // réelle (même pattern Promise.all que F10/F13/K3, revue post-fix #5 sur
+  // ClientPortalAuthService.verifyOtp()) : état partagé par closure (un vrai
+  // tableau `customers`, pas un count forcé) pour que findFirst()/create() de
+  // DEUX transactions concurrentes exercent le comportement réel, pas un mock
+  // qui prouverait uniquement ce qu'on veut lui faire dire.
+  //
+  // Ce test documente HONNÊTEMENT la limite assumée dans le commentaire de
+  // create() : la transaction Prisma réduit la fenêtre de course, elle NE
+  // L'ÉLIMINE PAS sous isolation Read Committed. Deux create() strictement
+  // concurrents pour le même téléphone peuvent donc encore produire DEUX
+  // Customer avec possibleDuplicateOf: null de part et d'autre — ADR-038 assume
+  // explicitement ce best-effort ("signal, jamais une garantie stricte"). Ce
+  // test échouerait s'il affirmait le contraire.
+  it("Cross-Story Audit 2026-08-24, finding #3 — sous deux create() réellement concurrents du même téléphone, la transaction réduit la fenêtre de course SANS l'éliminer (best-effort assumé, ADR-038)", async () => {
+    const customers: any[] = [];
+    let createCallCount = 0;
+    const prisma: any = {
+      $transaction: vi.fn((callback: any) => callback(prisma)),
+      customer: {
+        findFirst: vi.fn(async ({ where }: any) =>
+          customers.find((c) => c.organizationId === where.organizationId && c.phone === where.phone) ?? null,
+        ),
+        create: vi.fn(async ({ data }: any) => {
+          createCallCount += 1;
+          const row = { id: `cust-race-${createCallCount}`, ...data };
+          customers.push(row);
+          return row;
+        }),
+      },
+    };
+    const service = new CustomersService(prisma as any);
+
+    const [resultA, resultB]: any[] = await Promise.all([
+      service.create({ organizationId: "org-1", name: "Boutique Fanta (agent 1)", phone: "+224622334455" } as any),
+      service.create({ organizationId: "org-1", name: "Boutique Fanta (agent 2, ressaisie)", phone: "+224622334455" } as any),
+    ]);
+
+    // Les deux créations réussissent (aucun blocage, aucune erreur) — E3 ne
+    // bloque jamais une création, contrairement à une contrainte unique stricte.
+    expect(customers).toHaveLength(2);
+    // Limite honnêtement documentée : sous cette course, NI l'une NI l'autre ne
+    // voit le doublon de l'autre — possibleDuplicateOf reste null des deux
+    // côtés. Un futur fix qui fermerait totalement cette fenêtre (verrou
+    // explicite, contrainte DB) devrait faire échouer CE test précis, signal
+    // qu'il faut alors mettre à jour le commentaire de create() en conséquence.
+    expect(resultA.possibleDuplicateOf).toBeNull();
+    expect(resultB.possibleDuplicateOf).toBeNull();
   });
 });
 
