@@ -10,6 +10,9 @@ function createFakePrisma(overrides: { existingPhone?: unknown; userPhoneWithUse
     },
     user: {
       create: vi.fn().mockResolvedValue({ id: "user-1" }),
+      // Cross-Story Audit 2026-08-24, finding #2 — chemin de réclamation d'un
+      // compte fantôme F13 (register() sur un existingPhone.user.passwordHash null).
+      update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
   };
@@ -44,13 +47,17 @@ function createFakePendingMemberInvite(overrides: { resolveForNewUser?: ReturnTy
 
 describe("AuthService", () => {
   describe("register", () => {
-    it("rejette un msisdn déjà utilisé", async () => {
-      const prisma = createFakePrisma({ existingPhone: { id: "phone-1" } });
+    it("rejette un msisdn déjà utilisé par un VRAI compte (passwordHash déjà posé)", async () => {
+      const prisma = createFakePrisma({
+        existingPhone: { id: "phone-1", userId: "user-existing", user: { id: "user-existing", passwordHash: "$argon2id$deja-pose" } },
+      });
       const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any, createFakePendingMemberInvite() as any);
 
       await expect(
         service.register({ name: "Aissatou Diallo", msisdn: "+224622334455", password: "MotDePasse-Solide-2026" }),
       ).rejects.toThrow(/existe déjà/);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.create).not.toHaveBeenCalled();
     });
 
     it("hash le mot de passe avant de créer l'utilisateur — jamais en clair", async () => {
@@ -98,6 +105,74 @@ describe("AuthService", () => {
       expect(prisma.userPhone.create).toHaveBeenCalledWith({
         data: { userId: "user-1", msisdn: "+224622334455", isPrimary: true },
       });
+    });
+  });
+
+  describe("register — réclamation d'un compte fantôme F13 (Cross-Story Audit 2026-08-24, finding #2 HAUTE)", () => {
+    function createFakePrismaForClaim() {
+      const prisma: any = {
+        userPhone: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "phone-1",
+            userId: "user-ghost",
+            msisdn: "+224622334455",
+            user: { id: "user-ghost", name: "+224622334455", passwordHash: null },
+          }),
+          create: vi.fn(),
+        },
+        user: {
+          create: vi.fn(),
+          update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
+        },
+        $transaction: vi.fn((callback: any) => callback(prisma)),
+      };
+      return prisma;
+    }
+
+    it("pose le mot de passe sur le compte fantôme existant au lieu de rejeter", async () => {
+      const prisma = createFakePrismaForClaim();
+      const passwordService = createFakePasswordService();
+      const service = new AuthService(prisma, passwordService, createFakeTokenService(), createFakeTokenRevocation() as any, createFakePendingMemberInvite() as any);
+
+      const result = await service.register({
+        name: "Aissatou Diallo",
+        msisdn: "+224622334455",
+        password: "MotDePasse-Solide-2026",
+      });
+
+      expect(prisma.userPhone.findUnique).toHaveBeenCalledWith({
+        where: { msisdn: "+224622334455" },
+        include: { user: true },
+      });
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: "user-ghost" },
+        data: { name: "Aissatou Diallo", passwordHash: "$argon2id$hashed" },
+      });
+      // Jamais un nouveau User/UserPhone créé — c'est une réclamation, pas une création.
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(prisma.userPhone.create).not.toHaveBeenCalled();
+      expect(result.userId).toBe("user-ghost");
+    });
+
+    it("résout, dans la même transaction, toute PendingMemberInvite en attente pour ce numéro", async () => {
+      const prisma = createFakePrismaForClaim();
+      const pendingMemberInvite = createFakePendingMemberInvite();
+      const service = new AuthService(
+        prisma,
+        createFakePasswordService(),
+        createFakeTokenService(),
+        createFakeTokenRevocation() as any,
+        pendingMemberInvite as any,
+      );
+
+      await service.register({
+        name: "Aissatou Diallo",
+        msisdn: "+224622334455",
+        password: "MotDePasse-Solide-2026",
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(pendingMemberInvite.resolveForNewUser).toHaveBeenCalledWith(prisma, "user-ghost", "+224622334455");
     });
   });
 

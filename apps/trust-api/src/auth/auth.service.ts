@@ -33,12 +33,47 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto): Promise<{ userId: string }> {
-    const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
-    if (existingPhone) {
+    // Cross-Story Audit 2026-08-24, finding #2 HAUTE — include: {user: true}
+    // ajouté pour distinguer un VRAI compte existant (passwordHash posé, via ce
+    // même register() ou un chemin assisté) d'un compte "fantôme" créé par
+    // ClientPortalAuthService.verifyOtp() (F13, resolveOrCreateUser()) : un
+    // numéro invité via F10 qui passe d'abord par l'OTP portail client se
+    // retrouve avec un User(passwordHash: null) déjà vérifié pour ce msisdn.
+    // Sans cette distinction, register() rejetait INCONDITIONNELLEMENT ce
+    // fantôme avec ConflictException — la personne ne pouvait alors plus jamais
+    // définir de mot de passe sur ce compte, ni résoudre l'invitation F10 qui
+    // lui était pourtant destinée (register() est le seul chemin qui appelle
+    // resolveForNewUser()).
+    const existingPhone = await this.prisma.userPhone.findUnique({
+      where: { msisdn: dto.msisdn },
+      include: { user: true },
+    });
+
+    if (existingPhone?.user.passwordHash) {
       throw new ConflictException(`Un compte existe déjà pour le numéro ${dto.msisdn}`);
     }
 
     const passwordHash = await this.passwordService.hash(dto.password);
+
+    if (existingPhone) {
+      // Réclamation d'un compte fantôme F13 : le User et son UserPhone (déjà
+      // vérifié par l'OTP) existent déjà, on ne fait que poser le mot de passe
+      // et remplacer le nom par défaut (le msisdn, voir
+      // ClientPortalAuthService.resolveOrCreateUser()) par le vrai nom fourni
+      // ici. Même transaction que le chemin "nouveau compte" ci-dessous pour
+      // résoudre PendingMemberInvite : jamais un mot de passe posé sans que
+      // l'invitation qui a motivé cette inscription ne soit résolue.
+      const user = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.user.update({
+          where: { id: existingPhone.userId },
+          data: { name: dto.name, passwordHash },
+        });
+        await this.pendingMemberInvite.resolveForNewUser(tx, updated.id, dto.msisdn);
+        return updated;
+      });
+
+      return { userId: user.id };
+    }
 
     const user = await this.prisma.$transaction(async (tx) => {
       const created = await tx.user.create({ data: { name: dto.name, passwordHash } });
