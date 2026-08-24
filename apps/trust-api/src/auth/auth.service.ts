@@ -7,6 +7,7 @@ import type { PasswordService } from "./password.service";
 import type { AuthTokenService } from "./auth-token.service";
 import { TokenRevocationService } from "./token-revocation.service";
 import { PendingMemberInviteService } from "../pending-member-invites/pending-member-invite.service";
+import { ClientPortalOtpService } from "../client-portal/client-portal-otp.service";
 import type { RegisterDto } from "./dto/register.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RequestRecoveryDto } from "./dto/request-recovery.dto";
@@ -30,6 +31,7 @@ export class AuthService {
     @Inject(AUTH_TOKEN_SERVICE) private readonly tokenService: AuthTokenService,
     private readonly tokenRevocation: TokenRevocationService,
     private readonly pendingMemberInvite: PendingMemberInviteService,
+    private readonly clientPortalOtp: ClientPortalOtpService,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ userId: string }> {
@@ -56,6 +58,27 @@ export class AuthService {
     const passwordHash = await this.passwordService.hash(dto.password);
 
     if (existingPhone) {
+      // Cross-Story Audit 2026-08-24, finding #2 CRITIQUE — sans preuve de
+      // possession du téléphone, N'IMPORTE QUI connaissant un numéro associé à
+      // un compte fantôme (créé par le portail client OTP) pouvait poser un mot
+      // de passe de son choix dessus et déclencher aussitôt
+      // PendingMemberInvite.resolveForNewUser() dans la même transaction —
+      // potentiellement un rôle admin/organisation donné à l'attaquant. Choix
+      // retenu (documenté ici, pas un second mécanisme inventé) : réutiliser
+      // TEL QUEL le flux OTP déjà construit pour F13 (ClientPortalOtp via
+      // ClientPortalOtpService, le même service que ClientPortalAuthService.
+      // verifyOtp()) — le client doit avoir demandé un OTP sur ce numéro
+      // (POST /client-portal/otp/request) puis fournir le code reçu en plus de
+      // son mot de passe choisi, plutôt qu'exposer un endpoint de réclamation
+      // séparé qui aurait dupliqué toute la logique de resolveForNewUser()/
+      // transaction déjà en place ici. otpCode absent ou invalide → rejeté
+      // AVANT toute écriture, avec le même message générique que verifyOtp()
+      // (anti-énumération, cohérent avec le reste de ce fichier).
+      if (!dto.otpCode) {
+        throw new UnauthorizedException("Code invalide ou expiré");
+      }
+      await this.clientPortalOtp.verifyAndConsume(dto.msisdn, dto.otpCode);
+
       // Réclamation d'un compte fantôme F13 : le User et son UserPhone (déjà
       // vérifié par l'OTP) existent déjà, on ne fait que poser le mot de passe
       // et remplacer le nom par défaut (le msisdn, voir
@@ -63,13 +86,26 @@ export class AuthService {
       // ici. Même transaction que le chemin "nouveau compte" ci-dessous pour
       // résoudre PendingMemberInvite : jamais un mot de passe posé sans que
       // l'invitation qui a motivé cette inscription ne soit résolue.
+      //
+      // Cross-Story Audit 2026-08-24, finding #2 (course résiduelle) —
+      // updateMany(where:{id, passwordHash: null}) plutôt qu'update(where:{id})
+      // inconditionnel : même idiome que pending-member-invite.service.ts.
+      // Sous deux réclamations concurrentes du même compte fantôme (chacune
+      // avec un OTP valide — improbable mais possible si l'attaquant et la
+      // victime demandent chacun un OTP recevable au même moment), seule celle
+      // dont l'updateMany voit encore passwordHash:null peut committer ; l'autre
+      // reçoit count===0 et est rejetée proprement plutôt que d'écraser
+      // silencieusement le mot de passe déjà posé par la première.
       const user = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.user.update({
-          where: { id: existingPhone.userId },
+        const claimed = await tx.user.updateMany({
+          where: { id: existingPhone.userId, passwordHash: null },
           data: { name: dto.name, passwordHash },
         });
-        await this.pendingMemberInvite.resolveForNewUser(tx, updated.id, dto.msisdn);
-        return updated;
+        if (claimed.count === 0) {
+          throw new ConflictException(`Ce compte a déjà été réclamé pour le numéro ${dto.msisdn}`);
+        }
+        await this.pendingMemberInvite.resolveForNewUser(tx, existingPhone.userId, dto.msisdn);
+        return { id: existingPhone.userId };
       });
 
       return { userId: user.id };
