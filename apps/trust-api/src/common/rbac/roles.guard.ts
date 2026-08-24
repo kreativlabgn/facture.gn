@@ -29,6 +29,23 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
+    const request = context.switchToHttp().getRequest();
+
+    // Cross-Story Audit 2026-08-24, finding #1 CRITIQUE — un token
+    // scope:"client_portal" (ClientPortalAuthService.verifyOtp(), OTP F13) ne
+    // prouve qu'un contrôle du numéro de téléphone, jamais un mot de passe. Sans
+    // ce rejet, un tel token passait cette garde exactement comme un token
+    // login() de portée complète (même sub, RolesGuard résout le membership réel
+    // de l'utilisateur), donnant à un attaquant ayant intercepté un SMS OTP
+    // l'accès à TOUTE route @Roles() avec le rôle réel de la victime — pas
+    // seulement le portail client. ClientPortalController/ClientPortalAuthController
+    // ne déclarent justement aucun @Roles() (voir leur propre commentaire), donc ce
+    // rejet ne les atteint jamais : elles restent protégées uniquement par
+    // ClientPortalScopeGuard.
+    if (request.user?.scope === "client_portal") {
+      throw new ForbiddenException("Ce token (portail client) n'est pas autorisé sur cette route");
+    }
+
     // Défaut "invoice" : rétrocompatible avec toutes les routes existantes qui ne
     // déclarent pas @OrganizationIdSource() (issue/void/...).
     const idSource =
@@ -37,7 +54,6 @@ export class RolesGuard implements CanActivate {
         context.getClass(),
       ]) ?? "invoice";
 
-    const request = context.switchToHttp().getRequest();
     const organizationId = await this.resolveOrganizationId(request, idSource);
 
     const membership = await this.prisma.organizationMember.findUnique({

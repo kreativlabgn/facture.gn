@@ -229,7 +229,10 @@ describe("ClientPortalAuthService", () => {
         where: { id: "phone-1" },
         data: { verifiedAt: expect.any(Date) },
       });
-      expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-existing" });
+      // Cross-Story Audit 2026-08-24, finding #1 — scope:"client_portal" toujours
+      // présent, même pour un numéro déjà connu (ex. collaborateur ailleurs) :
+      // resolveOrCreateUser() ne change rien à la portée du token émis ensuite.
+      expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-existing", scope: "client_portal" });
     });
 
     it("crée un User + UserPhone vérifié à la volée pour un numéro totalement inconnu (auto-inscription, ADR-096)", async () => {
@@ -244,7 +247,22 @@ describe("ClientPortalAuthService", () => {
       expect(prisma.userPhone.create).toHaveBeenCalledWith({
         data: { userId: "user-new", msisdn: MSISDN, isPrimary: true, verifiedAt: expect.any(Date) },
       });
-      expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-new" });
+      expect(tokenService.sign).toHaveBeenCalledWith({ sub: "user-new", scope: "client_portal" });
+    });
+
+    it("Cross-Story Audit 2026-08-24, finding #1 CRITIQUE — signe toujours le token avec scope:\"client_portal\", jamais un token de portée complète", async () => {
+      const otp = { id: "otp-1", codeHash: "$argon2id$otp-hash", attempts: 0 };
+      const prisma = createFakePrisma({ otp, userPhone: { id: "phone-1", userId: "user-existing", verifiedAt: new Date() } });
+      const tokenService = createFakeTokenService();
+      const service = new ClientPortalAuthService(prisma, createFakePasswordService(true) as any, tokenService as any, createFakeSmsProvider() as any);
+
+      await service.verifyOtp(MSISDN, "1234");
+
+      const [signedPayload] = tokenService.sign.mock.calls[0];
+      expect(signedPayload.scope).toBe("client_portal");
+      // Non-régression : jamais un appel sans scope (qui reviendrait à émettre un
+      // token de portée complète pour une simple vérification OTP).
+      expect(signedPayload).not.toEqual({ sub: signedPayload.sub });
     });
   });
 

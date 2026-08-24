@@ -60,6 +60,19 @@ describe("JwtAuthGuard", () => {
     expect(request.user).toEqual({ id: "user-1", jti: "jti-1", exp: 1893456000 });
   });
 
+  it("Cross-Story Audit 2026-08-24, finding #1 — propage scope depuis le payload JWT vers req.user", async () => {
+    const tokenService = {
+      verify: vi.fn().mockResolvedValue({ sub: "user-1", jti: "jti-1", exp: 1893456000, scope: "client_portal" }),
+      sign: vi.fn(),
+    };
+    const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) } as any;
+    const guard = new JwtAuthGuard(reflector, tokenService as any, createFakeTokenRevocation() as any);
+    const { context, request } = buildContext({ headers: { authorization: "Bearer portal.token" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user.scope).toBe("client_portal");
+  });
+
   it("refuse un token par ailleurs valide mais dont le jti a été révoqué (Security Audit 2026-08-23, finding #14)", async () => {
     const tokenService = {
       verify: vi.fn().mockResolvedValue({ sub: "user-1", jti: "jti-revoked", exp: 1893456000 }),

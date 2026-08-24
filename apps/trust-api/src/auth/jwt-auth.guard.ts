@@ -46,7 +46,12 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Token d'authentification révoqué");
     }
 
-    request.user = { id: payload.sub, jti: payload.jti, exp: payload.exp };
+    // Cross-Story Audit 2026-08-24, finding #1 — scope propagé tel quel (undefined
+    // pour un token login()/register() de portée complète, "client_portal" pour un
+    // token issu de ClientPortalAuthService.verifyOtp()) : c'est la seule donnée
+    // que RolesGuard/ClientPortalScopeGuard consultent pour décider qui accède à
+    // quoi, jamais recalculée ailleurs.
+    request.user = { id: payload.sub, jti: payload.jti, exp: payload.exp, scope: payload.scope };
     return true;
   }
 }

@@ -48,6 +48,26 @@ describe("JwtAuthTokenService", () => {
     await expect(verifier.verify(token)).rejects.toThrow();
   });
 
+  it("Cross-Story Audit 2026-08-24, finding #1 — porte scope à travers sign()/verify() quand fourni", async () => {
+    const { privateKey, publicKey } = generateTestKeyPair();
+    const service = new JwtAuthTokenService(privateKey, publicKey);
+
+    const token = await service.sign({ sub: "user-1", scope: "client_portal" });
+    const payload = await service.verify(token);
+
+    expect(payload.scope).toBe("client_portal");
+  });
+
+  it("Cross-Story Audit 2026-08-24, finding #1 — non-régression : scope absent quand non fourni (login()/register())", async () => {
+    const { privateKey, publicKey } = generateTestKeyPair();
+    const service = new JwtAuthTokenService(privateKey, publicKey);
+
+    const token = await service.sign({ sub: "user-1" });
+    const payload = await service.verify(token);
+
+    expect(payload.scope).toBeUndefined();
+  });
+
   it("rejette un token expiré", async () => {
     const { privateKey, publicKey } = generateTestKeyPair();
     const service = new JwtAuthTokenService(privateKey, publicKey, { expiresIn: "1ms" });

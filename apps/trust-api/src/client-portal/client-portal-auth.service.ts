@@ -99,7 +99,15 @@ export class ClientPortalAuthService {
     }
 
     const userId = await this.resolveOrCreateUser(msisdn);
-    const accessToken = await this.tokenService.sign({ sub: userId });
+    // Cross-Story Audit 2026-08-24, finding #1 CRITIQUE — sans `scope`, ce token
+    // était indiscernable d'un token AuthService.login() (mot de passe vérifié) :
+    // un attaquant interceptant ce SMS OTP obtenait une portée COMPLÈTE sur le
+    // compte de la victime (dont son rôle réel owner/admin sur une organisation),
+    // pas seulement l'accès au portail client. `scope: "client_portal"` est lu
+    // par RolesGuard (rejette 403 sur toute route @Roles()) et par
+    // ClientPortalScopeGuard (seule valeur, avec l'absence de scope, acceptée
+    // sur ClientPortalController/ClientPortalAuthController).
+    const accessToken = await this.tokenService.sign({ sub: userId, scope: "client_portal" });
     return { accessToken };
   }
 

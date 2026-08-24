@@ -7,6 +7,8 @@ export interface CurrentUserPayload {
   // précisément CE token (jamais recalculés/devinés côté service).
   jti?: string;
   exp?: number;
+  // Cross-Story Audit 2026-08-24, finding #1 — voir AuthTokenPayload.scope.
+  scope?: string;
 }
 
 // req.user est attaché par JwtAuthGuard — jamais accessible sur une route @Public().
