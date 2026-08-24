@@ -94,6 +94,12 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
       // ici), même pattern que createFakePrismaForMerge()/createFakePrismaForFlag()
       // plus bas dans ce fichier.
       $transaction: vi.fn((callback: any) => callback(prisma)),
+      // Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) —
+      // pg_advisory_xact_lock posé via $queryRaw avant le findFirst. Resolved
+      // par défaut ici (aucune contention simulée) — voir le test de
+      // concurrence dédié plus bas pour un $queryRaw qui simule réellement le
+      // verrou.
+      $queryRaw: vi.fn().mockResolvedValue([]),
       customer: {
         // findFirst simule fidèlement le filtrage Prisma réel sur organizationId : un
         // existingMatch configuré pour une AUTRE organisation que celle demandée dans le
@@ -196,58 +202,110 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
     const result: any = await service.create({ organizationId: "org-1", name: "Boutique Sory" } as any);
 
     expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+    // Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) — aucun
+    // téléphone, rien à sérialiser : le verrou n'a de sens que pour la clé de
+    // dédoublonnage (organizationId+phone), jamais posé quand elle n'existe pas.
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.customer.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ possibleDuplicateOf: null }),
     });
     expect(result.possibleDuplicateOf).toBeNull();
   });
 
-  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — test de concurrence
-  // réelle (même pattern Promise.all que F10/F13/K3, revue post-fix #5 sur
-  // ClientPortalAuthService.verifyOtp()) : état partagé par closure (un vrai
-  // tableau `customers`, pas un count forcé) pour que findFirst()/create() de
-  // DEUX transactions concurrentes exercent le comportement réel, pas un mock
-  // qui prouverait uniquement ce qu'on veut lui faire dire.
-  //
-  // Ce test documente HONNÊTEMENT la limite assumée dans le commentaire de
-  // create() : la transaction Prisma réduit la fenêtre de course, elle NE
-  // L'ÉLIMINE PAS sous isolation Read Committed. Deux create() strictement
-  // concurrents pour le même téléphone peuvent donc encore produire DEUX
-  // Customer avec possibleDuplicateOf: null de part et d'autre — ADR-038 assume
-  // explicitement ce best-effort ("signal, jamais une garantie stricte"). Ce
-  // test échouerait s'il affirmait le contraire.
-  it("Cross-Story Audit 2026-08-24, finding #3 — sous deux create() réellement concurrents du même téléphone, la transaction réduit la fenêtre de course SANS l'éliminer (best-effort assumé, ADR-038)", async () => {
+  // Simule fidèlement pg_advisory_xact_lock(hashtext(clé)) : une Map<clé,
+  // Promise> sérialise les appelants partageant la MÊME clé (le second attend
+  // que le premier ait fini) et n'affecte jamais deux clés différentes (Map
+  // indépendante par clé). Le verrou est relâché quand le $transaction()
+  // englobant se termine (succès ou échec) — jamais un unlock explicite,
+  // exactement la sémantique `_xact_` réelle de Postgres.
+  function createFakeAdvisoryLockPrisma() {
     const customers: any[] = [];
     let createCallCount = 0;
-    const prisma: any = {
-      $transaction: vi.fn((callback: any) => callback(prisma)),
-      customer: {
-        findFirst: vi.fn(async ({ where }: any) =>
-          customers.find((c) => c.organizationId === where.organizationId && c.phone === where.phone) ?? null,
-        ),
-        create: vi.fn(async ({ data }: any) => {
-          createCallCount += 1;
-          const row = { id: `cust-race-${createCallCount}`, ...data };
-          customers.push(row);
-          return row;
+    const locks = new Map<string, Promise<void>>();
+
+    const $transaction = vi.fn(async (callback: any) => {
+      let releaseLock: (() => void) | undefined;
+      const tx: any = {
+        $queryRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
+          const previous = locks.get(key) ?? Promise.resolve();
+          let release!: () => void;
+          const mine = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          locks.set(key, previous.then(() => mine));
+          await previous;
+          releaseLock = release;
+          return [];
         }),
-      },
-    };
-    const service = new CustomersService(prisma as any);
+        customer: {
+          findFirst: vi.fn(async ({ where }: any) =>
+            customers.find((c) => c.organizationId === where.organizationId && c.phone === where.phone) ?? null,
+          ),
+          create: vi.fn(async ({ data }: any) => {
+            createCallCount += 1;
+            const row = { id: `cust-race-${createCallCount}`, ...data };
+            customers.push(row);
+            return row;
+          }),
+        },
+      };
+
+      try {
+        return await callback(tx);
+      } finally {
+        releaseLock?.();
+      }
+    });
+
+    return { $transaction, customers };
+  }
+
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — remplace
+  // l'ancien test qui prouvait honnêtement l'ABSENCE d'effet de
+  // $transaction() seul sous isolation Read Committed (possibleDuplicateOf
+  // null des deux côtés). Avec pg_advisory_xact_lock, la seconde création
+  // attend que la première commite avant de lancer son propre findFirst — le
+  // signal E3 est maintenant posé de façon fiable sous course réelle.
+  it("Cross-Story Audit 2026-08-24, finding #3 — sous deux create() réellement concurrents du même téléphone, le verrou consultatif sérialise et pose correctement le signal chez le second", async () => {
+    const { $transaction, customers } = createFakeAdvisoryLockPrisma();
+    const prisma: any = { $transaction };
+    const service = new CustomersService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
       service.create({ organizationId: "org-1", name: "Boutique Fanta (agent 1)", phone: "+224622334455" } as any),
       service.create({ organizationId: "org-1", name: "Boutique Fanta (agent 2, ressaisie)", phone: "+224622334455" } as any),
     ]);
 
-    // Les deux créations réussissent (aucun blocage, aucune erreur) — E3 ne
-    // bloque jamais une création, contrairement à une contrainte unique stricte.
+    // Les deux créations réussissent toujours (aucun blocage définitif, aucune
+    // erreur) — E3 ne bloque jamais une création, contrairement à une
+    // contrainte unique stricte : le verrou sérialise, il ne rejette rien.
     expect(customers).toHaveLength(2);
-    // Limite honnêtement documentée : sous cette course, NI l'une NI l'autre ne
-    // voit le doublon de l'autre — possibleDuplicateOf reste null des deux
-    // côtés. Un futur fix qui fermerait totalement cette fenêtre (verrou
-    // explicite, contrainte DB) devrait faire échouer CE test précis, signal
-    // qu'il faut alors mettre à jour le commentaire de create() en conséquence.
+
+    const results = [resultA, resultB];
+    const withSignal = results.filter((r) => r.possibleDuplicateOf !== null);
+    const withoutSignal = results.filter((r) => r.possibleDuplicateOf === null);
+    // Exactement UNE des deux créations pose maintenant le signal — plus les
+    // deux "null" que produisait l'ancien fix ($transaction seul).
+    expect(withSignal).toHaveLength(1);
+    expect(withoutSignal).toHaveLength(1);
+    // Et ce signal pointe bien vers l'AUTRE création (le premier gagnant du verrou).
+    expect(withSignal[0].possibleDuplicateOf).toBe(withoutSignal[0].id);
+  });
+
+  it("Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) — deux create() concurrents pour des téléphones DIFFÉRENTS ne se bloquent jamais l'un l'autre", async () => {
+    const { $transaction, customers } = createFakeAdvisoryLockPrisma();
+    const prisma: any = { $transaction };
+    const service = new CustomersService(prisma);
+
+    const [resultA, resultB]: any[] = await Promise.all([
+      service.create({ organizationId: "org-1", name: "Boutique Fanta", phone: "+224622334455" } as any),
+      service.create({ organizationId: "org-1", name: "Boutique Sory", phone: "+224699887766" } as any),
+    ]);
+
+    expect(customers).toHaveLength(2);
+    // Clés de verrou différentes (téléphones différents) : ni l'une ni l'autre
+    // n'a de raison de voir un doublon — jamais un blocage croisé entre deux
+    // clients réellement différents.
     expect(resultA.possibleDuplicateOf).toBeNull();
     expect(resultB.possibleDuplicateOf).toBeNull();
   });

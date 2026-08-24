@@ -27,16 +27,23 @@ export class ProductsService {
   // comportement de transformation Zod ni faire dépendre les tests de service du DTO.
   // Un seul trim, réutilisé pour la comparaison ET la création (jamais deux normalisations
   // divergentes).
-  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE — findFirst+create
-  // englobés dans une transaction Prisma, même fix et même limite assumée que
-  // CustomersService.create() (voir son commentaire détaillé) : réduit la
-  // fenêtre de course sans l'éliminer totalement sous isolation Read Committed,
-  // cohérent avec ADR-038 ("signal best-effort, jamais une garantie stricte").
-  // Aucune contrainte unique DB ajoutée pour la même raison qu'expliqué là-bas.
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE (verrou consultatif) —
+  // pg_advisory_xact_lock(hashtext(...)) posé AVANT le findFirst, même fix et
+  // même mécanisme que CustomersService.create() (voir son commentaire
+  // détaillé) : clé dérivée de organizationId+nom normalisé (trim + minuscule,
+  // pour que la clé du verrou suive exactement la même normalisation que la
+  // comparaison `mode: "insensitive"` ci-dessous — deux saisies qui ne
+  // diffèrent que par la casse doivent se sérialiser sur LE MÊME verrou).
+  // Remplace la limite précédente (findFirst+create simplement englobés dans
+  // $transaction(), sans effet sous isolation Read Committed). Aucune
+  // contrainte unique DB ajoutée, même raison qu'expliqué chez
+  // CustomersService.create() (ADR-038 : signal, jamais une règle d'unicité).
   async create(dto: CreateProductDto) {
     const name = dto.name.trim();
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`product:${dto.organizationId}:${name.toLowerCase()}`}))`;
+
       const existingMatch = await tx.product.findFirst({
         where: {
           organizationId: dto.organizationId,
