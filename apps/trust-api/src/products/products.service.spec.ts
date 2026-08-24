@@ -244,3 +244,99 @@ describe("ProductsService.setCostPrice (E6, ADR-084)", () => {
     expect(result.costPrice).toBe(15_000n);
   });
 });
+
+// Gap produit comblé ici — aucun GET /products n'existait jusqu'ici (seul
+// POST /products, E10). Même convention de pagination que
+// CustomersService.findAllByOrganization (DEFAULT_LIST_PAGE_SIZE=50,
+// MAX_LIST_PAGE_SIZE=100). orderBy name (pas createdAt : Product n'a pas ce
+// champ, contrairement à Customer) — s'appuie sur le nouvel index composite
+// product_organization_id_name_idx.
+describe("ProductsService.findAllByOrganization", () => {
+  it("liste les produits de l'organisation, triés par nom, paginés avec une limite par défaut", async () => {
+    const prisma: any = {
+      product: { findMany: vi.fn().mockResolvedValue([{ id: "product-1" }, { id: "product-2" }]) },
+    };
+    const service = new ProductsService(prisma as any);
+
+    const result = await service.findAllByOrganization("org-1", {});
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1" },
+      orderBy: { name: "asc" },
+      take: 50,
+      skip: 0,
+    });
+    expect(result).toEqual([{ id: "product-1" }, { id: "product-2" }]);
+  });
+
+  it("plafonne take à 100 quel que soit ce que l'appelant demande", async () => {
+    const prisma: any = { product: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new ProductsService(prisma as any);
+
+    await service.findAllByOrganization("org-1", { take: 500 });
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+  });
+
+  it("respecte take/skip explicitement fournis", async () => {
+    const prisma: any = { product: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new ProductsService(prisma as any);
+
+    await service.findAllByOrganization("org-1", { take: 10, skip: 20 });
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 10, skip: 20 }));
+  });
+});
+
+// Gap produit comblé ici — écran détail produit (UI, backlog gap). Même
+// pattern que CustomersService.findOneWithBalance : duplicateOf {id, name}
+// résolu pour afficher un nom lisible du candidat doublon plutôt que le seul
+// UUID possibleDuplicateOf déjà exposé par la liste. Jamais une fusion :
+// ProductsService.merge() n'existe pas (E3, décision actée — la fusion n'est
+// demandée par le Backlog que pour les clients, E4).
+describe("ProductsService.findOneWithDuplicate", () => {
+  it("inclut duplicateOf {id, name} quand possibleDuplicateOf est renseigné", async () => {
+    const prisma: any = {
+      product: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "product-1",
+          organizationId: "org-1",
+          name: "Riz 25kg (ressaisie)",
+          costPrice: null,
+          possibleDuplicateOf: "product-existant",
+          duplicateOf: { id: "product-existant", name: "Riz 25kg" },
+        }),
+      },
+    };
+    const service = new ProductsService(prisma as any);
+
+    const result: any = await service.findOneWithDuplicate("product-1");
+
+    expect(prisma.product.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: "product-1" },
+      include: { duplicateOf: { select: { id: true, name: true } } },
+    });
+    expect(result.duplicateOf).toEqual({ id: "product-existant", name: "Riz 25kg" });
+  });
+
+  it("laisse duplicateOf null quand possibleDuplicateOf est null (aucun doublon détecté)", async () => {
+    const prisma: any = {
+      product: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "product-1",
+          organizationId: "org-1",
+          name: "Sucre 1kg",
+          costPrice: 5_000n,
+          possibleDuplicateOf: null,
+          duplicateOf: null,
+        }),
+      },
+    };
+    const service = new ProductsService(prisma as any);
+
+    const result: any = await service.findOneWithDuplicate("product-1");
+
+    expect(result.duplicateOf).toBeNull();
+    expect(result.costPrice).toBe(5_000n);
+  });
+});

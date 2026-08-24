@@ -3,6 +3,9 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateProductDto } from "./dto/create-product.dto";
 
+const DEFAULT_LIST_PAGE_SIZE = 50;
+const MAX_LIST_PAGE_SIZE = 100;
+
 @Injectable()
 export class ProductsService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -67,6 +70,36 @@ export class ProductsService {
     return this.prisma.product.update({
       where: { id: productId },
       data: { costPrice },
+    });
+  }
+
+  // Gap produit comblé ici (UI backlog gap) — aucun GET /products n'existait
+  // jusqu'ici (seul POST /products, E10). Même convention de pagination que
+  // CustomersService.findAllByOrganization (DEFAULT_LIST_PAGE_SIZE=50,
+  // MAX_LIST_PAGE_SIZE=100). orderBy name (pas createdAt : Product n'a pas ce
+  // champ, contrairement à Customer) — s'appuie sur le nouvel index composite
+  // product_organization_id_name_idx.
+  async findAllByOrganization(organizationId: string, pagination: { take?: number; skip?: number }) {
+    const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
+    const skip = pagination.skip ?? 0;
+    return this.prisma.product.findMany({
+      where: { organizationId },
+      orderBy: { name: "asc" },
+      take,
+      skip,
+    });
+  }
+
+  // Gap produit comblé ici — écran détail produit (UI backlog gap). Même
+  // pattern que CustomersService.findOneWithBalance : duplicateOf {id, name}
+  // résolu pour afficher un nom lisible du candidat doublon plutôt que le
+  // seul UUID possibleDuplicateOf déjà exposé par la liste. Jamais une
+  // fusion : ProductsService.merge() n'existe pas (E3, décision actée — la
+  // fusion n'est demandée par le Backlog que pour les clients, E4).
+  async findOneWithDuplicate(productId: string) {
+    return this.prisma.product.findUniqueOrThrow({
+      where: { id: productId },
+      include: { duplicateOf: { select: { id: true, name: true } } },
     });
   }
 }

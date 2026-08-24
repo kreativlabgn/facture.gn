@@ -709,6 +709,13 @@ model Product {
   duplicateOf   Product?       @relation("ProductDuplicate", fields: [possibleDuplicateOf], references: [id])
   possibleDupes Product[]      @relation("ProductDuplicate")
 
+  // Gap produit comblé ici (E3/E10, ADR-038) — ProductsService.create() fait un
+  // findFirst({organizationId, name}) non indexé à CHAQUE création (dédoublonnage
+  // par nom). Même raisonnement que customer_phone_idx (20260823130000) : sans cet
+  // index, ce scan dégrade linéairement avec la taille du catalogue de
+  // l'organisation. Composite (pas juste sur name) : jamais de scan cross-organisation,
+  // et GET /products (listAllByOrganization, orderBy name) s'appuie sur le même index.
+  @@index([organizationId, name])
   @@map("product")
 }
 
