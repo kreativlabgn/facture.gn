@@ -131,11 +131,17 @@ export async function listInvoices(
 
 // Champs consommés par le sélecteur client de l'émission de facture et la
 // section "liste des clients" — pas un mirroir exhaustif de Customer.
+// possibleDuplicateOf (E4/E9, ADR-038) : UUID brut déjà renvoyé par
+// GET /customers (aucun select/include ne le filtre côté trust-api), utilisé
+// ici seulement comme signal booléen pour le badge de la liste — le nom
+// lisible du candidat n'est résolu que sur l'écran détail (CustomerDetail
+// ci-dessous, getCustomer()).
 export interface CustomerListItem {
   id: string;
   name: string;
   phone: string | null;
   nif: string | null;
+  possibleDuplicateOf: string | null;
 }
 
 export async function listCustomers(
@@ -171,6 +177,53 @@ export async function createCustomer(token: string, input: CreateCustomerInput):
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new TrustApiError(body?.message ?? "Création du client impossible", response.status);
+  }
+  return response.json();
+}
+
+// Mirroir de GET /customers/:id (findOneWithBalance) — écran détail client
+// (E4/E9, ADR-038). runningBalance/creditLimit en centimes GNF sérialisés en
+// string (même convention que totalTtc, voir main.ts:BigInt.prototype.toJSON).
+// duplicateOf {id, name} résolu côté trust-api seulement quand
+// possibleDuplicateOf est renseigné — jamais fabriqué ici.
+export interface CustomerDetail {
+  id: string;
+  name: string;
+  phone: string | null;
+  nif: string | null;
+  creditLimit: string | null;
+  runningBalance: string;
+  possibleDuplicateOf: string | null;
+  duplicateOf: { id: string; name: string } | null;
+}
+
+export async function getCustomer(token: string, customerId: string): Promise<CustomerDetail> {
+  const response = await authenticatedFetch(`/customers/${encodeURIComponent(customerId)}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger ce client", response.status);
+  }
+  return response.json();
+}
+
+// E4, ADR-038 — POST /customers/:id/merge, réservé owner/admin + palier Pro+
+// côté trust-api (isAdvancedCustomerManagementAllowed). :id est le client
+// CANONIQUE conservé, duplicateCustomerId dans le body est supprimé
+// (irréversible, factures réassignées) — jamais l'inverse. Le message
+// d'erreur de l'API (ex. palier insuffisant) est déjà clair en français,
+// relayé tel quel plutôt que remplacé par un message générique.
+export async function mergeCustomer(
+  token: string,
+  canonicalCustomerId: string,
+  duplicateCustomerId: string,
+): Promise<CustomerDetail> {
+  const response = await authenticatedFetch(`/customers/${encodeURIComponent(canonicalCustomerId)}/merge`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ duplicateCustomerId }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Fusion des clients impossible", response.status);
   }
   return response.json();
 }
