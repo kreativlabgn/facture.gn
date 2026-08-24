@@ -63,8 +63,17 @@ export class CustomersService {
   // C6, ADR-039 — running_balance n'est jamais stocké : agrégé à la demande sur
   // les factures encore dues (issued/partially_paid). paid/voided/draft exclus
   // (respectivement soldée, sans effet, ou pas encore une dette réelle).
+  //
+  // E4/E9, ADR-038 — écran détail client (UI, backlog gap) : duplicateOf
+  // {id, name} résolu ici pour afficher un nom lisible du candidat doublon
+  // plutôt que le seul UUID possibleDuplicateOf déjà exposé par la liste.
+  // Jamais une fusion : uniquement la lecture nécessaire à la résolution
+  // manuelle via merge() (E4) depuis cet écran.
   async findOneWithBalance(customerId: string) {
-    const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+    const customer = await this.prisma.customer.findUniqueOrThrow({
+      where: { id: customerId },
+      include: { duplicateOf: { select: { id: true, name: true } } },
+    });
     const aggregate = await this.prisma.invoice.aggregate({
       where: { customerId, status: { in: [...OUTSTANDING_INVOICE_STATUSES] } },
       _sum: { amountDue: true },

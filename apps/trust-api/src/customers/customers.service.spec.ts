@@ -218,6 +218,50 @@ describe("CustomersService — solde calculé à la volée (C6, ADR-039)", () =>
   });
 });
 
+describe("CustomersService — écran détail, résolution du nom du doublon candidat (E4/E9, ADR-038)", () => {
+  it("inclut duplicateOf {id, name} quand possibleDuplicateOf est renseigné", async () => {
+    const prisma = createFakePrisma({
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "cust-1",
+          organizationId: "org-1",
+          name: "Boutique Fanta (ressaisie après coupure)",
+          possibleDuplicateOf: "cust-existant",
+          duplicateOf: { id: "cust-existant", name: "Boutique Fanta" },
+        }),
+      },
+    });
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.findOneWithBalance("cust-1");
+
+    expect(prisma.customer.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: "cust-1" },
+      include: { duplicateOf: { select: { id: true, name: true } } },
+    });
+    expect(result.duplicateOf).toEqual({ id: "cust-existant", name: "Boutique Fanta" });
+  });
+
+  it("laisse duplicateOf null quand possibleDuplicateOf est null (aucun doublon détecté)", async () => {
+    const prisma = createFakePrisma({
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "cust-1",
+          organizationId: "org-1",
+          name: "Boutique Sory",
+          possibleDuplicateOf: null,
+          duplicateOf: null,
+        }),
+      },
+    });
+    const service = new CustomersService(prisma as any);
+
+    const result: any = await service.findOneWithBalance("cust-1");
+
+    expect(result.duplicateOf).toBeNull();
+  });
+});
+
 describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
   function createFakePrismaForMerge(canonical: any, duplicate: any, organization?: any) {
     const tx = {

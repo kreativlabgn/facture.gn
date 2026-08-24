@@ -36,6 +36,15 @@ export function StatusPill({ status }: { status: string }) {
   );
 }
 
+// E4/E9, ADR-038 — badge "doublon possible" sur la liste clients : signal du
+// possibleDuplicateOf posé à la création (jamais de fusion automatique),
+// résolution manuelle depuis l'écran détail (merge(), E4). Même tons/classes
+// que StatusPill/DisputeStatusPill pour rester visuellement cohérent — amber,
+// jamais red (ce n'est pas une erreur, juste une piste à vérifier).
+export function DuplicateWarningPill() {
+  return <span className={`${PILL_CLASSES} ${TONE_CLASSES.amber}`}>● Doublon possible</span>;
+}
+
 // dispute_status "none" n'affiche jamais de pastille — un litige inexistant
 // n'est pas une information, jamais un faux signal neutre à côté du statut.
 export function DisputeStatusPill({ disputeStatus }: { disputeStatus: string }) {
