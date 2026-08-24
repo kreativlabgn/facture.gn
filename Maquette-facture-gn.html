@@ -215,6 +215,7 @@ button{font-family:inherit;}
 
 .header{margin-bottom:18px;}
 .header .badge-ordre{display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:600; color:var(--good); background:color-mix(in srgb, var(--good) 15%, transparent); padding:3px 9px; border-radius:100px; margin-top:6px;}
+.header .badge-ordre.pending{color:var(--text-dim); background:var(--surface-2);}
 
 .seg{display:flex; background:var(--surface-2); border-radius:12px; padding:3px; margin-bottom:18px;}
 .seg button{flex:1; background:none; border:none; color:var(--text-dim); font-size:12.5px; font-weight:600; padding:9px; border-radius:9px; cursor:pointer;}
@@ -447,6 +448,22 @@ button{font-family:inherit;}
 .fee-breakdown{background:var(--surface-2); border-radius:10px; padding:12px 14px; margin:12px 0; font-size:12.5px;}
 .fee-row{display:flex; justify-content:space-between; padding:3px 0;}
 .fee-row.total{font-weight:700; border-top:1px solid var(--border-strong); margin-top:5px; padding-top:7px;}
+
+.onb-stepper{display:flex; gap:5px; margin-bottom:10px;}
+.onb-step{flex:1; height:3px; border-radius:2px; background:var(--border-strong);}
+.onb-step.done, .onb-step.active{background:var(--accent);}
+.onb-step-label{font-size:10.5px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; margin-bottom:16px;}
+.onb-tour-row{display:flex; align-items:flex-start; gap:12px; padding:11px 0; border-bottom:1px solid var(--border);}
+.onb-tour-row:last-child{border-bottom:none;}
+.onb-tour-ico{width:30px; height:30px; border-radius:8px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; flex:none;}
+.onb-tour-ico svg{width:16px; height:16px; stroke:var(--text);}
+.progress-track{height:6px; border-radius:100px; background:var(--surface-2); overflow:hidden;}
+.progress-fill{height:100%; border-radius:100px; background:var(--accent);}
+.rank-row{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border);}
+.rank-row:last-child{border-bottom:none;}
+.rank-num{width:22px; height:22px; border-radius:50%; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex:none;}
+.rank-row.me{background:color-mix(in srgb, var(--accent) 8%, transparent); margin:0 -16px; padding:9px 16px; border-radius:8px;}
+.rank-row.me .rank-num{background:var(--accent); color:var(--accent-ink);}
 .add-number-form{margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-strong);}
 
 :root{
@@ -701,9 +718,10 @@ button{font-family:inherit;}
 <body>
 
 <nav class="shell-nav">
-  <span class="nav-eyebrow">6 shells + legacy · ADR-095</span>
+  <span class="nav-eyebrow">7 shells + legacy · ADR-095/107</span>
   <button data-shell="shell-0">00 · Inscription</button>
   <button data-shell="shell-1" class="active">01 · App PME</button>
+  <button data-shell="shell-agt">01b · ACT</button>
       <button data-shell="shell2">02 · Cabinet/CGA</button>
       <button data-shell="shell3">03 · Portail DAF</button>
       <button data-shell="shell4">04 · Portail client</button>
@@ -717,30 +735,113 @@ button{font-family:inherit;}
 <div style="width:100%; max-width:400px;">
 
   <div style="text-align:center; margin-bottom:28px;">
-    <svg width="36" height="36" viewBox="0 0 26 26" aria-hidden="true" style="margin-bottom:10px;"><path d="M13 3L20 9.5L13 16L6 9.5Z" fill="none" stroke="#FBB500" stroke-width="1.6"/></svg>
-    <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; color:#0B1D3A;">facture.gn</div>
+    <svg width="36" height="36" viewBox="0 0 100 100" aria-hidden="true" style="margin-bottom:10px;">
+      <text x="44" y="57" text-anchor="middle" font-family="'Space Grotesk',sans-serif" font-weight="700" font-size="26" letter-spacing="-1" fill="#0B1D3A">*620#</text>
+      <circle cx="90" cy="90" r="3.3" fill="#F2B705"/>
+    </svg>
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; color:#0B1D3A;">facture<span style="color:#F2B705;">.</span>gn</div>
     <p style="font-size:12.5px; color:rgba(11,29,58,.66); margin:6px auto 0; max-width:280px; line-height:1.5;">Infrastructure de confiance transactionnelle pour les PME de Guinée</p>
   </div>
 
-  <div style="background:#fff; border:1px solid rgba(11,29,58,.1); border-radius:18px; padding:26px 22px; box-shadow:0 8px 28px rgba(11,29,58,.07);">
-    <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:rgba(11,29,58,.5); margin-bottom:10px;">Langue</div>
-    <div id="shell0-lang" style="display:flex; gap:6px; margin-bottom:22px; flex-wrap:wrap;">
-      <button class="shell0-lang-btn active" data-lang="fr">Français</button>
-      <button class="shell0-lang-btn" data-lang="pular">Pular</button>
-      <button class="shell0-lang-btn" data-lang="malinke">Malinké</button>
-      <button class="shell0-lang-btn" data-lang="soussou">Soussou</button>
+  <!-- ===== Vue Accueil (choix d'entrée) ===== -->
+  <div id="shell0-view-hero">
+    <div style="background:#fff; border:1px solid rgba(11,29,58,.1); border-radius:18px; padding:26px 22px; box-shadow:0 8px 28px rgba(11,29,58,.07);">
+      <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:rgba(11,29,58,.5); margin-bottom:10px;">Langue</div>
+      <div id="shell0-lang" style="display:flex; gap:6px; margin-bottom:22px; flex-wrap:wrap;">
+        <button class="shell0-lang-btn active" data-lang="fr">Français</button>
+        <button class="shell0-lang-btn" data-lang="pular">Pular</button>
+        <button class="shell0-lang-btn" data-lang="malinke">Malinké</button>
+        <button class="shell0-lang-btn" data-lang="soussou">Soussou</button>
+      </div>
+
+      <button onclick="showShell('shell-agt'); agt_startMerchantRegistration('self');" style="width:100%; padding:15px; border:none; border-radius:12px; background:#FBB500; color:#0B1D30; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; cursor:pointer;">Créer mon compte</button>
+      <p style="font-size:11px; color:rgba(11,29,58,.5); text-align:center; margin:10px 0 0; line-height:1.5;">Ouvre le même formulaire de profil PME que remplit un Agent commercial terrain avec vous, sur le terrain. Aucune information requise pour commencer à facturer — NIF et eTax restent optionnels (ADR-035).</p>
+
+      <div style="border-top:1px solid rgba(11,29,58,.08); margin:20px 0 16px;"></div>
+
+      <button onclick="shell0ShowLogin('pme')" style="width:100%; padding:13px; border:1px solid rgba(11,29,58,.15); border-radius:12px; background:none; color:#0B1D3A; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer; margin-bottom:8px;">J'ai déjà un compte</button>
+      <button onclick="shell0ShowLogin('agent')" style="width:100%; padding:13px; border:1px solid rgba(11,29,58,.15); border-radius:12px; background:none; color:#0B1D3A; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer;">Je suis un Agent commercial terrain — inscrire un marchand</button>
     </div>
 
-    <button onclick="showShell('shell-1'); s1_showScreen('s-onb-1');" style="width:100%; padding:15px; border:none; border-radius:12px; background:#FBB500; color:#0B1D30; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; cursor:pointer;">Créer mon compte</button>
-    <p style="font-size:11px; color:rgba(11,29,58,.5); text-align:center; margin:10px 0 0; line-height:1.5;">Aucune information requise pour commencer à facturer — NIF et eTax restent optionnels (ADR-035). Première facture émise en moins de 5 minutes.</p>
+    <button onclick="shell0ShowCabinetCreate()" style="width:100%; padding:12px; border:none; background:none; color:rgba(11,29,58,.55); font-family:'Inter',sans-serif; font-weight:600; font-size:12px; cursor:pointer; text-decoration:underline; margin-top:14px;">Vous êtes un cabinet comptable ou un CGA ? Créer votre espace professionnel</button>
 
-    <div style="border-top:1px solid rgba(11,29,58,.08); margin:20px 0 16px;"></div>
-
-    <button onclick="showShell('shell-1'); s1_showScreen('s-accueil');" style="width:100%; padding:13px; border:1px solid rgba(11,29,58,.15); border-radius:12px; background:none; color:#0B1D3A; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer; margin-bottom:8px;">J'ai déjà un compte</button>
-    <button onclick="showShell('shell-1'); s1_startMerchantRegistration();" style="width:100%; padding:13px; border:1px solid rgba(11,29,58,.15); border-radius:12px; background:none; color:#0B1D3A; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer;">Je suis un Agent commercial terrain — inscrire un marchand</button>
+    <p style="text-align:center; font-size:10.5px; color:rgba(11,29,58,.4); margin-top:6px;">"Créer mon compte" = nouvelle PME (chemin A/B communs, ADR-045/107). "J'ai déjà un compte" = identité PME existante (OrganizationMember). "Agent commercial terrain" = identité facture.gn interne, jamais confondue avec un rôle PME (ADR-107) — zone + activité assignées. "Cabinet/CGA" = professional_practice, tiers mandaté, jamais une identité PME (ADR-068/078).</p>
   </div>
 
-  <p style="text-align:center; font-size:10.5px; color:rgba(11,29,58,.4); margin-top:20px;">Chemin A ci-dessus (self-service) · Chemin B ci-contre (Agent commercial terrain facture.gn, pas le rôle field_agent) — Parcours 0, ADR-045/107</p>
+  <!-- ===== Vue Création — Cabinet comptable / CGA (F4, ADR-078) ===== -->
+  <div id="shell0-view-cabinet-create" hidden>
+    <div style="background:#fff; border:1px solid rgba(11,29,58,.1); border-radius:18px; padding:26px 22px; box-shadow:0 8px 28px rgba(11,29,58,.07);">
+      <div class="back-row" style="margin-bottom:14px; cursor:pointer;" onclick="shell0ShowHero()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:#0B1D3A; margin-bottom:4px;">Créer votre espace professionnel</div>
+      <p style="font-size:11.5px; color:rgba(11,29,58,.6); margin:0 0 18px; line-height:1.5;">Cabinet comptable, gestionnaire, fiduciaire ou Centre de Gestion Agréé — vous devenez administrateur (practice_admin) de votre entité (POST /practices, ADR-078).</p>
+
+      <label style="font-size:11px; font-weight:600; color:rgba(11,29,58,.6); display:block; margin-bottom:6px;">Type d'entité</label>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;">
+        <button type="button" class="cab-create-type active" data-type="cabinet_comptable" onclick="shell0SelectPracticeType(this)">Cabinet comptable</button>
+        <button type="button" class="cab-create-type" data-type="gestionnaire" onclick="shell0SelectPracticeType(this)">Gestionnaire</button>
+        <button type="button" class="cab-create-type" data-type="fiduciaire" onclick="shell0SelectPracticeType(this)">Fiduciaire</button>
+        <button type="button" class="cab-create-type" data-type="cga" onclick="shell0SelectPracticeType(this)">CGA</button>
+      </div>
+
+      <label style="font-size:11px; font-weight:600; color:rgba(11,29,58,.6); display:block; margin-bottom:6px;">Raison sociale</label>
+      <input id="cab-create-name" type="text" placeholder="Ex. Cabinet Konaté &amp; Associés" style="width:100%; box-sizing:border-box; padding:12px 13px; border:1px solid rgba(11,29,58,.18); border-radius:10px; font-size:13.5px; margin-bottom:6px;">
+      <p id="cab-create-name-error" hidden style="font-size:11px; color:#C0392B; font-weight:600; margin:0 0 10px;">La raison sociale est requise.</p>
+
+      <label style="font-size:11px; font-weight:600; color:rgba(11,29,58,.6); display:block; margin-bottom:6px;" id="cab-create-reg-label">Numéro Ordre OCAECG</label>
+      <input id="cab-create-reg" type="text" placeholder="Optionnel — vérifié a posteriori" style="width:100%; box-sizing:border-box; padding:12px 13px; border:1px solid rgba(11,29,58,.18); border-radius:10px; font-size:13.5px; margin-bottom:14px;">
+
+      <button onclick="shell0CreatePractice()" style="width:100%; padding:15px; border:none; border-radius:12px; background:#FBB500; color:#0B1D30; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; cursor:pointer;">Créer mon espace</button>
+      <p style="font-size:11px; color:rgba(11,29,58,.5); text-align:center; margin:10px 0 0; line-height:1.5;">Aucun mandat, aucun collaborateur au départ — palier Partner Free (0 GNF/mois, ≤ 5 organisations). Le numéro d'ordre est vérifié après coup, jamais bloquant à l'inscription.</p>
+    </div>
+  </div>
+
+  <!-- ===== Vue Connexion — PME existante (identifiant + OTP) ===== -->
+  <div id="shell0-view-login-pme" hidden>
+    <div style="background:#fff; border:1px solid rgba(11,29,58,.1); border-radius:18px; padding:26px 22px; box-shadow:0 8px 28px rgba(11,29,58,.07);">
+      <div class="back-row" style="margin-bottom:14px; cursor:pointer;" onclick="shell0ShowHero()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:#0B1D3A; margin-bottom:4px;">Connexion</div>
+      <p style="font-size:11.5px; color:rgba(11,29,58,.6); margin:0 0 18px; line-height:1.5;">Identité PME existante (owner, admin, comptable…). Authentification par code à usage unique — aucun mot de passe.</p>
+
+      <div id="login-pme-step-id">
+        <label style="font-size:11px; font-weight:600; color:rgba(11,29,58,.6); display:block; margin-bottom:6px;">Téléphone ou email</label>
+        <input id="login-pme-id" type="text" placeholder="+224 6… ou vous@exemple.com" style="width:100%; box-sizing:border-box; padding:12px 13px; border:1px solid rgba(11,29,58,.18); border-radius:10px; font-size:13.5px; margin-bottom:6px;">
+        <p id="login-pme-id-error" hidden style="font-size:11px; color:#C0392B; font-weight:600; margin:0 0 10px;">Renseignez un numéro ou un email.</p>
+        <button onclick="shell0SendOtp('pme')" style="width:100%; padding:13px; border:none; border-radius:12px; background:#FBB500; color:#0B1D30; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; cursor:pointer; margin-top:8px;">Recevoir le code</button>
+      </div>
+
+      <div id="login-pme-step-otp" hidden>
+        <p style="font-size:12px; color:rgba(11,29,58,.66); margin:0 0 12px; line-height:1.5;">Code à 4 chiffres envoyé à <b id="login-pme-id-echo" style="color:#0B1D3A;"></b>.</p>
+        <input id="login-pme-otp" type="text" inputmode="numeric" maxlength="4" placeholder="••••" style="width:100%; box-sizing:border-box; padding:12px 13px; border:1px solid rgba(11,29,58,.18); border-radius:10px; font-family:'JetBrains Mono',monospace; font-size:20px; letter-spacing:.3em; text-align:center; margin-bottom:6px;">
+        <p id="login-pme-otp-error" hidden style="font-size:11px; color:#C0392B; font-weight:600; margin:0 0 10px;">Code incorrect — réessayez (démo : 0000).</p>
+        <button onclick="shell0VerifyOtp('pme')" style="width:100%; padding:13px; border:none; border-radius:12px; background:#FBB500; color:#0B1D30; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; cursor:pointer; margin-top:8px;">Vérifier et se connecter</button>
+        <button onclick="shell0SendOtp('pme')" style="width:100%; padding:11px; border:none; background:none; color:rgba(11,29,58,.5); font-family:'Inter',sans-serif; font-weight:600; font-size:12px; cursor:pointer; margin-top:4px;">Renvoyer le code</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Vue Connexion — Agent commercial terrain (identité facture.gn interne) ===== -->
+  <div id="shell0-view-login-agent" hidden>
+    <div style="background:#fff; border:1px solid rgba(11,29,58,.1); border-radius:18px; padding:26px 22px; box-shadow:0 8px 28px rgba(11,29,58,.07);">
+      <div class="back-row" style="margin-bottom:14px; cursor:pointer;" onclick="shell0ShowHero()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:#0B1D3A; margin-bottom:4px;">Espace Agent commercial terrain (ACT)</div>
+      <p style="font-size:11.5px; color:rgba(11,29,58,.6); margin:0 0 18px; line-height:1.5;">Identité facture.gn interne — jamais le rôle <code>field_agent</code> d'une PME (ADR-107). Connectez-vous à votre profil pour inscrire un marchand dans votre zone.</p>
+
+      <div id="login-agent-step-id">
+        <label style="font-size:11px; font-weight:600; color:rgba(11,29,58,.6); display:block; margin-bottom:6px;">Numéro professionnel facture.gn</label>
+        <input id="login-agent-id" type="text" placeholder="+224 6… (numéro enregistré RH)" style="width:100%; box-sizing:border-box; padding:12px 13px; border:1px solid rgba(11,29,58,.18); border-radius:10px; font-size:13.5px; margin-bottom:6px;">
+        <p id="login-agent-id-error" hidden style="font-size:11px; color:#C0392B; font-weight:600; margin:0 0 10px;">Renseignez votre numéro professionnel.</p>
+        <button onclick="shell0SendOtp('agent')" style="width:100%; padding:13px; border:none; border-radius:12px; background:#0B1D3A; color:#fff; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; cursor:pointer; margin-top:8px;">Recevoir le code</button>
+      </div>
+
+      <div id="login-agent-step-otp" hidden>
+        <p style="font-size:12px; color:rgba(11,29,58,.66); margin:0 0 12px; line-height:1.5;">Code à 4 chiffres envoyé à <b id="login-agent-id-echo" style="color:#0B1D3A;"></b>.</p>
+        <input id="login-agent-otp" type="text" inputmode="numeric" maxlength="4" placeholder="••••" style="width:100%; box-sizing:border-box; padding:12px 13px; border:1px solid rgba(11,29,58,.18); border-radius:10px; font-family:'JetBrains Mono',monospace; font-size:20px; letter-spacing:.3em; text-align:center; margin-bottom:6px;">
+        <p id="login-agent-otp-error" hidden style="font-size:11px; color:#C0392B; font-weight:600; margin:0 0 10px;">Code incorrect — réessayez (démo : 0000).</p>
+        <button onclick="shell0VerifyOtp('agent')" style="width:100%; padding:13px; border:none; border-radius:12px; background:#0B1D3A; color:#fff; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; cursor:pointer; margin-top:8px;">Vérifier et se connecter</button>
+        <button onclick="shell0SendOtp('agent')" style="width:100%; padding:11px; border:none; background:none; color:rgba(11,29,58,.5); font-family:'Inter',sans-serif; font-weight:600; font-size:12px; cursor:pointer; margin-top:4px;">Renvoyer le code</button>
+      </div>
+    </div>
+  </div>
 
 </div>
 </div>
@@ -748,6 +849,8 @@ button{font-family:inherit;}
 <style>
 .shell0-lang-btn{padding:7px 13px; border-radius:100px; border:1px solid rgba(11,29,58,.15); background:none; color:rgba(11,29,58,.66); font-family:'Inter',sans-serif; font-size:12px; font-weight:600; cursor:pointer;}
 .shell0-lang-btn.active{background:#0B1D3A; border-color:#0B1D3A; color:#fff;}
+.cab-create-type{padding:7px 13px; border-radius:100px; border:1px solid rgba(11,29,58,.15); background:none; color:rgba(11,29,58,.66); font-family:'Inter',sans-serif; font-size:12px; font-weight:600; cursor:pointer;}
+.cab-create-type.active{background:#0B1D3A; border-color:#0B1D3A; color:#fff;}
 </style>
 
 <div id="shell-1" class="shell-pane">
@@ -793,7 +896,7 @@ button{font-family:inherit;}
   <div class="branch-strip" id="branch-strip">
     <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M9 13h1M14 9h1M14 13h1"/></svg>
     <div class="txt">Succursale active : <b id="branch-strip-name">Boutique principale</b></div>
-    <button class="action" onclick="s1_switchBranch()">Changer</button>
+    <button class="action" onclick="s1_showScreen('s-succursales')">Changer</button>
   </div>
 
   <!-- ================= ACCUEIL ================= -->
@@ -836,46 +939,6 @@ button{font-family:inherit;}
     </div>
 
   </section>
-
-  <!-- ================= INSCRIPTION ASSISTÉE — Chemin B, Agent commercial terrain (ADR-107) ================= -->
-  <section class="screen" id="s-register">
-    <h1 style="font-size:19px; margin-bottom:4px;">Inscrire un nouveau marchand</h1>
-    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Écran de l'Agent commercial terrain (recruté par facture.gn — jamais le rôle field_agent d'une PME, ADR-107). Pour un marchand qui n'a jamais utilisé facture.gn — un feature phone suffit ensuite, aucun smartphone requis.</p>
-    <div class="card" style="padding:18px;">
-      <div class="field" style="margin-bottom:10px;"><label>Nom du marchand</label><input type="text" id="reg-name" placeholder="Ex. Mariama Bah — étal marché Madina"></div>
-      <div class="field" style="margin-bottom:10px;"><label>Téléphone</label><input type="text" id="reg-phone" placeholder="+224 6…"></div>
-      <div class="field" style="margin-bottom:0;">
-        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="reg-consent" style="margin-top:3px;">
-          <span style="font-size:12px; color:var(--text-dim); line-height:1.5; font-weight:400;">Le marchand consent à cette inscription en son nom — enregistré (<code>consent_recorded</code>).</span>
-        </label>
-      </div>
-    </div>
-    <p id="reg-error" hidden style="font-size:11.5px; color:var(--bad); font-weight:600; margin:10px 0 0;">Nom, téléphone et consentement sont requis.</p>
-    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="s1_submitMerchantRegistration()">Inscrire le marchand</button>
-  </section>
-
-  <!-- ================= CODE COMPTE — carte à remettre ================= -->
-  <section class="screen" id="s-register-done">
-    <div style="text-align:center; padding:24px 4px 8px;">
-      <div style="width:56px; height:56px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <h2 style="font-size:17px; margin-bottom:6px;">Marchand inscrit</h2>
-      <p style="font-size:12.5px; color:var(--text-dim); margin:0 0 20px;" id="reg-done-name"></p>
-    </div>
-    <div class="card" style="padding:20px; margin-bottom:8px; background:var(--text); color:#fff; text-align:center;">
-      <div style="font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.6); margin-bottom:8px;">Code compte — carte à remettre</div>
-      <div class="mono" style="font-size:24px; font-weight:700; letter-spacing:.1em;" id="reg-done-code"></div>
-      <div style="font-size:11px; color:rgba(255,255,255,.6); margin-top:8px;">Nécessaire pour toute connexion depuis un téléphone non reconnu (ADR-046)</div>
-    </div>
-    <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0 0 20px; text-align:center;">Le marchand est immédiatement opérationnel, y compris pour émettre depuis *620# sans jamais avoir touché un smartphone. Aucune membership permanente n'est créée pour vous, l'agent — accès délégué par facture.gn, pas par le marchand (ADR-107).</p>
-    <div style="display:flex; gap:8px;">
-      <button class="go ghost" style="flex:1;" onclick="s1_showScreen('s-accueil')">Terminer</button>
-      <button class="go" style="flex:1;" onclick="s1_showScreen('s-emission')">Émettre sa 1ère facture</button>
-    </div>
-  </section>
-
   <!-- ================= SESSION ASSISTÉE (field_agent / delivery_driver) ================= -->
   <section class="screen" id="s-assisted">
     <div style="text-align:center; padding:8px 4px 20px;">
@@ -896,7 +959,8 @@ button{font-family:inherit;}
 
   <!-- ================= FACTURES ================= -->
   <section class="screen" id="s-factures">
-    <h1 style="font-size:20px; margin-bottom:16px;">Factures</h1>
+    <h1 style="font-size:20px; margin-bottom:2px;">Factures</h1>
+    <p id="factures-count" style="font-size:11.5px; color:var(--text-dim); margin:0 0 14px;"></p>
     <input class="search-field" type="text" placeholder="Rechercher un client, un numéro…">
     <div class="filter-row">
       <button class="filter-chip active">Toutes · 38</button>
@@ -1181,6 +1245,55 @@ button{font-family:inherit;}
     </div>
   </section>
 
+  <!-- ================= ACHATS & FACTURES REÇUES (owner/admin/accountant_internal) ================= -->
+  <section class="screen" id="s-achats">
+    <h1 style="font-size:20px; margin-bottom:4px;">Achats &amp; Factures reçues</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Vos dépenses fournisseurs, pour compléter votre FEC — une facture émise par un fournisseur qui est lui-même sur facture.gn apparaît ici automatiquement, déjà certifiée. Les autres se saisissent manuellement.</p>
+
+    <div class="stats-strip" style="margin-top:0; margin-bottom:18px;">
+      <div class="stat-mini"><div class="lbl">Achats ce mois</div><div class="val mono" id="pur-stat-total"></div></div>
+      <div class="stat-mini"><div class="lbl">Soldés</div><div class="val mono" style="color:var(--good);" id="pur-stat-settled"></div></div>
+    </div>
+
+    <button class="btn-primary" style="width:100%; margin-top:0; margin-bottom:16px;" onclick="s1_showNewPurchase()">+ Enregistrer un achat</button>
+
+    <div class="filter-row" id="pur-filter-row">
+      <button class="filter-chip active" data-status="all">Tous</button>
+      <button class="filter-chip" data-status="due">Non réglés</button>
+      <button class="filter-chip" data-status="partial">Partiels</button>
+      <button class="filter-chip" data-status="settled">Soldés</button>
+    </div>
+    <div class="card" id="pur-list"></div>
+  </section>
+
+  <!-- ================= NOUVEL ACHAT ================= -->
+  <section class="screen" id="s-achat-nouveau">
+    <div class="back-row" onclick="s1_showScreen('s-achats')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Achats</div>
+    <h1 style="font-size:19px; margin-bottom:16px;">Nouvel achat</h1>
+    <div class="card" style="padding:18px;">
+      <div class="field" style="margin-bottom:10px;"><label>Fournisseur</label><input type="text" id="pur-supplier" placeholder="Ex. Grossiste Textile Madina"></div>
+      <div class="field" style="margin-bottom:10px;"><label>NIF fournisseur (optionnel)</label><input type="text" class="mono" id="pur-supplier-nif" placeholder="9 chiffres"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Montant (GNF)</label><input type="text" id="pur-amount" placeholder="Ex. 150 000"></div>
+      <div class="field" style="margin-bottom:0;"><label>Statut de règlement</label><select id="pur-status"><option value="due">Non réglé</option><option value="partial">Partiellement réglé</option><option value="settled">Soldé</option></select></div>
+    </div>
+    <p id="pur-error" hidden style="font-size:11.5px; color:var(--bad); font-weight:600; margin:10px 0 0;">Fournisseur et montant sont requis.</p>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="s1_savePurchase()">Enregistrer</button>
+    <p style="font-size:10.5px; color:var(--text-dim); margin-top:10px; line-height:1.5; text-align:center;">Saisie manuelle, hors certification facture.gn (pas de signature Ed25519) — un simple enregistrement comptable pour votre FEC.</p>
+  </section>
+
+  <!-- ================= DÉTAIL ACHAT ================= -->
+  <div class="sheet-backdrop" id="pur-detail-sheet">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2 style="font-size:16px; margin-bottom:2px;" id="pur-ds-supplier"></h2>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:16px;" id="pur-ds-sub"></div>
+      <div class="detail-row"><span class="k">Montant</span><span class="mono" id="pur-ds-amount"></span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Statut</span><span class="pill" id="pur-ds-status"></span></div>
+      <button class="btn-primary" style="width:100%; margin-top:16px;" id="pur-ds-settle-btn" onclick="s1_settlePurchase()">Marquer soldé</button>
+      <button class="btn-ghost" style="width:100%; margin-top:8px;" onclick="document.getElementById('pur-detail-sheet').classList.remove('open')">Fermer</button>
+    </div>
+  </div>
+
   <!-- ================= ÉQUIPE & RÔLES (owner/admin) ================= -->
   <section class="screen" id="s-equipe">
     <h1 style="font-size:20px; margin-bottom:4px;">Équipe &amp; Rôles</h1>
@@ -1335,7 +1448,7 @@ button{font-family:inherit;}
   <section class="screen" id="s-succursales">
     <div class="back-row" onclick="s1_showScreen('s-parametres')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Paramètres</div>
     <h1 style="font-size:20px; margin-bottom:4px;">Succursales</h1>
-    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Touchez une succursale pour en faire votre succursale active.</p>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Touchez une succursale pour en faire votre succursale active — Factures et Stock se filtrent automatiquement sur la succursale active (switch &lt;1s, ADR-069).</p>
     <div class="card" id="branches-list"></div>
   </section>
 
@@ -1392,6 +1505,7 @@ button{font-family:inherit;}
     <div class="drawer-handle"></div>
     <div class="drawer-item linked" data-roles="owner,admin,inventory_manager" data-screen="s-stock"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/></svg></span><span class="label">Produits &amp; Stock<span class="sub">inventory_manager · ADR-097</span></span></div>
     <div class="drawer-item linked" data-roles="owner,admin,accountant_internal,cashier" data-screen="s-paiements"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg></span><span class="label">Paiements &amp; Encaissements</span></div>
+    <div class="drawer-item linked" data-roles="owner,admin,accountant_internal" data-screen="s-achats"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h2l2.4 12.4a2 2 0 002 1.6h8.6a2 2 0 002-1.6L21 8H6"/><circle cx="9" cy="20" r="1"/><circle cx="17" cy="20" r="1"/></svg></span><span class="label">Achats &amp; Factures reçues<span class="sub">complète votre FEC</span></span></div>
     <div class="drawer-item linked" data-roles="owner,admin,accountant_internal,business_manager" data-screen="s-analytics"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M11 19V5M18 19v-7"/></svg></span><span class="label">Analytics<span class="sub">marge produit · ADR-084</span></span></div>
     <div class="drawer-item" data-roles="owner,admin"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></span><span class="label">Commande Publique<span class="sub">si organisation éligible B2G</span></span><span class="pill neutral">hors périmètre</span></div>
     <div class="drawer-item linked" data-roles="owner,admin,approver" data-screen="s-approbations"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="label">Approbations<span class="sub">approver · ADR-083</span></span><span class="badge">2</span></div>
@@ -1403,6 +1517,368 @@ button{font-family:inherit;}
     <div class="drawer-empty" id="drawer-empty" hidden>Aucun accès secondaire pour ce rôle.</div>
   </div>
 </div>
+</div>
+
+<!-- ================= AGENT COMMERCIAL TERRAIN — identité facture.gn interne, jamais un rôle PME (ADR-107) ================= -->
+<div id="shell-agt" class="shell-pane" hidden>
+<div class="proto-bar">
+  <span class="proto-label">Aperçu prototype</span>
+  <button data-zone="conakry" class="active">Zone : Conakry-Matam</button>
+  <button data-zone="kindia">Zone : Kindia</button>
+  <button data-zone="kankan">Zone : Kankan</button>
+  <span style="width:1px; background:var(--border-strong); align-self:stretch;"></span>
+  <button data-activite="commerce" class="active">Activité : Commerce général</button>
+  <button data-activite="restauration">Activité : Restauration</button>
+  <button data-activite="marche">Activité : Marché/Grossiste</button>
+</div>
+
+<div class="page">
+<div class="frame">
+
+  <div class="header" id="agt-dashboard-header">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between;">
+      <p class="eyebrow" style="margin:0;">Commercial Terrain · facture.gn</p>
+      <button onclick="agt_openDrawer()" style="background:none; border:none; cursor:pointer; color:var(--text-dim); padding:2px;" aria-label="Plus d'options"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:12px; margin-top:6px;">
+      <div style="width:48px; height:48px; border-radius:50%; background:var(--text); color:#fff; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; flex:none;">SC</div>
+      <div>
+        <h1 style="font-size:19px; margin-bottom:2px;" id="agt-name">Sékou Camara</h1>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span class="mono" style="font-size:10.5px; color:var(--text-dim);">Matricule ACT-2026-0143</span>
+          <span class="pill neutral">ACT</span>
+          <span class="pill paid">Actif</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= NAVIGATION PAR ONGLETS (tabbar) — 4 écrans utiles, accès direct sans scroll ================= -->
+
+  <!-- TAB 1/4 — Profil : identité, rattachement, score ================= -->
+  <section class="screen active" id="agt-profile">
+    <div class="section-head" style="margin-top:0;"><h2>Mon profil</h2></div>
+    <div class="card" style="padding:6px 16px; margin-bottom:16px;">
+      <div class="detail-row"><span class="k">Zone assignée</span><span id="agt-profile-zone">Conakry-Matam</span></div>
+      <div class="detail-row"><span class="k">Activité assignée</span><span id="agt-profile-activite">Commerce général</span></div>
+      <div class="detail-row"><span class="k">Superviseur</span><span>Fatoumata Diallo — Chef de zone</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Département</span><span>Direction Commerciale Terrain</span></div>
+    </div>
+
+    <div class="trust-card">
+      <div class="trust-gauge">
+        <svg width="96" height="96" viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="42" fill="none" stroke="var(--surface-2)" stroke-width="8"/>
+          <circle id="agt-gauge-arc" cx="48" cy="48" r="42" fill="none" stroke="var(--good)" stroke-width="8" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="263.9"/>
+        </svg>
+        <div class="val"><span class="n">88</span><span class="pct">/100</span></div>
+      </div>
+      <div class="trust-body">
+        <div class="label">Performance terrain</div>
+        <h3>Niveau Confirmé</h3>
+        <div class="trend">▲ +4 pts ce mois</div>
+        <p>Basé sur le taux de rétention des marchands inscrits, le délai moyen d'inscription et le taux de première facture émise.</p>
+      </div>
+    </div>
+
+    <div class="card" style="padding:14px 16px; margin-top:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;"><span class="panel-title">Prochain palier</span><span style="font-size:11px; color:var(--text-dim);">Niveau Senior</span></div>
+      <div class="progress-track"><div class="progress-fill" style="width:63%;"></div></div>
+      <p style="font-size:10.5px; color:var(--text-dim); margin:8px 0 0; line-height:1.5;">63 % complété — encore 5 marchands opérationnels ce trimestre pour passer Senior (accès à des zones supplémentaires et bonus majoré).</p>
+    </div>
+  </section>
+
+  <!-- TAB 2/4 — Activité : portefeuille de marchands ================= -->
+  <section class="screen" id="agt-portfolio">
+    <div class="section-head" style="margin-top:0;"><h2>Mon activité</h2></div>
+    <div class="stats-strip">
+      <div class="stat-mini"><div class="lbl">Marchands inscrits</div><div class="val" id="agt-stat-total">3</div></div>
+      <div class="stat-mini"><div class="lbl">Ce mois-ci</div><div class="val" style="color:var(--good);" id="agt-stat-month">3</div></div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-top:16px;" onclick="agt_startMerchantRegistration('agent')">+ Inscrire un marchand</button>
+    <div class="section-head"><h2>Mes marchands inscrits</h2></div>
+    <input class="search-field" type="text" id="agt-portfolio-search" oninput="agt_filterPortfolio()" placeholder="Rechercher un marchand…">
+    <div class="filter-row" style="margin:10px 0 12px;">
+      <button class="filter-chip agt-portfolio-filter active" data-filter="all">Tous</button>
+      <button class="filter-chip agt-portfolio-filter" data-filter="Opérationnel">Opérationnels</button>
+      <button class="filter-chip agt-portfolio-filter" data-filter="Frais en attente">Frais en attente</button>
+    </div>
+    <div class="card" id="agt-merchants-list"></div>
+  </section>
+
+  <!-- SHEET — détail d'un marchand du portefeuille ================= -->
+  <div class="sheet-backdrop" id="agt-merchant-sheet">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2 style="font-size:16px; margin-bottom:2px;" id="agt-ms-name"></h2>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:16px;" id="agt-ms-sub"></div>
+      <div class="detail-row"><span class="k">Statut</span><span class="pill paid" id="agt-ms-status"></span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Inscrit par vous</span><span>ACT-2026-0143</span></div>
+      <button class="btn-primary" style="width:100%; margin-top:16px;" id="agt-ms-fee-btn" onclick="agt_proposeFeeFromPortfolio()">Proposer les frais de service (10 000 GNF)</button>
+      <button class="btn-ghost" style="width:100%; margin-top:8px;" onclick="agt_closeMerchantSheet()">Fermer</button>
+    </div>
+  </div>
+
+  <!-- TAB 3/4 — Objectifs & gains ================= -->
+  <section class="screen" id="agt-goals">
+    <div class="section-head" style="margin-top:0;"><h2>Objectifs &amp; gains</h2></div>
+    <div class="card" style="padding:14px 16px; margin-bottom:16px;">
+      <div class="panel-head" style="margin-bottom:10px;">
+        <span class="panel-title">Période</span>
+        <div style="display:flex; gap:6px;">
+          <button class="filter-chip active" data-period="mois" style="padding:5px 11px; font-size:11px;">Ce mois</button>
+          <button class="filter-chip" data-period="trimestre" style="padding:5px 11px; font-size:11px;">Ce trimestre</button>
+        </div>
+      </div>
+      <div class="stats-strip" style="margin-top:0;">
+        <div class="stat-mini"><div class="lbl">Objectif inscriptions</div><div class="val" id="agt-goal-progress">3 / 8</div></div>
+        <div class="stat-mini"><div class="lbl">Gains estimés</div><div class="val" style="color:var(--good);" id="agt-earnings">45 000 GNF</div></div>
+      </div>
+      <p style="font-size:10.5px; color:var(--text-dim); margin:10px 0 0; line-height:1.5;">Commission de 15 000 GNF par marchand inscrit et opérationnel, + bonus de 50 000 GNF si l'objectif est atteint. Grille illustrative — à confirmer avec la Direction Commerciale Terrain.</p>
+    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Historique récent</h2></div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="detail-row"><span class="k">Juillet 2026</span><span class="mono">6 marchands · 90 000 GNF</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Juin 2026</span><span class="mono">9 marchands · 185 000 GNF</span></div>
+    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Classement · Conakry-Matam</h2></div>
+    <div class="card" style="padding:4px 16px;">
+      <div class="rank-row"><span class="rank-num">1</span><div style="flex:1;"><div style="font-weight:600; font-size:12.5px;">Mariama Touré</div><div style="font-size:10.5px; color:var(--text-dim);">11 marchands ce mois</div></div></div>
+      <div class="rank-row me"><span class="rank-num">2</span><div style="flex:1;"><div style="font-weight:600; font-size:12.5px;">Sékou Camara (vous)</div><div style="font-size:10.5px; color:var(--text-dim);">3 marchands ce mois</div></div></div>
+      <div class="rank-row"><span class="rank-num">3</span><div style="flex:1;"><div style="font-weight:600; font-size:12.5px;">Ibrahima Diané</div><div style="font-size:10.5px; color:var(--text-dim);">2 marchands ce mois</div></div></div>
+    </div>
+  </section>
+
+  <!-- TAB 4/4 — Support ================= -->
+  <section class="screen" id="agt-support">
+    <div class="section-head" style="margin-top:0;"><h2>Nouveau ticket</h2></div>
+    <div class="card" style="padding:16px; margin-bottom:18px;">
+      <div class="field" style="margin-bottom:10px;"><label>Sujet</label><input type="text" id="agt-tk-subject" placeholder="Décrivez votre problème en une phrase"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select id="agt-tk-severity"><option>Faible</option><option>Moyenne</option><option>Élevée</option><option>Critique</option></select></div>
+      <div class="field" style="margin-bottom:0;"><label>Détails</label><input type="text" id="agt-tk-details" placeholder="Plus de contexte…"></div>
+      <button class="btn-primary" onclick="agt_submitTicket()">Envoyer</button>
+      <p id="agt-tk-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:10px 0 0;"></p>
+    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Contact direct</h2></div>
+    <div class="card" style="padding:6px 16px; margin-bottom:18px;">
+      <div class="client-row"><div class="row-main"><span class="name">Fatoumata Diallo</span><span class="sub">Superviseur direct · Chef de zone Conakry-Matam</span></div></div>
+      <a class="client-row" style="text-decoration:none; color:inherit;" href="https://wa.me/224600000000" target="_blank" rel="noopener"><div class="row-main"><span class="name">WhatsApp Direction Commerciale Terrain</span><span class="sub">Réponse sous 2h en heures ouvrées</span></div><span class="sub" style="flex:none;">↗</span></a>
+      <a class="client-row" style="text-decoration:none; color:inherit;" href="tel:+224600000000"><div class="row-main"><span class="name">Téléphone</span><span class="sub">+224 6XX XX XX XX</span></div><span class="sub" style="flex:none;">↗</span></a>
+    </div>
+
+    <div class="section-head" style="margin-top:0;"><h2>Ressources commerciales</h2></div>
+    <div class="card" style="padding:14px 16px; margin-bottom:18px;">
+      <div class="panel-title" style="margin-bottom:8px;">Argumentaire rapide</div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0;">
+        • Facture certifiée en moins de 2 minutes, même sans smartphone (*620#).<br>
+        • Le marchand reçoit 100 % du montant facturé — aucun frais caché.<br>
+        • L'historique certifié devient un actif finançable (accès crédit, ADR-088).<br>
+        • Formule Freemium gratuite le 1ᵉʳ trimestre — aucun engagement.
+      </p>
+    </div>
+    <div class="card" style="padding:14px 16px; margin-bottom:18px;">
+      <div class="panel-title" style="margin-bottom:8px;">Objections fréquentes</div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0 0 10px;"><b style="color:var(--text);">« Je n'ai pas de smartphone »</b><br>Émission possible depuis *620#, sans jamais toucher un smartphone.</p>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0 0 10px;"><b style="color:var(--text);">« C'est pour les grandes entreprises »</b><br>facture.gn est pensé pour les PME et le commerce informel — NIF optionnel.</p>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0;"><b style="color:var(--text);">« Ça va me coûter cher »</b><br>Freemium gratuit pour démarrer ; commission et frais gateway toujours portés par le payeur, jamais par le marchand.</p>
+    </div>
+  </section>
+
+  <!-- ================= DOCUMENTS — carte ACT & contrat (drawer) ================= -->
+  <section class="screen" id="agt-documents">
+    <div class="back-row" onclick="agt_showScreen('agt-profile')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Profil</div>
+    <h1 style="font-size:20px; margin-bottom:16px;">Documents</h1>
+    <div class="card" style="padding:20px; margin-bottom:16px; background:var(--text); color:#fff;">
+      <div style="font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.6); margin-bottom:10px;">Carte Agent — ACT</div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; margin-bottom:2px;" id="agt-doc-name">Sékou Camara</div>
+      <div class="mono" style="font-size:12px; color:rgba(255,255,255,.75); margin-bottom:14px;">ACT-2026-0143</div>
+      <div style="display:flex; justify-content:space-between; font-size:11px; color:rgba(255,255,255,.6);"><span>Zone Conakry-Matam</span><span>Valide jusqu'au 31/12/2026</span></div>
+    </div>
+    <div class="card">
+      <div class="detail-row"><span class="k">Statut contrat</span><span class="pill paid">Actif</span></div>
+      <div class="detail-row"><span class="k">Type</span><span>Prestation Agent commercial terrain</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Renouvellement</span><span>31 décembre 2026</span></div>
+    </div>
+  </section>
+
+  <!-- ================= PARAMÈTRES DU COMPTE (drawer) ================= -->
+  <section class="screen" id="agt-settings">
+    <div class="back-row" onclick="agt_showScreen('agt-profile')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Profil</div>
+    <h1 style="font-size:20px; margin-bottom:16px;">Paramètres</h1>
+    <div class="card" style="padding:6px 16px; margin-bottom:16px;">
+      <div class="client-row"><div class="row-main"><span class="name">Notifications SMS</span><span class="sub">Nouveaux objectifs, alertes frais de service</span></div><button class="switch on"><span class="dot"></span></button></div>
+      <div class="client-row"><div class="row-main"><span class="name">Langue de l'interface</span><span class="sub">Français</span></div></div>
+    </div>
+    <button class="btn-ghost" style="width:100%; padding:12px; text-align:center; color:var(--bad); border-color:var(--bad);" onclick="showShell('shell-0'); shell0ShowHero();">Se déconnecter</button>
+  </section>
+
+  <!-- ================= ONBOARDING — Étape 1, profil (chemin Agent en avant + chemin self-service, ADR-045/107) ================= -->
+  <!-- Parcours complet en 5 étapes : Profil → Formule → Encaissement → Première facture → Prise en main. -->
+  <section class="screen" id="agt-register">
+    <div class="onb-stepper"><div class="onb-step active"></div><div class="onb-step"></div><div class="onb-step"></div><div class="onb-step"></div><div class="onb-step"></div></div>
+    <div class="onb-step-label">Étape 1 sur 5 — Profil</div>
+    <h1 style="font-size:19px; margin-bottom:4px;" id="agt-reg-title">Inscrire un nouveau marchand</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;" id="agt-reg-intro">Écran de l'Agent commercial terrain (recruté par facture.gn — jamais le rôle field_agent d'une PME, ADR-107). En 5 étapes, le marchand repart avec un compte opérationnel, sa première facture certifiée en main et les bases de facture.gn en tête — un feature phone suffit ensuite, aucun smartphone requis.</p>
+    <div class="card" style="padding:18px;">
+      <div class="field" style="margin-bottom:10px;"><label id="agt-reg-shopname-label">Nom de la boutique / du commerce</label><input type="text" id="agt-reg-shopname" placeholder="Ex. Boutique Mariama"></div>
+      <div class="field" style="margin-bottom:10px;"><label id="agt-reg-name-label">Nom du marchand (propriétaire)</label><input type="text" id="agt-reg-name" placeholder="Ex. Mariama Bah"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Téléphone</label><input type="text" id="agt-reg-phone" placeholder="+224 6…"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Activité</label><select id="agt-reg-activite"><option>Commerce général</option><option>Restauration</option><option>Textile</option><option>Grossiste</option><option>Services</option></select></div>
+      <div class="field" style="margin-bottom:10px;">
+        <label>Entreprise formalisée ?</label>
+        <div style="display:flex; gap:8px; margin-top:2px;">
+          <button type="button" class="filter-chip agt-formal active" data-formal="non">Non formalisée</button>
+          <button type="button" class="filter-chip agt-formal" data-formal="oui">Formalisée (NIF)</button>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:10px;" id="agt-reg-nif-row" hidden><label>NIF (Numéro d'Identification Fiscale)</label><input type="text" class="mono" id="agt-reg-nif" placeholder="9 chiffres"></div>
+      <div class="field" style="margin-bottom:10px;"><label>Adresse</label><input type="text" id="agt-reg-address" placeholder="Ex. Marché Madina, étal 14, Conakry"></div>
+      <div class="field" style="margin-bottom:0;" id="agt-reg-consent-row">
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="agt-reg-consent" style="margin-top:3px;">
+          <span style="font-size:12px; color:var(--text-dim); line-height:1.5; font-weight:400;">Le marchand consent à cette inscription en son nom — enregistré (<code>consent_recorded</code>).</span>
+        </label>
+      </div>
+    </div>
+    <p id="agt-reg-error" hidden style="font-size:11.5px; color:var(--bad); font-weight:600; margin:10px 0 0;">Nom de la boutique, nom du propriétaire, téléphone et consentement sont requis.</p>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="agt_continueMerchantRegistration()">Continuer</button>
+  </section>
+
+  <!-- ================= ONBOARDING — Étape 2, offres & avantages ================= -->
+  <section class="screen" id="agt-register-offer">
+    <div class="back-row" onclick="agt_showScreen('agt-register')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+    <div class="onb-stepper"><div class="onb-step done"></div><div class="onb-step active"></div><div class="onb-step"></div><div class="onb-step"></div><div class="onb-step"></div></div>
+    <div class="onb-step-label">Étape 2 sur 5 — Formule</div>
+    <h1 style="font-size:19px; margin-bottom:4px;">Choisir une formule</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Grille à 6 paliers (ADR-106) — modifiable à tout moment depuis Paramètres → Abonnement. Émission et encaissement illimités sur toutes les formules (§1.1) : la différenciation se fait uniquement par les fonctionnalités.</p>
+    <div class="pay-method agt-plan selected" data-plan="freemium"><div class="pay-icon">🆓</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Freemium — 0 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">1 succursale, 1 collaborateur — fenêtre d'accueil à tarif Starter le 1er trimestre (ADR-092)</div></div></div>
+    <div class="pay-method agt-plan" data-plan="starter"><div class="pay-icon">⭐</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Starter — 100 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">2 succursales, 4 collaborateurs, récurrence automatique, rappels SMS/WhatsApp</div></div></div>
+    <div class="pay-method agt-plan" data-plan="starterplus"><div class="pay-icon">🔶</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Starter Plus — 250 000 GNF/mois <span class="pill neutral" style="margin-left:4px;">Nouveau</span></div><div style="font-size:10.5px; color:var(--text-dim);">5 succursales, 7 collaborateurs — même sophistication que Starter, plus d'échelle (ADR-106)</div></div></div>
+    <div class="pay-method agt-plan" data-plan="pro"><div class="pay-icon">💠</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Pro — 500 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">Succursales et collaborateurs illimités, analytics avancés, approbations, API</div></div></div>
+    <div class="card" style="padding:14px 16px; margin-top:14px; border-color:var(--good);">
+      <div style="font-weight:600; font-size:12.5px; color:var(--good); margin-bottom:4px;">Avantage CGA</div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0;">Toutes les formules donnent accès à l'adhésion CGA (Centre de Gestion Agréé) — abattement fiscal de -50 % la 1ʳᵉ année, -25 % les deux suivantes. facture.gn structure l'adhésion mais ne se substitue jamais à la DGI (ADR-079).</p>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="agt_continueRegistrationOffer()">Continuer</button>
+  </section>
+
+  <!-- ================= ONBOARDING — Étape 3, moyen d'encaissement ================= -->
+  <section class="screen" id="agt-register-payment">
+    <div class="back-row" onclick="agt_showScreen('agt-register-offer')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+    <div class="onb-stepper"><div class="onb-step done"></div><div class="onb-step done"></div><div class="onb-step active"></div><div class="onb-step"></div><div class="onb-step"></div></div>
+    <div class="onb-step-label">Étape 3 sur 5 — Encaissement</div>
+    <h1 style="font-size:19px; margin-bottom:4px;">Moyen d'encaissement</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Comment ce marchand recevra ses paiements via Djomy. Modifiable ensuite depuis Paiements &amp; Encaissements.</p>
+    <div class="pay-method agt-pm selected" data-pm="orange"><div class="pay-icon">🟠</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Orange Money (Djomy)</div><div style="font-size:10.5px; color:var(--text-dim);">Confirmation par OTP</div></div></div>
+    <div class="pay-method agt-pm" data-pm="mtn"><div class="pay-icon">🟡</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">MTN MoMo (Djomy)</div></div></div>
+    <p style="font-size:10.5px; color:var(--text-dim); margin-top:10px; text-align:center;">Le marchand reçoit toujours 100 % du montant facturé — commission et frais gateway portés par le payeur.</p>
+    <button class="btn-primary" style="width:100%; margin-top:14px;" onclick="agt_continueRegistrationPayment()">Continuer</button>
+  </section>
+
+  <!-- ================= ONBOARDING — Étape 4, émission de la première facture (prise en main concrète) ================= -->
+  <section class="screen" id="agt-register-invoice">
+    <div class="back-row" onclick="agt_showScreen('agt-register-payment')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Retour</div>
+    <div class="onb-stepper"><div class="onb-step done"></div><div class="onb-step done"></div><div class="onb-step done"></div><div class="onb-step active"></div><div class="onb-step"></div></div>
+    <div class="onb-step-label">Étape 4 sur 5 — Première facture</div>
+    <h1 style="font-size:19px; margin-bottom:4px;" id="agt-reg-inv-title">Émettre la première facture</h1>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;" id="agt-reg-inv-intro">Rien de plus concret pour prendre en main facture.gn qu'une vraie facture, signée et certifiée devant le marchand.</p>
+    <div class="card" style="padding:18px; margin-bottom:14px;">
+      <div class="field"><label>Client</label><select><option>Client comptoir</option><option>+ Nouveau client</option><option>Facture anonyme (plafond 500 000 GNF)</option></select></div>
+      <div class="field"><label>Type de document</label><select><option>Facture</option><option>Proforma (arrhes uniquement)</option><option>Devis</option></select></div>
+      <div class="line-item head"><span>Description</span><span>Qté</span><span>P.U.</span><span>Total</span></div>
+      <div class="line-item"><span>Première vente</span><span>1</span><span class="mono">45 000</span><span class="mono">45 000</span></div>
+      <button class="btn-ghost" style="margin-top:10px;">+ Ajouter une ligne</button>
+    </div>
+    <div class="card" style="padding:18px;">
+      <div class="total-line grand"><span>Total TTC</span><span class="mono">45 000 GNF</span></div>
+      <button class="btn-primary" onclick="agt_emitFirstInvoice()">Émettre et certifier</button>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:10px; line-height:1.5;">Signée (Ed25519), chaînée au registre. Hors ligne : mise en file, synchronisée à la reconnexion.</p>
+    </div>
+    <button class="btn-ghost" style="width:100%; margin-top:10px; text-align:center;" onclick="agt_skipFirstInvoice()">Passer cette étape</button>
+  </section>
+
+  <!-- ================= ONBOARDING — Étape 5, prise en main & code compte ================= -->
+  <section class="screen" id="agt-register-welcome">
+    <div class="onb-stepper"><div class="onb-step done"></div><div class="onb-step done"></div><div class="onb-step done"></div><div class="onb-step done"></div><div class="onb-step active"></div></div>
+    <div class="onb-step-label">Étape 5 sur 5 — Prise en main</div>
+    <div style="text-align:center; padding:8px 4px 8px;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--good); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h2 style="font-size:17px; margin-bottom:6px;" id="agt-reg-done-title">Marchand opérationnel</h2>
+      <p style="font-size:12.5px; color:var(--text-dim); margin:0 0 4px;" id="agt-reg-done-name"></p>
+      <p style="font-size:11.5px; color:var(--text-dim); margin:0 0 4px;" id="agt-reg-done-plan"></p>
+      <p style="font-size:11.5px; color:var(--good); font-weight:600; margin:0 0 20px;" id="agt-reg-done-invoice"></p>
+    </div>
+    <div class="card" style="padding:20px; margin-bottom:16px; background:var(--text); color:#fff; text-align:center;">
+      <div id="agt-reg-done-code-label" style="font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.6); margin-bottom:8px;">Code compte — carte à remettre</div>
+      <div class="mono" style="font-size:24px; font-weight:700; letter-spacing:.1em;" id="agt-reg-done-code"></div>
+      <div style="font-size:11px; color:rgba(255,255,255,.6); margin-top:8px;">Nécessaire pour toute connexion depuis un téléphone non reconnu (ADR-046)</div>
+    </div>
+    <div class="card" style="padding:6px 16px; margin-bottom:16px;">
+      <div class="panel-title" style="padding-top:10px;">Prise en main rapide</div>
+      <div class="onb-tour-row"><div class="onb-tour-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11L12 4l8 7v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg></div><div><div style="font-weight:600; font-size:12.5px;">Accueil</div><div style="font-size:11px; color:var(--text-dim);">Score de confiance et synthèse de l'activité, en un coup d'œil.</div></div></div>
+      <div class="onb-tour-row"><div class="onb-tour-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div><div><div style="font-weight:600; font-size:12.5px;">+ Émettre</div><div style="font-size:11px; color:var(--text-dim);">Une nouvelle facture certifiée en quelques secondes, comme à l'instant.</div></div></div>
+      <div class="onb-tour-row"><div class="onb-tour-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h8l4 4v14a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M9 12h6M9 16h6"/></svg></div><div><div style="font-weight:600; font-size:12.5px;">Factures</div><div style="font-size:11px; color:var(--text-dim);">Historique et suivi des paiements, contestations comprises.</div></div></div>
+      <div class="onb-tour-row"><div class="onb-tour-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15.5 14a5 5 0 015.5 5"/></svg></div><div><div style="font-weight:600; font-size:12.5px;">Clients</div><div style="font-size:11px; color:var(--text-dim);">Gérez vos habitués et retrouvez leur historique d'achat.</div></div></div>
+      <div class="onb-tour-row"><div class="onb-tour-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2 1.7-2.3 3.2M12 17h.01"/></svg></div><div><div style="font-weight:600; font-size:12.5px;">Support</div><div style="font-size:11px; color:var(--text-dim);">Un ticket ou WhatsApp — réponse sous 2h en heures ouvrées.</div></div></div>
+    </div>
+
+    <!-- Frais de service (Agent uniquement, si une facture a bien été émise pour la justifier) -->
+    <div class="card" id="agt-fee-card" hidden style="padding:16px; margin-bottom:16px;">
+      <div class="panel-title" style="margin-bottom:6px;">Frais de service</div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0 0 12px;">Accompagnement à l'inscription et prise en main facture.gn — 10 000 GNF, justifiés par la première facture déjà émise, payables par le marchand via <b id="agt-fee-pm-label">Orange Money</b>.</p>
+      <div id="agt-fee-step-propose">
+        <button class="btn-primary" style="width:100%; margin-top:0;" onclick="agt_sendServiceFeeLink()">Envoyer le lien de paiement (10 000 GNF)</button>
+      </div>
+      <div id="agt-fee-step-pending" hidden>
+        <div style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--surface-2); border-radius:10px; font-size:12px; color:var(--text-dim);">
+          <div style="width:14px; height:14px; border-radius:50%; border:2px solid var(--border-strong); border-top-color:var(--accent); flex:none; animation:spin 0.8s linear infinite;"></div>
+          Lien envoyé — en attente de paiement Mobile Money…
+        </div>
+        <button class="btn-ghost" style="width:100%; margin-top:10px;" onclick="agt_markServiceFeePaid()">Marquer comme payé (démo)</button>
+      </div>
+      <div id="agt-fee-step-paid" hidden style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--good); font-weight:600;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Frais de service payés — 10 000 GNF
+      </div>
+    </div>
+
+    <!-- Parrainage — Agent : débloqué après paiement des frais de service · Self-service : direct, sans frais -->
+    <div class="card" id="agt-referral-card" hidden style="padding:16px; margin-bottom:16px;">
+      <div class="panel-title" style="margin-bottom:6px;">Invitez vos contacts</div>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0 0 12px;" id="agt-referral-intro">Le marchand reçoit son lien de parrainage par SMS et peut l'utiliser pour inviter d'autres commerçants à rejoindre facture.gn.</p>
+      <div class="field" style="margin-bottom:10px;"><label>Nombre de contacts à inviter</label><input type="number" id="agt-referral-count" value="5" min="1" max="50"></div>
+      <div id="agt-referral-step-send">
+        <button class="btn-primary" style="width:100%; margin-top:0;" onclick="agt_sendInvitations()">Envoyer le lien par SMS</button>
+      </div>
+      <p id="agt-referral-step-sent" hidden style="font-size:12px; color:var(--good); font-weight:600; margin:0;"></p>
+    </div>
+
+    <p id="agt-reg-done-footer" style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0 0 16px; text-align:center;">Le marchand est immédiatement opérationnel, y compris pour émettre depuis *620# sans jamais avoir touché un smartphone. Aucune membership permanente n'est créée pour vous, l'agent — accès délégué par facture.gn, pas par le marchand (ADR-107).</p>
+    <button class="btn-primary" style="width:100%;" id="agt-reg-done-cta" onclick="agt_finishOnboarding()">Retour au tableau de bord</button>
+  </section>
+
+</div>
+</div>
+
+<nav class="tabbar visible" id="agt-tabbar">
+  <button class="tabbar-item active" data-screen="agt-profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>Profil</button>
+  <button class="tabbar-item" data-screen="agt-portfolio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h8l4 4v14a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M9 12h6M9 16h6"/></svg>Activité</button>
+  <button class="tabbar-cta" title="Inscrire un marchand" onclick="agt_startMerchantRegistration('agent')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="tabbar-item" data-screen="agt-goals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M11 19V5M18 19v-7"/></svg>Objectifs</button>
+  <button class="tabbar-item" data-screen="agt-support"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2 1.7-2.3 3.2M12 17h.01"/></svg>Support</button>
+</nav>
+
+<div class="drawer-backdrop" id="agt-drawer">
+  <div class="drawer-panel">
+    <div class="drawer-handle"></div>
+    <div class="drawer-item linked" data-screen="agt-documents"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h8l4 4v14a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M9 12h6M9 16h6"/></svg></span><span class="label">Documents<span class="sub">Carte ACT, contrat</span></span></div>
+    <div class="drawer-item linked" data-screen="agt-settings"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.2-1.6l2-1.5-2-3.5-2.4.7a7 7 0 00-2.8-1.6L13 2h-4l-.6 2.5a7 7 0 00-2.8 1.6l-2.4-.7-2 3.5 2 1.5A7 7 0 005 12c0 .5 0 1.1.2 1.6l-2 1.5 2 3.5 2.4-.7c.8.7 1.8 1.3 2.8 1.6L11 22h4l.6-2.5c1-.3 2-.9 2.8-1.6l2.4.7 2-3.5-2-1.5c.2-.5.2-1.1.2-1.6z"/></svg></span><span class="label">Paramètres du compte</span></div>
+  </div>
+</div>
+
 </div>
 
 <div id="shell2" class="shell-pane" hidden>
@@ -1425,10 +1901,17 @@ button{font-family:inherit;}
   </div>
 
   <div class="seg">
+    <button data-screen="cab-s-clients">Mes clients</button>
     <button class="active" data-screen="cab-s-portefeuille">Portefeuille</button>
     <button data-screen="cab-s-nouveau-mandat">+ Mandat</button>
     <button id="cab-tab-cabinet" data-screen="cab-s-cabinet">Cabinet</button>
   </div>
+
+  <!-- ================= MES CLIENTS — annuaire des organisations mandatées ================= -->
+  <section class="screen" id="cab-s-clients">
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 14px; line-height:1.5;">Vue d'ensemble de votre portefeuille — touchez un client pour ouvrir son Portefeuille (factures + export FEC).</p>
+    <div class="card" id="cab-clients-list"></div>
+  </section>
 
   <!-- ================= PORTEFEUILLE (accountant_external + practice_admin) ================= -->
   <section class="screen active" id="cab-s-portefeuille">
@@ -1444,13 +1927,24 @@ button{font-family:inherit;}
         <span class="panel-title" id="cab-org-active-title">Boutique Aissatou — factures</span>
         <button class="btn-ghost" id="cab-fec-btn" onclick="cab_exportFec()">Exporter le FEC</button>
       </div>
+      <div style="display:flex; gap:6px; padding:0 16px 12px;">
+        <button class="filter-chip active" data-book="sales" onclick="cab_switchBook('sales')" style="padding:5px 11px; font-size:11px;">Ventes</button>
+        <button class="filter-chip" data-book="purchases" onclick="cab_switchBook('purchases')" style="padding:5px 11px; font-size:11px;">Achats</button>
+      </div>
       <p id="cab-fec-confirm" hidden style="font-size:11px; color:var(--good); font-weight:600; margin:0; padding:8px 16px 0;"></p>
+      <p style="font-size:10.5px; color:var(--text-dim); margin:0; padding:0 16px 10px; line-height:1.5;">Le FEC exporté couvre toujours les deux registres, toutes factures confondues quel que soit leur statut de règlement — une créance non encore payée reste une écriture comptable (Article 23 OHADA/SYSCOHADA).</p>
       <div id="cab-org-invoices"></div>
     </div>
 
     <div class="card" id="cab-org-pending-card" hidden style="padding:20px 16px; text-align:center;">
       <div style="font-weight:600; font-size:13.5px; margin-bottom:6px;">Mandat en attente</div>
       <p style="font-size:12px; color:var(--text-dim); line-height:1.6; margin:0;" id="cab-org-pending-text"></p>
+    </div>
+
+    <div class="card" id="cab-org-empty-card" hidden style="padding:24px 16px; text-align:center;">
+      <div style="font-weight:600; font-size:13.5px; margin-bottom:6px;">Aucun client mandaté</div>
+      <p style="font-size:12px; color:var(--text-dim); line-height:1.6; margin:0 0 16px;">Demandez votre premier mandat pour consulter les factures d'une organisation cliente et exporter son FEC.</p>
+      <button class="btn-primary" style="width:100%; margin-top:0;" onclick="cab_showScreen('cab-s-nouveau-mandat')">+ Demander un mandat</button>
     </div>
   </section>
 
@@ -1491,13 +1985,33 @@ button{font-family:inherit;}
         <div style="font-weight:600; font-size:13.5px;">Demande envoyée à Hôtel Riviera</div>
       </div>
       <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0;">
-        POST /practices/{id}/mandates — en attente d'acceptation par le propriétaire de l'organisation, via la PWA ou *620# (option 5.3 + PIN). Aucun accès tant que le mandat n'est pas accepté.
+        POST /practices/{id}/mandates — invitation transmise par email, WhatsApp et SMS directement à l'organisation cliente, en plus de la notification dans la PWA. Acceptation par le propriétaire de l'organisation via la PWA ou *620# (option 5.3 + PIN). Aucun accès tant que le mandat n'est pas accepté.
       </p>
     </div>
   </section>
 
   <!-- ================= CABINET (practice_admin uniquement) ================= -->
   <section class="screen" id="cab-s-cabinet">
+    <div class="card" style="margin-bottom:16px;">
+      <div class="panel-head" style="padding:14px 16px 0;">
+        <span class="panel-title">Informations du cabinet</span>
+        <button class="btn-ghost" onclick="cab_toggleEditInstance()" id="cab-instance-edit-btn">Modifier</button>
+      </div>
+      <div id="cab-instance-view">
+        <div class="detail-row"><span class="k">Raison sociale</span><span id="cab-instance-name-view">Cabinet Comptable Barry &amp; Associés</span></div>
+        <div class="detail-row"><span class="k" id="cab-instance-ordre-label-view">Numéro Ordre OCAECG</span><span class="mono" id="cab-instance-ordre-view">OCAECG-2019-0347</span></div>
+        <div class="detail-row"><span class="k">Adresse</span><span id="cab-instance-address-view">Almamya, Conakry</span></div>
+        <div class="detail-row" style="border-bottom:none;"><span class="k">Contact</span><span id="cab-instance-contact-view">+224 6XX XX XX XX</span></div>
+      </div>
+      <div id="cab-instance-edit" hidden style="padding:0 16px 16px;">
+        <div class="field" style="margin-bottom:10px;"><label>Raison sociale</label><input type="text" id="cab-instance-name" value="Cabinet Comptable Barry &amp; Associés"></div>
+        <div class="field" style="margin-bottom:10px;"><label id="cab-instance-ordre-label">Numéro Ordre OCAECG</label><input type="text" class="mono" id="cab-instance-ordre" value="OCAECG-2019-0347"></div>
+        <div class="field" style="margin-bottom:10px;"><label>Adresse</label><input type="text" id="cab-instance-address" value="Almamya, Conakry"></div>
+        <div class="field" style="margin-bottom:0;"><label>Contact</label><input type="text" id="cab-instance-contact" value="+224 6XX XX XX XX"></div>
+        <button class="btn-primary" style="width:100%;" onclick="cab_saveInstance()">Enregistrer</button>
+      </div>
+    </div>
+
     <div class="card" id="cab-cga-panel" hidden style="padding:16px; margin-bottom:16px; border-color:var(--good);">
       <div style="font-weight:600; font-size:13px; color:var(--good); margin-bottom:6px;">Avantage CGA</div>
       <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0;">
@@ -1506,14 +2020,16 @@ button{font-family:inherit;}
     </div>
 
     <div class="stats-strip">
-      <div class="stat-mini"><div class="lbl">Revenue share · juillet</div><div class="val mono" style="color:var(--good);">32 000</div></div>
-      <div class="stat-mini"><div class="lbl">Formule Partner</div><div class="val">Pro</div></div>
+      <div class="stat-mini"><div class="lbl">Revenue share · juillet</div><div class="val mono" style="color:var(--good);" id="cab-revenue-total">32 000</div></div>
+      <div class="stat-mini"><div class="lbl">Formule Partner</div><div class="val" id="cab-partner-tier-short">Pro</div></div>
     </div>
 
     <div class="card" style="margin:14px 0 16px; padding:15px 16px;">
       <div class="panel-title" style="margin-bottom:10px;">Détail du revenue share</div>
-      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);"><span>Boutique Aissatou</span><span class="mono">18 000 GNF</span></div>
-      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0;"><span>Restaurant Le Damier</span><span class="mono">14 000 GNF</span></div>
+      <div id="cab-revenue-detail">
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);"><span>Boutique Aissatou</span><span class="mono">18 000 GNF</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0;"><span>Restaurant Le Damier</span><span class="mono">14 000 GNF</span></div>
+      </div>
       <div style="font-size:10.5px; color:var(--text-dim); margin-top:10px; line-height:1.5;">10 % de la commission Money de chaque organisation mandatée, plafonné à 5 000 GNF/mois/client.</div>
     </div>
 
@@ -1535,8 +2051,8 @@ button{font-family:inherit;}
 
     <div class="card" style="padding:15px 16px;">
       <div class="panel-title" style="margin-bottom:10px;">Facturation cabinet</div>
-      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);"><span style="color:var(--text-dim);">Formule</span><span>Pro · 1 500 000 GNF/mois</span></div>
-      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0;"><span style="color:var(--text-dim);">Clients mandatés</span><span>2 actifs · 1 en attente</span></div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);"><span style="color:var(--text-dim);">Formule</span><span id="cab-billing-formule">Pro · 1 500 000 GNF/mois</span></div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0;"><span style="color:var(--text-dim);">Clients mandatés</span><span id="cab-billing-clients">2 actifs · 1 en attente</span></div>
     </div>
   </section>
 
@@ -1570,11 +2086,17 @@ button{font-family:inherit;}
 <div class="page">
 <div class="frame">
 
+  <p class="eyebrow" style="margin-bottom:2px;">Portail Administration publique</p>
+  <h1 style="font-size:19px; margin-bottom:14px;">Ministère de l'Agriculture — DAF</h1>
+
+  <div class="seg">
+    <button class="active" data-screen="daf-s-liste">Factures</button>
+    <button data-screen="daf-s-fournisseurs">Fournisseurs</button>
+    <button data-screen="daf-s-profil">Profil</button>
+  </div>
+
   <!-- ================= FACTURES REÇUES (ADR-095) ================= -->
   <section class="screen active" id="daf-s-liste">
-    <p class="eyebrow">Portail Administration publique</p>
-    <h1 style="font-size:19px; margin-bottom:16px;">Ministère de l'Agriculture — DAF</h1>
-
     <div class="encours-card">
       <div class="lbl">Encours fournisseurs</div>
       <div class="amt mono" id="daf-encours-total"></div>
@@ -1648,6 +2170,32 @@ button{font-family:inherit;}
     </div>
   </section>
 
+  <!-- ================= FOURNISSEURS — annuaire agrégé ================= -->
+  <section class="screen" id="daf-s-fournisseurs">
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 14px; line-height:1.5;">Vue agrégée des fournisseurs ayant émis au moins une facture à ce ministère.</p>
+    <div class="card" id="daf-suppliers-list"></div>
+  </section>
+
+  <!-- ================= PROFIL — administration & agent DAF ================= -->
+  <section class="screen" id="daf-s-profil">
+    <div class="card" style="padding:6px 16px; margin-bottom:16px;">
+      <div class="panel-title" style="padding-top:10px;">Administration</div>
+      <div class="detail-row"><span class="k">Entité</span><span>Ministère de l'Agriculture</span></div>
+      <div class="detail-row"><span class="k">Type</span><span>Entité publique (customer:flag_public_entity, ADR-105)</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Direction</span><span>Direction Administrative et Financière (DAF)</span></div>
+    </div>
+    <div class="card" style="padding:6px 16px; margin-bottom:16px;">
+      <div class="panel-title" style="padding-top:10px;">Agent DAF connecté</div>
+      <div class="detail-row"><span class="k">Nom</span><span>Ousmane Barry</span></div>
+      <div class="detail-row"><span class="k">Fonction</span><span>Contrôleur financier</span></div>
+      <div class="detail-row" style="border-bottom:none;"><span class="k">Habilitation</span><span>Validation de liquidation (ADR-088)</span></div>
+    </div>
+    <div class="scope-note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+      Ce compte confirme uniquement la liquidation (reconnaissance de dette) — il ne déclenche et ne voit jamais un paiement effectif, qui reste hors de facture.gn (ADR-088).
+    </div>
+  </section>
+
 </div>
 </div>
 </div>
@@ -1677,14 +2225,14 @@ button{font-family:inherit;}
     <div class="card" style="padding:20px; margin-top:14px;" id="cli-verify-step-2" hidden>
       <div class="field" style="margin-bottom:6px;"><label>Code reçu par SMS</label></div>
       <div class="pin-boxes"><input maxlength="1" value="4"><input maxlength="1" value="1"><input maxlength="1" value="9"><input maxlength="1" value="2"></div>
-      <button class="btn-primary" onclick="cli_showScreen('cli-s-liste')">Valider</button>
+      <button class="btn-primary" onclick="cli_showScreen('cli-s-home')">Valider</button>
     </div>
 
     <p class="helper">Même flux de vérification que le canal *620# (ADR-087) — un seul numéro suffit, même s'il est reconnu par plusieurs commerçants.</p>
   </section>
 
-  <!-- ================= MES FACTURES (ADR-096) ================= -->
-  <section class="screen" id="cli-s-liste">
+  <!-- ================= ACCUEIL (post-vérification) ================= -->
+  <section class="screen" id="cli-s-home">
     <div class="top-row">
       <div>
         <p class="eyebrow" style="margin-bottom:4px;">Portail client</p>
@@ -1696,6 +2244,22 @@ button{font-family:inherit;}
     </div>
 
     <div class="due-banner">
+      <div><div class="lbl">Total dû</div><div class="amt mono" id="cli-total-due-home"></div></div>
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.6 18a1.5 1.5 0 001.3 2.2h16.2a1.5 1.5 0 001.3-2.2L13.7 3.9a1.5 1.5 0 00-2.6 0z"/></svg>
+    </div>
+
+    <div class="section-head" style="margin-top:18px;"><h2>Notifications récentes</h2></div>
+    <div class="card" id="cli-notifications-list"></div>
+
+    <button class="btn-ghost" style="width:100%; margin-top:16px; padding:12px; text-align:center;" onclick="cli_showScreen('cli-s-liste')">Voir toutes mes factures →</button>
+  </section>
+
+  <!-- ================= MES FACTURES (ADR-096) ================= -->
+  <section class="screen" id="cli-s-liste">
+    <div class="back-row" onclick="cli_showScreen('cli-s-home')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Accueil</div>
+    <h1 style="font-size:20px; margin-bottom:16px;">Mes factures</h1>
+
+    <div class="due-banner">
       <div><div class="lbl">Total dû</div><div class="amt mono" id="cli-total-due"></div></div>
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.6 18a1.5 1.5 0 001.3 2.2h16.2a1.5 1.5 0 001.3-2.2L13.7 3.9a1.5 1.5 0 00-2.6 0z"/></svg>
     </div>
@@ -1703,6 +2267,22 @@ button{font-family:inherit;}
     <div class="filter-row" id="cli-org-filter-row"></div>
 
     <div class="card" id="cli-invoices-list"></div>
+  </section>
+
+  <!-- ================= AIDE ================= -->
+  <section class="screen" id="cli-s-aide">
+    <div class="back-row" onclick="cli_showScreen('cli-s-home')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>Accueil</div>
+    <h1 style="font-size:20px; margin-bottom:16px;">Aide</h1>
+    <div class="card" style="padding:14px 16px; margin-bottom:16px;">
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0 0 12px;"><b style="color:var(--text);">Dois-je créer un compte ?</b><br>Non — votre numéro de téléphone suffit. Vous voyez toutes les factures émises à votre nom par n'importe quel commerçant facture.gn, sans inscription.</p>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0 0 12px;"><b style="color:var(--text);">Mes données sont-elles sécurisées ?</b><br>Chaque facture est signée (Ed25519) et vérifiable publiquement sur verify.facture.gn, sans jamais exposer vos informations bancaires.</p>
+      <p style="font-size:11.5px; color:var(--text-dim); line-height:1.7; margin:0;"><b style="color:var(--text);">Qui reçoit mon paiement ?</b><br>Le commerçant reçoit 100 % du montant facturé. Les frais de transaction affichés avant paiement sont les seuls que vous payez, à vous.</p>
+    </div>
+    <div class="section-head" style="margin-top:0;"><h2>Contact</h2></div>
+    <div class="card" style="padding:6px 16px;">
+      <a class="client-row" style="text-decoration:none; color:inherit;" href="https://wa.me/224600000000" target="_blank" rel="noopener"><div class="row-main"><span class="name">WhatsApp facture.gn</span><span class="sub">Réponse sous 2h en heures ouvrées</span></div><span class="sub" style="flex:none;">↗</span></a>
+      <a class="client-row" style="text-decoration:none; color:inherit;" href="tel:+224600000000"><div class="row-main"><span class="name">Téléphone</span><span class="sub">+224 6XX XX XX XX</span></div><span class="sub" style="flex:none;">↗</span></a>
+    </div>
   </section>
 
   <!-- ================= DÉTAIL FACTURE ================= -->
@@ -1763,6 +2343,12 @@ button{font-family:inherit;}
 
 </div>
 </div>
+
+<nav class="tabbar visible" id="cli-tabbar">
+  <button class="tabbar-item active" data-screen="cli-s-home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11L12 4l8 7v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg>Accueil</button>
+  <button class="tabbar-item" data-screen="cli-s-liste"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h8l4 4v14a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M9 12h6M9 16h6"/></svg>Factures</button>
+  <button class="tabbar-item" data-screen="cli-s-aide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2 1.7-2.3 3.2M12 17h.01"/></svg>Aide</button>
+</nav>
 
 <div class="sheet-backdrop" id="cli-profil-sheet">
   <div class="sheet">
@@ -1862,8 +2448,8 @@ button{font-family:inherit;}
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <svg width="24" height="24" viewBox="0 0 26 26"><path d="M13 3L20 9.5L13 16L6 9.5Z" fill="none" stroke="#FBB500" stroke-width="1.6"/></svg>
-      <div class="brand-txt"><div>facture.gn</div><div>Console Ops · interne</div></div>
+      <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="26" fill="#F2B705"/></svg>
+      <div class="brand-txt"><div>facture<span style="color:#F2B705;">.</span>gn</div><div>Console Ops · interne</div></div>
     </div>
     <div class="nav-group">
       <div class="nav-label">Commun</div>
@@ -1999,12 +2585,15 @@ button{font-family:inherit;}
 <div id="shell-7" class="shell-pane" hidden>
 
 <div class="shell-nav" style="border-bottom:1px dashed var(--border-strong); border-top:none; position:relative; top:auto; z-index:1; background:var(--surface); margin:-1px -1px 0;">
-  <span class="nav-eyebrow">Style d'origine, non retouché</span>
+  <span class="nav-eyebrow">Style d'origine, non retouché — maquette du 26/07, antérieure à ADR-095</span>
   <button data-leg="leg-s3" class="active">Checkout (payeur)</button>
   <button data-leg="leg-s4">Vérification publique</button>
   <button data-leg="leg-s5">USSD *620#</button>
   <button data-leg="leg-s7">Commande Publique</button>
 </div>
+<p style="font-size:11px; color:var(--text-dim); padding:10px 16px; margin:0; border-bottom:1px dashed var(--border-strong); line-height:1.6;" id="leg-caption">
+  Quatre écrans hors des 6 shells applicatifs (ADR-095) — conservés tels quels comme référence de design, pas comme surfaces produit à faire évoluer. <b>Checkout</b> : ce que voit le payeur en cliquant un lien de paiement. <b>Vérification publique</b> : verify.facture.gn, sans compte ni réseau. <b>USSD *620#</b> : simulateur du canal feature phone. <b>Commande Publique</b> : choix du rail de financement B2G côté fournisseur (ADR-088).
+</p>
 
 <div class="legacy-wrap">
 <div class="legacy-stage">
@@ -2191,7 +2780,7 @@ button{font-family:inherit;}
 
 <script>
 (function(){
-const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-assisted','s-register','s-register-done','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-onb-1','s-onb-2','s-onb-3','s-support','s-ticket-detail'];
+const SHELL1_SCREENS = ['s-accueil','s-factures','s-facture-detail','s-emission','s-error','s-assisted','s-clients','s-client-detail','s-approbations','s-analytics','s-stock','s-paiements','s-payment-detail','s-achats','s-achat-nouveau','s-equipe','s-member-detail','s-audit','s-dev','s-parametres','s-org-detail','s-succursales','s-onb-1','s-onb-2','s-onb-3','s-support','s-ticket-detail'];
 const LIGHT_ROLES = ['field_agent','delivery_driver'];
 const tabbar = document.getElementById('tabbar');
 const drawer = document.getElementById('drawer');
@@ -2227,32 +2816,32 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
 
 // ===== Factures — données + détail (invoice_event, ADR-015) =====
 const INVOICES = [
-  { id:'inv1', num:'FG-2026-000412', org:'Mamadou Sylla — Grossiste tissus', amount:180000, status:'paid',
+  { id:'inv1', num:'FG-2026-000412', org:'Mamadou Sylla — Grossiste tissus', amount:180000, status:'paid', branch:'principale',
     date:'14 août 2026 · il y a 2h', certid:'GN-31029918-2026-7F3A2C', hash:'8f2a…c91e ← 71bd…44a0',
     lines:[{d:'Tissu wax 6 yards',q:5,pu:'32 000',t:'160 000'},{d:'Frais de transport',q:1,pu:'20 000',t:'20 000'}],
     events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'il y a 2h'},{t:'payment_link.generated',a:'système',w:'il y a 2h'},{t:'invoice.paid',a:'Djomy (webhook)',w:'il y a 5 min'}],
     payment:null, actions:['avoir'] },
-  { id:'inv2', num:'FG-2026-000411', org:'Restaurant Le Damier', amount:95000, status:'pending',
+  { id:'inv2', num:'FG-2026-000411', org:'Restaurant Le Damier', amount:95000, status:'pending', branch:'principale',
     date:'13 août 2026 · hier', certid:'GN-77102256-2026-B71E4A', hash:'3c9d…12ab ← 8f2a…c91e',
     lines:[{d:'Prestation traiteur',q:1,pu:'95 000',t:'95 000'}],
     events:[{t:'invoice.issued',a:'Fatou Camara (cashier)',w:'hier, 14h32'},{t:'payment_link.generated',a:'système',w:'hier, 14h32'},{t:'payment_link.viewed',a:'payeur',w:'hier, 16h10'}],
     payment:{link:'https://facture.gn/p/7f3a2c91b0d4', expiry:'Expire dans 28 jours (TTL 30j, ADR-066)'}, actions:['marquer_paye','avoir'] },
-  { id:'inv3', num:'FG-2026-000410', org:'Fatoumata Camara', amount:220000, status:'partial',
+  { id:'inv3', num:'FG-2026-000410', org:'Fatoumata Camara', amount:220000, status:'partial', branch:'kaloum',
     date:'24 juillet 2026', certid:'GN-55810234-2026-9D4F17', hash:'1a2b…77cd ← 3c9d…12ab',
     lines:[{d:'Sac de riz 50kg',q:2,pu:'85 000',t:'170 000'},{d:'Huile 5L',q:2,pu:'25 000',t:'50 000'}],
     events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'24 juil.'},{t:'payment.partial',a:'Djomy · 100 000 GNF',w:'25 juil.'}],
     payment:{link:'https://facture.gn/p/1a2b77cd9f01', expiry:'Reste dû : 120 000 GNF · expire dans 4 jours'}, actions:['marquer_paye','avoir'] },
-  { id:'inv4', num:'FG-2026-000409', org:'Client anonyme — comptoir', amount:45000, status:'paid',
+  { id:'inv4', num:'FG-2026-000409', org:'Client anonyme — comptoir', amount:45000, status:'paid', branch:'principale',
     date:'23 juillet 2026 · hors ligne', certid:'GN-31029918-2026-2C81FE', hash:'9e0f…33aa ← 1a2b…77cd',
     lines:[{d:'Vente comptoir',q:1,pu:'45 000',t:'45 000'}],
     events:[{t:'invoice.issued',a:'Fatou Camara (cashier) · hors ligne',w:'23 juil.'},{t:'sync.completed',a:'système',w:'23 juil., +40 min'},{t:'payment.cash',a:'Fatou Camara (cashier)',w:'23 juil.'}],
     payment:null, actions:['avoir'] },
-  { id:'inv5', num:'FG-2026-000408', org:'Boutique Sory', amount:610000, status:'void',
+  { id:'inv5', num:'FG-2026-000408', org:'Boutique Sory', amount:610000, status:'void', branch:'kaloum',
     date:'22 juillet 2026', certid:'GN-64471820-2026-E203BC', hash:'7bb1…905e ← 9e0f…33aa',
     lines:[{d:'Commande groupée — divers',q:1,pu:'610 000',t:'610 000'}],
     events:[{t:'invoice.issued',a:'Aissatou Diallo',w:'22 juil.'},{t:'invoice.disputed',a:'Boutique Sory (payeur)',w:'23 juil.'}],
     payment:null, dispute:'Le client conteste avoir reçu la commande complète — litige ouvert depuis 3 jours, en attente de résolution amiable avant recours à un avoir partiel.', actions:['avoir'] },
-  { id:'inv6', num:'FG-2026-000407', org:'Boubacar Camara — livraison foraine', amount:60000, status:'pending',
+  { id:'inv6', num:'FG-2026-000407', org:'Boubacar Camara — livraison foraine', amount:60000, status:'pending', branch:'kaloum',
     date:'12 juillet 2026', certid:'GN-31029918-2026-4B8A02', hash:'6d2e…f180 ← 7bb1…905e',
     lines:[{d:'Livraison foraine — divers', q:1, pu:'60 000', t:'60 000'}],
     events:[{t:'invoice.issued', a:'Aissatou Diallo', w:'12 juil.'}, {t:'payment_link.generated', a:'système', w:'12 juil.'}],
@@ -2262,7 +2851,13 @@ const STATUS_LABEL = { paid:'Payée', pending:'Attente', partial:'Partiel', void
 const ACTION_LABEL = { marquer_paye:'Marquer payé (virement reçu)', avoir:'Émettre un avoir (credit_note)' };
 
 function renderInvoicesList(){
-  document.getElementById('factures-list').innerHTML = INVOICES.map(inv => `
+  const scoped = INVOICES.filter(inv => !inv.branch || inv.branch === currentBranch);
+  document.getElementById('factures-count').textContent = scoped.length + ' facture' + (scoped.length > 1 ? 's' : '') + ' · ' + BRANCHES.find(b => b.key === currentBranch).name;
+  if (!scoped.length) {
+    document.getElementById('factures-list').innerHTML = '<div style="padding:20px; text-align:center; font-size:12.5px; color:var(--text-dim);">Aucune facture dans cette succursale.</div>';
+    return;
+  }
+  document.getElementById('factures-list').innerHTML = scoped.map(inv => `
     <div class="invoice-row" onclick="s1_showInvoiceDetail('${inv.id}')">
       <div class="row-main">${inv.id === 'inv4' ? '<span class="offline-dot" title="Créée hors ligne, en attente de synchro"></span>' : ''}<span class="name">${inv.org}</span><span class="sub">${inv.num} · ${inv.date.split(' · ')[1] || inv.date}</span></div>
       <div class="row-side"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.status}">${STATUS_LABEL[inv.status]}</span></div>
@@ -2505,30 +3100,6 @@ function endAssistedSession(){
   showScreen('s-accueil');
 }
 
-// ===== Inscription assistée — Chemin B (Parcours 0, ADR-045) =====
-function startMerchantRegistration(){
-  document.getElementById('reg-name').value = '';
-  document.getElementById('reg-phone').value = '';
-  document.getElementById('reg-consent').checked = false;
-  document.getElementById('reg-error').hidden = true;
-  showScreen('s-register');
-}
-function submitMerchantRegistration(){
-  const name = document.getElementById('reg-name').value.trim();
-  const phone = document.getElementById('reg-phone').value.trim();
-  const consent = document.getElementById('reg-consent').checked;
-  if (!name || !phone || !consent) {
-    document.getElementById('reg-error').hidden = false;
-    return;
-  }
-  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 8; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  document.getElementById('reg-done-name').textContent = name + ' · ' + phone;
-  document.getElementById('reg-done-code').textContent = code.slice(0, 4) + ' ' + code.slice(4);
-  showScreen('s-register-done');
-}
-
 // ===== Inscription d'une nouvelle organisation =====
 function startOnboarding(){
   document.getElementById('onb-name').value = '';
@@ -2710,15 +3281,12 @@ function applyBranch(){
   document.getElementById('stock-branch').value = b.name;
   renderBranches();
   renderStock();
+  renderInvoicesList();
 }
 function selectBranch(key){
   currentBranch = key;
   applyBranch();
-}
-function switchBranch(){
-  const idx = BRANCHES.findIndex(b => b.key === currentBranch);
-  currentBranch = BRANCHES[(idx + 1) % BRANCHES.length].key;
-  applyBranch();
+  showScreen('s-accueil');
 }
 function receiveStock(){
   const product = document.getElementById('stock-product').value;
@@ -2815,6 +3383,78 @@ function showPaymentDetail(id){
   document.getElementById('pd-commission').textContent = '0 GNF — commission portée par le payeur';
   showScreen('s-payment-detail');
 }
+
+// ===== Achats & factures reçues — complète le FEC (ventes + achats) =====
+const PURCHASE_STATUS_LABEL = { due:'Non réglé', partial:'Partiel', settled:'Soldé' };
+const PURCHASE_STATUS_PILL = { due:'pending', partial:'partial', settled:'paid' };
+const PURCHASES = [
+  { id:'pu1', supplier:'Grossiste Textile Madina', nif:null, amount:150000, date:'12 août 2026', status:'due', certified:false },
+  { id:'pu2', supplier:'Restaurant Le Damier', nif:'987654321', amount:45000, date:'10 août 2026', status:'settled', certified:true, certid:'GN-77102256-2026-B71E4A' },
+  { id:'pu3', supplier:'Imprimerie Kaloum', nif:null, amount:200000, date:'5 août 2026', status:'partial', paid:80000, certified:false },
+];
+let currentPurchaseFilter = 'all';
+let currentPurchaseId = null;
+function renderPurchases(){
+  const list = currentPurchaseFilter === 'all' ? PURCHASES : PURCHASES.filter(p => p.status === currentPurchaseFilter);
+  document.getElementById('pur-list').innerHTML = list.length ? list.map(p => `
+    <div class="invoice-row" onclick="s1_showPurchaseDetail('${p.id}')">
+      <div class="row-main">${p.certified ? '<span class="mono" style="font-size:9.5px; color:var(--good);">FACTURE.GN ✓</span> ' : ''}<span class="name">${p.supplier}</span><span class="sub">${p.date}</span></div>
+      <div class="row-side"><span class="amount">${p.amount.toLocaleString('fr-FR')}</span><span class="pill ${PURCHASE_STATUS_PILL[p.status]}">${PURCHASE_STATUS_LABEL[p.status]}</span></div>
+    </div>`).join('') : '<div style="padding:20px; text-align:center; font-size:12.5px; color:var(--text-dim);">Aucun achat dans cette catégorie.</div>';
+  document.getElementById('pur-stat-total').textContent = PURCHASES.reduce((s,p) => s + p.amount, 0).toLocaleString('fr-FR');
+  document.getElementById('pur-stat-settled').textContent = PURCHASES.filter(p => p.status === 'settled').length;
+}
+document.getElementById('pur-filter-row').addEventListener('click', (e) => {
+  const chip = e.target.closest('.filter-chip');
+  if (!chip) return;
+  document.querySelectorAll('#pur-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  currentPurchaseFilter = chip.dataset.status;
+  renderPurchases();
+});
+function showNewPurchase(){
+  document.getElementById('pur-supplier').value = '';
+  document.getElementById('pur-supplier-nif').value = '';
+  document.getElementById('pur-amount').value = '';
+  document.getElementById('pur-status').selectedIndex = 0;
+  document.getElementById('pur-error').hidden = true;
+  showScreen('s-achat-nouveau');
+}
+function savePurchase(){
+  const supplier = document.getElementById('pur-supplier').value.trim();
+  const amount = parseInt(document.getElementById('pur-amount').value.replace(/\D/g,''), 10);
+  if (!supplier || !amount) {
+    document.getElementById('pur-error').hidden = false;
+    return;
+  }
+  const nif = document.getElementById('pur-supplier-nif').value.trim();
+  const status = document.getElementById('pur-status').value;
+  PURCHASES.unshift({ id:'pu' + (PURCHASES.length + 1), supplier, nif: nif || null, amount, date:"à l'instant", status, certified:false });
+  renderPurchases();
+  showScreen('s-achats');
+}
+function showPurchaseDetail(id){
+  currentPurchaseId = id;
+  const p = PURCHASES.find(x => x.id === id);
+  document.getElementById('pur-ds-supplier').textContent = p.supplier;
+  document.getElementById('pur-ds-sub').textContent = (p.certified ? 'Facture certifiée facture.gn · ' : 'Saisie manuelle · ') + p.date + (p.nif ? ' · NIF ' + p.nif : '');
+  document.getElementById('pur-ds-amount').textContent = p.amount.toLocaleString('fr-FR') + ' GNF';
+  const pill = document.getElementById('pur-ds-status');
+  pill.className = 'pill ' + PURCHASE_STATUS_PILL[p.status];
+  pill.textContent = PURCHASE_STATUS_LABEL[p.status];
+  document.getElementById('pur-ds-settle-btn').hidden = p.status === 'settled';
+  document.getElementById('pur-detail-sheet').classList.add('open');
+}
+function settlePurchase(){
+  const p = PURCHASES.find(x => x.id === currentPurchaseId);
+  if (!p) return;
+  p.status = 'settled';
+  renderPurchases();
+  document.getElementById('pur-detail-sheet').classList.remove('open');
+}
+document.getElementById('pur-detail-sheet').addEventListener('click', (e) => {
+  if (e.target.id === 'pur-detail-sheet') e.target.classList.remove('open');
+});
 
 // ===== Équipe & Rôles (owner/admin) =====
 const TEAM = [
@@ -2918,15 +3558,24 @@ function generateApiKey(){
   el.textContent = 'Nouvelle clé (copiez-la maintenant, elle ne sera plus affichée) : ' + full;
 }
 
-// ===== Paramètres organisation (owner/admin) =====
+// ===== Paramètres organisation (owner/admin) — grille à 6 paliers, ADR-106 =====
+const PLAN_SEQUENCE = ['Freemium', 'Starter', 'Starter Plus', 'Pro'];
+let currentPlanIndex = 0;
 function upgradePlan(){
-  document.getElementById('param-plan').textContent = 'Starter';
-  document.getElementById('home-tier-chip').textContent = 'Starter · T1';
-  document.getElementById('home-tier-val').textContent = 'Starter';
+  if (currentPlanIndex >= PLAN_SEQUENCE.length - 1) return;
+  currentPlanIndex += 1;
+  const plan = PLAN_SEQUENCE[currentPlanIndex];
+  document.getElementById('param-plan').textContent = plan;
+  document.getElementById('home-tier-chip').textContent = plan + ' · T1';
+  document.getElementById('home-tier-val').textContent = plan;
   const btn = document.getElementById('param-upgrade-btn');
-  btn.textContent = 'Palier actuel';
-  btn.disabled = true;
-  btn.style.opacity = '.5';
+  if (currentPlanIndex >= PLAN_SEQUENCE.length - 1) {
+    btn.textContent = 'Palier actuel';
+    btn.disabled = true;
+    btn.style.opacity = '.5';
+  } else {
+    btn.textContent = 'Passer à ' + PLAN_SEQUENCE[currentPlanIndex + 1];
+  }
 }
 
 // ===== Support =====
@@ -2994,6 +3643,7 @@ window.addEventListener('DOMContentLoaded', () => {
   renderStock();
   renderReconcile();
   renderPayments('all');
+  renderPurchases();
   renderTeam();
   renderAuditLog('all');
   renderApiKeys();
@@ -3014,6 +3664,10 @@ window.s1_markReceived = markReceived;
 window.s1_markRefused = markRefused;
 window.s1_regenerateLink = regenerateLink;
 window.s1_showPaymentDetail = showPaymentDetail;
+window.s1_showNewPurchase = showNewPurchase;
+window.s1_savePurchase = savePurchase;
+window.s1_showPurchaseDetail = showPurchaseDetail;
+window.s1_settlePurchase = settlePurchase;
 window.s1_inviteMember = inviteMember;
 window.s1_showMemberDetail = showMemberDetail;
 window.s1_applyMemberRole = applyMemberRole;
@@ -3024,16 +3678,336 @@ window.s1_generateApiKey = generateApiKey;
 window.s1_upgradePlan = upgradePlan;
 window.s1_submitTicket = submitTicket;
 window.s1_showTicketDetail = showTicketDetail;
-window.s1_switchBranch = switchBranch;
 window.s1_selectBranch = selectBranch;
 window.s1_startAssistedSession = startAssistedSession;
 window.s1_endAssistedSession = endAssistedSession;
-window.s1_startMerchantRegistration = startMerchantRegistration;
-window.s1_submitMerchantRegistration = submitMerchantRegistration;
 window.s1_startOnboarding = startOnboarding;
 window.s1_onboardingStep2 = onboardingStep2;
 window.s1_onboardingStep3 = onboardingStep3;
 window.s1_finishOnboarding = finishOnboarding;
+})();
+
+// ===== Agent commercial terrain — identité facture.gn interne (ADR-045/107) =====
+// Dashboard dédié + parcours d'onboarding en 5 étapes (déplacé hors de shell-1 : un marchand
+// n'existe pas encore quand ce parcours démarre, il ne doit jamais s'ouvrir "dans la boutique").
+(function(){
+const AGT_ZONES = {conakry:'Conakry-Matam', kindia:'Kindia', kankan:'Kankan'};
+const AGT_ACTIVITES = {commerce:'Commerce général', restauration:'Restauration', marche:'Marché/Grossiste'};
+const AGT_GOALS = {
+  mois: {target:8, commission:15000, bonus:50000},
+  trimestre: {target:24, commission:15000, bonus:150000},
+};
+let agtZone = 'conakry';
+let agtActivite = 'commerce';
+let agtPeriod = 'mois';
+const AGT_MERCHANTS = [
+  { name:'Boutique Aissatou', sub:'Freemium · Conakry', status:'Opérationnel' },
+  { name:'Restaurant Le Damier', sub:'Starter · Conakry', status:'Frais en attente' },
+  { name:'Hôtel Riviera', sub:'Starter · Kindia', status:'Opérationnel' },
+];
+
+const AGT_MAIN_TABS = ['agt-profile','agt-portfolio','agt-goals','agt-support','agt-documents','agt-settings'];
+const agtDrawer = document.getElementById('agt-drawer');
+function openDrawer(){ agtDrawer.classList.add('open'); }
+function closeDrawer(){ agtDrawer.classList.remove('open'); }
+agtDrawer.addEventListener('click', (e) => {
+  if (e.target === agtDrawer) { closeDrawer(); return; }
+  const linked = e.target.closest('.drawer-item.linked');
+  if (linked) { closeDrawer(); showScreen(linked.dataset.screen); }
+});
+function showScreen(id){
+  document.querySelectorAll('#shell-agt .screen').forEach(s => s.classList.toggle('active', s.id === id));
+  document.querySelectorAll('#agt-tabbar [data-screen]').forEach(t => t.classList.toggle('active', t.dataset.screen === id));
+  const isMainTab = AGT_MAIN_TABS.includes(id);
+  document.getElementById('agt-dashboard-header').hidden = !isMainTab;
+  document.querySelector('#shell-agt .proto-bar').hidden = !isMainTab;
+  document.getElementById('agt-tabbar').classList.toggle('visible', isMainTab);
+  window.scrollTo(0,0);
+}
+document.getElementById('agt-tabbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-screen]');
+  if (btn) showScreen(btn.dataset.screen);
+});
+
+let agtPortfolioFilter = 'all';
+function filterPortfolio(){
+  agtPortfolioFilter = document.querySelector('.agt-portfolio-filter.active')?.dataset.filter || 'all';
+  renderMerchantsList();
+}
+function renderMerchantsList(){
+  const search = (document.getElementById('agt-portfolio-search')?.value || '').trim().toLowerCase();
+  const filtered = AGT_MERCHANTS.filter(m =>
+    (agtPortfolioFilter === 'all' || m.status === agtPortfolioFilter) &&
+    (!search || m.name.toLowerCase().includes(search)));
+  document.getElementById('agt-merchants-list').innerHTML = filtered.length ? filtered.map(m => `
+    <div class="inv-row" style="cursor:pointer;" onclick="agt_openMerchantSheet('${m.name.replace(/'/g, "\\'")}')">
+      <div class="inv-main"><span class="inv-name">${m.name}</span><span class="inv-sub">${m.sub}</span></div>
+      <span class="pill ${m.status === 'Opérationnel' ? 'paid' : 'pending'}">${m.status}</span>
+    </div>`).join('') : '<div style="padding:16px; font-size:12.5px; color:var(--text-dim); text-align:center;">Aucun marchand ne correspond.</div>';
+  document.getElementById('agt-stat-total').textContent = AGT_MERCHANTS.length;
+  document.getElementById('agt-stat-month').textContent = AGT_MERCHANTS.length;
+  renderGoals();
+}
+function openMerchantSheet(name){
+  const m = AGT_MERCHANTS.find(x => x.name === name);
+  if (!m) return;
+  document.getElementById('agt-ms-name').textContent = m.name;
+  document.getElementById('agt-ms-sub').textContent = m.sub;
+  const statusPill = document.getElementById('agt-ms-status');
+  statusPill.textContent = m.status;
+  statusPill.className = 'pill ' + (m.status === 'Opérationnel' ? 'paid' : 'pending');
+  document.getElementById('agt-ms-fee-btn').hidden = m.status === 'Opérationnel';
+  document.getElementById('agt-ms-fee-btn').dataset.merchant = m.name;
+  document.getElementById('agt-merchant-sheet').classList.add('open');
+}
+function closeMerchantSheet(){
+  document.getElementById('agt-merchant-sheet').classList.remove('open');
+}
+function proposeFeeFromPortfolio(){
+  const name = document.getElementById('agt-ms-fee-btn').dataset.merchant;
+  const m = AGT_MERCHANTS.find(x => x.name === name);
+  if (m) { m.status = 'Opérationnel'; renderMerchantsList(); }
+  closeMerchantSheet();
+}
+document.getElementById('agt-merchant-sheet').addEventListener('click', (e) => {
+  if (e.target.id === 'agt-merchant-sheet') closeMerchantSheet();
+});
+document.querySelectorAll('.agt-portfolio-filter').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.agt-portfolio-filter').forEach(m => m.classList.remove('active'));
+    el.classList.add('active');
+    filterPortfolio();
+  });
+});
+function renderGoals(){
+  const g = AGT_GOALS[agtPeriod];
+  const done = AGT_MERCHANTS.length;
+  const earnings = done * g.commission + (done >= g.target ? g.bonus : 0);
+  document.getElementById('agt-goal-progress').textContent = done + ' / ' + g.target;
+  document.getElementById('agt-earnings').textContent = earnings.toLocaleString('fr-FR') + ' GNF';
+}
+renderMerchantsList();
+
+document.querySelectorAll('#shell-agt .proto-bar [data-zone]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#shell-agt .proto-bar [data-zone]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    agtZone = btn.dataset.zone;
+    document.getElementById('agt-profile-zone').textContent = AGT_ZONES[agtZone];
+  });
+});
+document.querySelectorAll('#shell-agt .proto-bar [data-activite]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#shell-agt .proto-bar [data-activite]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    agtActivite = btn.dataset.activite;
+    document.getElementById('agt-profile-activite').textContent = AGT_ACTIVITES[agtActivite];
+  });
+});
+document.querySelectorAll('#shell-agt [data-period]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#shell-agt [data-period]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    agtPeriod = btn.dataset.period;
+    renderGoals();
+  });
+});
+window.addEventListener('DOMContentLoaded', () => {
+  const arc = document.getElementById('agt-gauge-arc');
+  const circumference = 263.9, pct = 0.88;
+  requestAnimationFrame(() => {
+    arc.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
+    arc.style.strokeDashoffset = String(circumference * (1 - pct));
+  });
+});
+
+let registrationMode = 'agent';
+let registrationCode = '';
+let lastOnboardedMerchant = null;
+function startMerchantRegistration(mode){
+  registrationMode = mode === 'self' ? 'self' : 'agent';
+  document.getElementById('agt-reg-shopname').value = '';
+  document.getElementById('agt-reg-name').value = '';
+  document.getElementById('agt-reg-phone').value = '';
+  document.getElementById('agt-reg-activite').selectedIndex = 0;
+  document.getElementById('agt-reg-address').value = '';
+  document.getElementById('agt-reg-nif').value = '';
+  document.getElementById('agt-reg-nif-row').hidden = true;
+  document.querySelectorAll('.agt-formal').forEach(b => b.classList.remove('active'));
+  document.querySelector('.agt-formal[data-formal="non"]').classList.add('active');
+  document.getElementById('agt-reg-consent').checked = false;
+  document.getElementById('agt-reg-error').hidden = true;
+  document.getElementById('agt-reg-title').textContent = registrationMode === 'self' ? 'Créer mon compte' : 'Inscrire un nouveau marchand';
+  document.getElementById('agt-reg-intro').textContent = registrationMode === 'self'
+    ? "Nouvelle organisation, en 5 étapes. Aucune information n'est requise pour commencer à facturer — NIF et eTax restent optionnels (ADR-035)."
+    : "Écran de l'Agent commercial terrain (recruté par facture.gn — jamais le rôle field_agent d'une PME, ADR-107). En 5 étapes, le marchand repart avec un compte opérationnel, sa première facture certifiée en main et les bases de facture.gn en tête — un feature phone suffit ensuite, aucun smartphone requis.";
+  document.getElementById('agt-reg-shopname-label').textContent = registrationMode === 'self' ? 'Nom de votre commerce' : 'Nom de la boutique / du commerce';
+  document.getElementById('agt-reg-name-label').textContent = registrationMode === 'self' ? 'Votre nom' : 'Nom du marchand (propriétaire)';
+  document.getElementById('agt-reg-consent-row').hidden = registrationMode === 'self';
+  document.getElementById('agt-reg-error').textContent = registrationMode === 'self' ? 'Nom du commerce, votre nom et téléphone sont requis.' : 'Nom de la boutique, nom du propriétaire, téléphone et consentement sont requis.';
+  document.getElementById('agt-reg-inv-title').textContent = registrationMode === 'self' ? 'Émettez votre première facture' : 'Émettre la première facture';
+  document.getElementById('agt-reg-inv-intro').textContent = registrationMode === 'self'
+    ? "Rien de plus concret pour prendre en main facture.gn qu'une vraie facture, signée et certifiée."
+    : "Rien de plus concret pour prendre en main facture.gn qu'une vraie facture, signée et certifiée devant le marchand.";
+  document.getElementById('agt-reg-done-invoice').textContent = '';
+  document.getElementById('agt-reg-done-cta').textContent = registrationMode === 'self' ? 'Se connecter à mon compte' : 'Retour au tableau de bord';
+  document.getElementById('agt-fee-card').hidden = true;
+  document.getElementById('agt-fee-step-propose').hidden = false;
+  document.getElementById('agt-fee-step-pending').hidden = true;
+  document.getElementById('agt-fee-step-paid').hidden = true;
+  document.getElementById('agt-referral-card').hidden = true;
+  document.getElementById('agt-referral-step-send').hidden = false;
+  document.getElementById('agt-referral-step-sent').hidden = true;
+  document.getElementById('agt-referral-count').value = 5;
+  document.getElementById('agt-referral-intro').textContent = registrationMode === 'self'
+    ? "Recevez votre lien de parrainage par SMS et utilisez-le pour inviter d'autres commerçants à rejoindre facture.gn."
+    : "Le marchand reçoit son lien de parrainage par SMS et peut l'utiliser pour inviter d'autres commerçants à rejoindre facture.gn.";
+  document.querySelectorAll('.agt-plan').forEach(m => m.classList.remove('selected'));
+  document.querySelector('.agt-plan[data-plan="freemium"]').classList.add('selected');
+  document.querySelectorAll('.agt-pm').forEach(m => m.classList.remove('selected'));
+  document.querySelector('.agt-pm[data-pm="orange"]').classList.add('selected');
+  showScreen('agt-register');
+}
+function continueMerchantRegistration(){
+  const shopname = document.getElementById('agt-reg-shopname').value.trim();
+  const name = document.getElementById('agt-reg-name').value.trim();
+  const phone = document.getElementById('agt-reg-phone').value.trim();
+  const consent = registrationMode === 'self' ? true : document.getElementById('agt-reg-consent').checked;
+  if (!shopname || !name || !phone || !consent) {
+    document.getElementById('agt-reg-error').hidden = false;
+    return;
+  }
+  document.getElementById('agt-reg-error').hidden = true;
+  showScreen('agt-register-offer');
+}
+function continueRegistrationOffer(){
+  showScreen('agt-register-payment');
+}
+function continueRegistrationPayment(){
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  registrationCode = code.slice(0, 4) + ' ' + code.slice(4);
+  showScreen('agt-register-invoice');
+}
+function emitFirstInvoice(){
+  const num = 'FG-2026-0004' + (13 + AGT_MERCHANTS.length);
+  finishRegistrationWelcome(num + ' certifiée — 45 000 GNF');
+}
+function skipFirstInvoice(){
+  finishRegistrationWelcome('');
+}
+function finishRegistrationWelcome(invoiceSummary){
+  const shopname = document.getElementById('agt-reg-shopname').value.trim();
+  const name = document.getElementById('agt-reg-name').value.trim();
+  const phone = document.getElementById('agt-reg-phone').value.trim();
+  const activite = document.getElementById('agt-reg-activite').value;
+  const plan = document.querySelector('.agt-plan.selected')?.dataset.plan || 'freemium';
+  const pm = document.querySelector('.agt-pm.selected')?.dataset.pm || 'orange';
+  const PLAN_LABEL = {freemium:'Freemium', starter:'Starter', starterplus:'Starter Plus', pro:'Pro'};
+  const PM_LABEL = {orange:'Orange Money (Djomy)', mtn:'MTN MoMo (Djomy)'};
+  const feePending = registrationMode === 'agent' && !!invoiceSummary;
+  lastOnboardedMerchant = { name: shopname || 'Nouveau marchand', sub: PLAN_LABEL[plan] + ' · ' + activite + ' · ' + AGT_ZONES[agtZone], status: feePending ? 'Frais en attente' : 'Opérationnel' };
+  AGT_MERCHANTS.unshift(lastOnboardedMerchant);
+  renderMerchantsList();
+  document.getElementById('agt-reg-done-title').textContent = registrationMode === 'self' ? 'Compte opérationnel' : 'Marchand opérationnel';
+  document.getElementById('agt-reg-done-code-label').textContent = registrationMode === 'self' ? 'Votre code compte' : 'Code compte — carte à remettre';
+  document.getElementById('agt-reg-done-name').textContent = shopname + ' · ' + name + ' · ' + phone;
+  document.getElementById('agt-reg-done-plan').textContent = 'Formule ' + PLAN_LABEL[plan] + ' · encaissement ' + PM_LABEL[pm];
+  document.getElementById('agt-reg-done-invoice').textContent = invoiceSummary ? ('Première facture ' + invoiceSummary) : "Première facture reportée — à émettre depuis + Émettre.";
+  document.getElementById('agt-reg-done-footer').textContent = registrationMode === 'self'
+    ? "Vous êtes immédiatement opérationnel, y compris pour émettre depuis *620# sans jamais avoir touché un smartphone."
+    : "Le marchand est immédiatement opérationnel, y compris pour émettre depuis *620# sans jamais avoir touché un smartphone. Aucune membership permanente n'est créée pour vous, l'agent — accès délégué par facture.gn, pas par le marchand (ADR-107).";
+  document.getElementById('agt-reg-done-code').textContent = registrationCode;
+  // Frais de service : uniquement côté Agent, et seulement si une facture a bien été émise pour le justifier.
+  // Self-service : pas de frais (personne à facturer pour l'accompagnement), mais le parrainage reste ouvert directement.
+  if (registrationMode === 'agent' && invoiceSummary) {
+    document.getElementById('agt-fee-pm-label').textContent = PM_LABEL[pm];
+    document.getElementById('agt-fee-card').hidden = false;
+    document.getElementById('agt-referral-card').hidden = true;
+  } else if (registrationMode === 'self') {
+    document.getElementById('agt-fee-card').hidden = true;
+    document.getElementById('agt-referral-card').hidden = false;
+  } else {
+    document.getElementById('agt-fee-card').hidden = true;
+    document.getElementById('agt-referral-card').hidden = true;
+  }
+  showScreen('agt-register-welcome');
+}
+function sendServiceFeeLink(){
+  document.getElementById('agt-fee-step-propose').hidden = true;
+  document.getElementById('agt-fee-step-pending').hidden = false;
+}
+function markServiceFeePaid(){
+  document.getElementById('agt-fee-step-pending').hidden = true;
+  document.getElementById('agt-fee-step-paid').hidden = false;
+  document.getElementById('agt-referral-card').hidden = false;
+  if (lastOnboardedMerchant) { lastOnboardedMerchant.status = 'Opérationnel'; renderMerchantsList(); }
+}
+function sendInvitations(){
+  const count = Math.max(1, parseInt(document.getElementById('agt-referral-count').value, 10) || 1);
+  const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+  document.getElementById('agt-referral-step-send').hidden = true;
+  const sent = document.getElementById('agt-referral-step-sent');
+  sent.hidden = false;
+  sent.innerHTML = count + ' invitations envoyées par SMS — lien <span class="mono">facture.gn/i/' + code + '</span>';
+}
+function finishOnboarding(){
+  if (registrationMode === 'self') {
+    showShell('shell-0');
+    shell0ShowLogin('pme');
+    const idField = document.getElementById('login-pme-id');
+    const phone = document.getElementById('agt-reg-phone').value.trim();
+    if (idField && phone) idField.value = phone;
+    return;
+  }
+  showScreen('agt-portfolio');
+}
+function submitTicket(){
+  const subject = document.getElementById('agt-tk-subject').value.trim();
+  if (!subject) return;
+  document.getElementById('agt-tk-confirm').hidden = false;
+  document.getElementById('agt-tk-confirm').textContent = 'Ticket envoyé — un membre de la Direction Commerciale Terrain vous répond sous 24h.';
+  document.getElementById('agt-tk-subject').value = '';
+  document.getElementById('agt-tk-details').value = '';
+}
+document.querySelectorAll('.agt-plan').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.agt-plan').forEach(m => m.classList.remove('selected'));
+    el.classList.add('selected');
+  });
+});
+document.querySelectorAll('.agt-pm').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.agt-pm').forEach(m => m.classList.remove('selected'));
+    el.classList.add('selected');
+  });
+});
+document.querySelectorAll('.agt-formal').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.agt-formal').forEach(m => m.classList.remove('selected', 'active'));
+    el.classList.add('active');
+    document.getElementById('agt-reg-nif-row').hidden = el.dataset.formal !== 'oui';
+  });
+});
+window.agt_showScreen = showScreen;
+window.agt_startMerchantRegistration = startMerchantRegistration;
+window.agt_continueMerchantRegistration = continueMerchantRegistration;
+window.agt_continueRegistrationOffer = continueRegistrationOffer;
+window.agt_continueRegistrationPayment = continueRegistrationPayment;
+window.agt_emitFirstInvoice = emitFirstInvoice;
+window.agt_skipFirstInvoice = skipFirstInvoice;
+window.agt_sendServiceFeeLink = sendServiceFeeLink;
+window.agt_markServiceFeePaid = markServiceFeePaid;
+window.agt_sendInvitations = sendInvitations;
+window.agt_finishOnboarding = finishOnboarding;
+window.agt_submitTicket = submitTicket;
+window.agt_filterPortfolio = filterPortfolio;
+window.agt_openMerchantSheet = openMerchantSheet;
+window.agt_closeMerchantSheet = closeMerchantSheet;
+window.agt_proposeFeeFromPortfolio = proposeFeeFromPortfolio;
+window.agt_openDrawer = openDrawer;
+window.agt_closeDrawer = closeDrawer;
 })();
 
 (function(){
@@ -3051,15 +4025,24 @@ const ORG_PORTFOLIO = [
       { name:'Mamadou Sylla', num:'FG-2026-000412', when:'il y a 2h', amount:'180 000', status:'paid', label:'Payée' },
       { name:'Restaurant Le Damier', num:'FG-2026-000411', when:'hier', amount:'95 000', status:'pending', label:'Attente' },
       { name:'Fatoumata Camara', num:'FG-2026-000410', when:'24 juil.', amount:'220 000', status:'partial', label:'Partiel' },
+    ],
+    purchases:[
+      { name:'Grossiste Textile Madina', num:null, when:'12 août', amount:'150 000', status:'pending', label:'Non réglé' },
+      { name:'Restaurant Le Damier', num:'FG-2026-000411', when:'10 août', amount:'45 000', status:'paid', label:'Soldé · certifié facture.gn' },
+      { name:'Imprimerie Kaloum', num:null, when:'5 août', amount:'200 000', status:'partial', label:'Partiel' },
     ] },
   { id:'org2', name:'Restaurant Le Damier', initials:'RD', status:'active', fecFile:'fec_restaurant-le-damier_2026-08.txt',
     invoices:[
       { name:'Client anonyme', num:'FG-2026-000405', when:'3 juil.', amount:'145 000', status:'paid', label:'Payée' },
       { name:'Aminata Diallo', num:'FG-2026-000399', when:'28 juin', amount:'62 000', status:'paid', label:'Payée' },
+    ],
+    purchases:[
+      { name:'Marché de gros Madina', num:null, when:'8 août', amount:'320 000', status:'pending', label:'Non réglé' },
     ] },
-  { id:'org3', name:'Hôtel Riviera', initials:'HR', status:'pending', invoices:[] },
+  { id:'org3', name:'Hôtel Riviera', initials:'HR', status:'pending', invoices:[], purchases:[] },
 ];
 let cabActiveOrgId = 'org1';
+let cabActiveBook = 'sales';
 
 function renderOrgSwitcher(){
   document.getElementById('cab-org-switcher').innerHTML = ORG_PORTFOLIO.map(o => `
@@ -3067,9 +4050,17 @@ function renderOrgSwitcher(){
 }
 
 function renderOrgCard(){
-  const org = ORG_PORTFOLIO.find(o => o.id === cabActiveOrgId);
   const activeCard = document.getElementById('cab-org-active-card');
   const pendingCard = document.getElementById('cab-org-pending-card');
+  const emptyCard = document.getElementById('cab-org-empty-card');
+  const org = ORG_PORTFOLIO.find(o => o.id === cabActiveOrgId);
+  if (!org) {
+    activeCard.hidden = true;
+    pendingCard.hidden = true;
+    emptyCard.hidden = false;
+    return;
+  }
+  emptyCard.hidden = true;
   if (org.status === 'pending') {
     activeCard.hidden = true;
     pendingCard.hidden = false;
@@ -3078,18 +4069,43 @@ function renderOrgCard(){
   }
   activeCard.hidden = false;
   pendingCard.hidden = true;
-  document.getElementById('cab-org-active-title').textContent = org.name + ' — factures';
+  document.getElementById('cab-org-active-title').textContent = org.name + (cabActiveBook === 'sales' ? ' — ventes' : ' — achats');
   document.getElementById('cab-fec-confirm').hidden = true;
   const btn = document.getElementById('cab-fec-btn');
   btn.textContent = 'Exporter le FEC';
-  document.getElementById('cab-org-invoices').innerHTML = org.invoices.map((inv, i) => `
-    <div class="inv-row" style="cursor:pointer;" onclick="cab_showInvoiceSheet('${org.id}', ${i})"><div class="inv-main"><span class="inv-name">${inv.name}</span><span class="inv-sub">${inv.num} · ${inv.when}</span></div><div style="text-align:right;"><span class="amount">${inv.amount}</span><br><span class="pill ${inv.status}" style="margin-top:4px;">${inv.label}</span></div></div>`).join('');
+  document.querySelectorAll('#cab-org-active-card [data-book]').forEach(b => b.classList.toggle('active', b.dataset.book === cabActiveBook));
+  if (cabActiveBook === 'sales') {
+    document.getElementById('cab-org-invoices').innerHTML = org.invoices.length ? org.invoices.map((inv, i) => `
+      <div class="inv-row" style="cursor:pointer;" onclick="cab_showInvoiceSheet('${org.id}', ${i})"><div class="inv-main"><span class="inv-name">${inv.name}</span><span class="inv-sub">${inv.num} · ${inv.when}</span></div><div style="text-align:right;"><span class="amount">${inv.amount}</span><br><span class="pill ${inv.status}" style="margin-top:4px;">${inv.label}</span></div></div>`).join('')
+      : '<div style="padding:20px 16px; text-align:center; font-size:12.5px; color:var(--text-dim);">Aucune vente enregistrée.</div>';
+  } else {
+    const purchases = org.purchases || [];
+    document.getElementById('cab-org-invoices').innerHTML = purchases.length ? purchases.map(p => `
+      <div class="inv-row"><div class="inv-main"><span class="inv-name">${p.name}</span><span class="inv-sub">${p.num ? p.num + ' · ' : 'Saisie manuelle · '}${p.when}</span></div><div style="text-align:right;"><span class="amount">${p.amount}</span><br><span class="pill ${p.status}" style="margin-top:4px;">${p.label}</span></div></div>`).join('')
+      : '<div style="padding:20px 16px; text-align:center; font-size:12.5px; color:var(--text-dim);">Aucun achat enregistré par cette organisation.</div>';
+  }
+}
+function switchBook(book){
+  cabActiveBook = book;
+  renderOrgCard();
 }
 
 function selectOrg(id){
   cabActiveOrgId = id;
+  cabActiveBook = 'sales';
   renderOrgSwitcher();
   renderOrgCard();
+}
+function renderClientsList(){
+  document.getElementById('cab-clients-list').innerHTML = ORG_PORTFOLIO.length ? ORG_PORTFOLIO.map(o => `
+    <div class="inv-row" style="cursor:pointer;" onclick="cab_openClient('${o.id}')">
+      <div class="inv-main"><span class="inv-name">${o.name}</span><span class="inv-sub">${o.status === 'pending' ? "Mandat en attente d'acceptation" : o.invoices.length + ' facture' + (o.invoices.length > 1 ? 's' : '') + ' consultable' + (o.invoices.length > 1 ? 's' : '')}</span></div>
+      <span class="pill ${o.status === 'pending' ? 'pending' : 'paid'}">${o.status === 'pending' ? 'En attente' : 'Mandat actif'}</span>
+    </div>`).join('') : '<div style="padding:20px 16px; text-align:center; font-size:12.5px; color:var(--text-dim);">Aucun client mandaté pour le moment.</div>';
+}
+function openClient(id){
+  selectOrg(id);
+  showScreen('cab-s-portefeuille');
 }
 
 function showInvoiceSheet(orgId, idx){
@@ -3140,9 +4156,11 @@ function sendMandateRequest(){
 // ===== Export FEC =====
 function exportFec(){
   const org = ORG_PORTFOLIO.find(o => o.id === cabActiveOrgId);
+  const salesCount = org.invoices.length;
+  const purchasesCount = (org.purchases || []).length;
   const confirm = document.getElementById('cab-fec-confirm');
   confirm.hidden = false;
-  confirm.textContent = 'Export généré — ' + org.fecFile + ' (SYSCOHADA)';
+  confirm.textContent = 'Export généré — ' + org.fecFile + ' (SYSCOHADA) · ' + salesCount + ' vente' + (salesCount > 1 ? 's' : '') + ' + ' + purchasesCount + ' achat' + (purchasesCount > 1 ? 's' : '') + ', tous statuts confondus';
   const btn = document.getElementById('cab-fec-btn');
   btn.textContent = 'Exporté ✓';
   setTimeout(() => { btn.textContent = 'Exporter le FEC'; }, 2000);
@@ -3209,7 +4227,79 @@ document.getElementById('cab-member-sheet').addEventListener('click', (e) => {
 renderCollaborators();
 renderOrgSwitcher();
 renderOrgCard();
+renderClientsList();
 
+function toggleEditInstance(){
+  const editing = document.getElementById('cab-instance-edit').hidden;
+  document.getElementById('cab-instance-view').hidden = editing;
+  document.getElementById('cab-instance-edit').hidden = !editing;
+  document.getElementById('cab-instance-edit-btn').textContent = editing ? 'Annuler' : 'Modifier';
+}
+function saveInstance(){
+  document.getElementById('cab-instance-name-view').textContent = document.getElementById('cab-instance-name').value;
+  document.getElementById('cab-instance-ordre-view').textContent = document.getElementById('cab-instance-ordre').value;
+  document.getElementById('cab-instance-address-view').textContent = document.getElementById('cab-instance-address').value;
+  document.getElementById('cab-instance-contact-view').textContent = document.getElementById('cab-instance-contact').value;
+  document.getElementById('cab-practice-name').textContent = document.getElementById('cab-instance-name').value;
+  toggleEditInstance();
+}
+
+// ===== Création d'un cabinet/CGA tout juste inscrit (F4, ADR-078, POST /practices) =====
+const REG_NUMBER_LABEL = {
+  cabinet_comptable: 'Numéro Ordre OCAECG',
+  gestionnaire: 'RCCM',
+  fiduciaire: 'RCCM',
+  cga: 'Agrément CGA',
+};
+function initFreshPractice(type, name, registrationNumber){
+  document.getElementById('cab-practice-name').textContent = name;
+  document.getElementById('cab-instance-name-view').textContent = name;
+  document.getElementById('cab-instance-name').value = name;
+
+  const regLabel = REG_NUMBER_LABEL[type] || 'Numéro Ordre OCAECG';
+  document.getElementById('cab-instance-ordre-label-view').textContent = regLabel;
+  document.getElementById('cab-instance-ordre-label').textContent = regLabel;
+  document.getElementById('cab-instance-ordre-view').textContent = registrationNumber || 'Non renseigné';
+  document.getElementById('cab-instance-ordre').value = registrationNumber || '';
+  document.getElementById('cab-instance-address-view').textContent = 'À renseigner';
+  document.getElementById('cab-instance-address').value = '';
+  document.getElementById('cab-instance-contact-view').textContent = 'À renseigner';
+  document.getElementById('cab-instance-contact').value = '';
+
+  // ordre_verified=false à la création — vérification toujours a posteriori (Backlog F4)
+  document.getElementById('cab-practice-badge').className = 'badge-ordre pending';
+  document.getElementById('cab-practice-badge').innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>' + regLabel + ' en cours de vérification';
+
+  document.getElementById('cab-cga-panel').hidden = type !== 'cga';
+
+  // Portefeuille vide — aucun mandat encore accepté
+  ORG_PORTFOLIO.length = 0;
+  cabActiveOrgId = null;
+  renderOrgSwitcher();
+  renderOrgCard();
+  renderClientsList();
+
+  // Seul le créateur, en tant que practice_admin (Backlog F4)
+  COLLABORATORS.length = 0;
+  COLLABORATORS.push({ id:'m1', name:'Vous', title:'Fondateur', role:'practice_admin' });
+  renderCollaborators();
+
+  // Palier Partner Free — 0 GNF/mois, revenue share nul (Grille-Offres §5.1)
+  document.getElementById('cab-partner-tier-short').textContent = 'Free';
+  document.getElementById('cab-revenue-total').textContent = '0';
+  document.getElementById('cab-revenue-detail').innerHTML = '<div style="padding:10px 0; text-align:center; font-size:11.5px; color:var(--text-dim);">Aucun client mandaté — le revenue share démarre au premier mandat accepté.</div>';
+  document.getElementById('cab-billing-formule').textContent = 'Partner Free · 0 GNF/mois';
+  document.getElementById('cab-billing-clients').textContent = '0 actif · 0 en attente';
+
+  document.querySelectorAll('.proto-bar [data-role]').forEach(b => b.classList.toggle('active', b.dataset.role === 'practice_admin'));
+  document.getElementById('cab-tab-cabinet').hidden = false;
+  document.querySelectorAll('.proto-bar [data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === (type === 'cga' ? 'cga' : 'cabinet_comptable')));
+
+  showScreen('cab-s-portefeuille');
+}
+
+window.cab_initFreshPractice = initFreshPractice;
+window.cab_showScreen = showScreen;
 window.cab_sendMandateRequest = sendMandateRequest;
 window.cab_showMemberDetail = showMemberDetail;
 window.cab_exportFec = exportFec;
@@ -3218,6 +4308,10 @@ window.cab_sendInvite = sendInvite;
 window.cab_changeMemberRole = changeMemberRole;
 window.cab_revokeMember = revokeMember;
 window.cab_selectOrg = selectOrg;
+window.cab_switchBook = switchBook;
+window.cab_openClient = openClient;
+window.cab_toggleEditInstance = toggleEditInstance;
+window.cab_saveInstance = saveInstance;
 window.cab_showInvoiceSheet = showInvoiceSheet;
 })();
 
@@ -3225,8 +4319,12 @@ window.cab_showInvoiceSheet = showInvoiceSheet;
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
   document.querySelectorAll('.proto-bar [data-go]').forEach(b => b.classList.toggle('active', b.dataset.go === id));
+  document.querySelectorAll('#shell3 .seg [data-screen]').forEach(b => b.classList.toggle('active', b.dataset.screen === id));
   window.scrollTo(0,0);
 }
+document.querySelectorAll('#shell3 .seg [data-screen]').forEach(btn => {
+  btn.addEventListener('click', () => showScreen(btn.dataset.screen));
+});
 document.querySelectorAll('.proto-bar [data-go]').forEach(btn => {
   btn.addEventListener('click', () => showScreen(btn.dataset.go));
 });
@@ -3252,7 +4350,7 @@ const DAF_INVOICES = [
     marche:'MPA-2026-00390', objet:'Réhabilitation de périmètre irrigué',
     serviceFait:{by:'Direction régionale Faranah', date:'1 juillet 2026'},
     validated:true, validatedDate:'5 juillet 2026',
-    rail:{type:'A', partner:'Ecobank', date:'6 juillet 2026'} },
+    rail:{type:'A', partner:'Ecobank', rate:'2,1 %/mois', date:'6 juillet 2026'} },
   { id:'d4', org:'Fournitures Baldé SARL', num:'FG-2026-000375', amount:5400000, date:'28 juin 2026',
     marche:'MPA-2026-00381', objet:'Réfection de clôture — annexe régionale',
     serviceFait:null, validated:false, disputed:true },
@@ -3272,6 +4370,7 @@ function renderDafList(){
       <div class="inv-main"><span class="inv-name">${inv.org}</span><span class="inv-sub">${inv.num} · marché ${inv.marche}</span></div>
       <div style="text-align:right;"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.validated ? 'paid' : (inv.disputed ? 'void' : 'pending')}" style="display:block; margin-top:4px;">${inv.validated ? 'Validée' : (inv.disputed ? 'Objection' : 'Non validée')}</span></div>
     </div>`).join('') : '<div style="padding:16px; font-size:12.5px; color:var(--text-dim); text-align:center;">Aucune facture dans cette catégorie.</div>';
+  renderSuppliersList();
 }
 
 function showDafDetail(id){
@@ -3297,8 +4396,8 @@ function showDafDetail(id){
   if (inv.validated) {
     document.getElementById('daf-dd-validated-date').textContent = 'Liquidation validée le ' + inv.validatedDate;
     document.getElementById('daf-dd-rail').innerHTML = inv.rail
-      ? `<span style="color:var(--good); font-weight:600;">Rail ${inv.rail.type}</span> — financé par ${inv.rail.partner}, le ${inv.rail.date}.`
-      : `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts.</span>`;
+      ? `<span style="color:var(--good); font-weight:600;">Rail ${inv.rail.type}</span> — financé par ${inv.rail.partner} (taux ${inv.rail.rate}), le ${inv.rail.date}. Banque partenaire choisie par le fournisseur selon le taux et les avantages proposés.`
+      : `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts. Le choix de la banque partenaire, selon le taux et les avantages proposés, appartient au fournisseur.</span>`;
   }
 
   showScreen('daf-s-detail');
@@ -3317,7 +4416,7 @@ function validateLiquidation(){
   document.getElementById('daf-dd-dispute-block').hidden = true;
   document.getElementById('daf-dd-validated-block').hidden = false;
   document.getElementById('daf-dd-validated-date').textContent = "Liquidation validée à l'instant";
-  document.getElementById('daf-dd-rail').innerHTML = `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts.</span>`;
+  document.getElementById('daf-dd-rail').innerHTML = `<span style="color:var(--text-dim);">Le fournisseur n'a pas encore choisi de rail — Rail A (financement immédiat) ou Rail B (attente Trésor) restent ouverts. Le choix de la banque partenaire, selon le taux et les avantages proposés, appartient au fournisseur.</span>`;
   renderDafList();
 }
 
@@ -3332,6 +4431,18 @@ function openDispute(){
   renderDafList();
 }
 
+function renderSuppliersList(){
+  const orgs = [...new Set(DAF_INVOICES.map(i => i.org))];
+  document.getElementById('daf-suppliers-list').innerHTML = orgs.map(org => {
+    const invs = DAF_INVOICES.filter(i => i.org === org);
+    const total = invs.reduce((s,i) => s + i.amount, 0);
+    const validated = invs.filter(i => i.validated).length;
+    return `<div class="inv-row">
+      <div class="inv-main"><span class="inv-name">${org}</span><span class="inv-sub">${invs.length} facture${invs.length > 1 ? 's' : ''} · ${validated} validée${validated > 1 ? 's' : ''}</span></div>
+      <span class="amount">${total.toLocaleString('fr-FR')}</span>
+    </div>`;
+  }).join('');
+}
 renderDafList();
 
 window.daf_openDispute = openDispute;
@@ -3341,13 +4452,20 @@ window.daf_validateLiquidation = validateLiquidation;
 })();
 
 (function(){
+const CLI_MAIN_TABS = ['cli-s-home','cli-s-liste','cli-s-aide'];
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
   document.querySelectorAll('.proto-bar [data-go]').forEach(b => b.classList.toggle('active', b.dataset.go === id));
+  document.querySelectorAll('#cli-tabbar [data-screen]').forEach(t => t.classList.toggle('active', t.dataset.screen === id));
+  document.getElementById('cli-tabbar').classList.toggle('visible', CLI_MAIN_TABS.includes(id));
   window.scrollTo(0,0);
 }
 document.querySelectorAll('.proto-bar [data-go]').forEach(btn => {
   btn.addEventListener('click', () => showScreen(btn.dataset.go));
+});
+document.getElementById('cli-tabbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-screen]');
+  if (btn) showScreen(btn.dataset.screen);
 });
 document.getElementById('cli-profil-sheet').addEventListener('click', (e) => {
   if (e.target.id === 'profil-sheet') e.target.classList.remove('open');
@@ -3382,12 +4500,28 @@ function renderOrgFilter(){
 function renderInvoices(){
   const due = CLIENT_INVOICES.filter(i => i.status !== 'paid').reduce((s,i) => s + (i.status === 'partial' ? (i.amount - i.paid) : i.amount), 0);
   document.getElementById('cli-total-due').textContent = due.toLocaleString('fr-FR') + ' GNF';
+  document.getElementById('cli-total-due-home').textContent = due.toLocaleString('fr-FR') + ' GNF';
   const list = currentOrgFilter === 'all' ? CLIENT_INVOICES : CLIENT_INVOICES.filter(i => i.org === currentOrgFilter);
   document.getElementById('cli-invoices-list').innerHTML = list.map(inv => `
     <div class="inv-row" onclick="cli_showDetail('${inv.id}')">
       <div class="inv-main"><span class="inv-org">${inv.org}</span><span class="inv-sub">${inv.num} · ${inv.date.split(' ').slice(0,2).join(' ')}</span></div>
       <div class="inv-side"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span><span class="pill ${inv.status}">${STATUS_LABEL[inv.status]}</span></div>
     </div>`).join('');
+}
+const NOTIF_TEXT = {
+  pending:{icon:'<path d="M12 9v4M12 17h.01M10.3 3.9L2.6 18a1.5 1.5 0 001.3 2.2h16.2a1.5 1.5 0 001.3-2.2L13.7 3.9a1.5 1.5 0 00-2.6 0z"/>', label:'Nouvelle facture reçue'},
+  partial:{icon:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/>', label:'Paiement partiel enregistré'},
+  paid:{icon:'<path d="M20 6L9 17l-5-5"/>', label:'Facture payée'},
+};
+function renderNotifications(){
+  const sorted = [...CLIENT_INVOICES].slice(0, 4);
+  document.getElementById('cli-notifications-list').innerHTML = sorted.map(inv => {
+    const n = NOTIF_TEXT[inv.status];
+    return `<div class="inv-row" onclick="cli_showDetail('${inv.id}')">
+      <div class="inv-main"><span class="inv-org">${n.label} — ${inv.org}</span><span class="inv-sub">${inv.num} · ${inv.date}</span></div>
+      <div class="inv-side"><span class="amount">${inv.amount.toLocaleString('fr-FR')}</span></div>
+    </div>`;
+  }).join('');
 }
 
 let currentInvoiceId = null;
@@ -3477,6 +4611,7 @@ function confirmAddNumber(){
 
 renderOrgFilter();
 renderInvoices();
+renderNotifications();
 
 window.cli_confirmAddNumber = confirmAddNumber;
 window.cli_confirmPayment = confirmPayment;
@@ -3724,6 +4859,87 @@ document.querySelectorAll('.shell0-lang-btn').forEach(btn => {
     btn.classList.add('active');
   });
 });
+
+// ===== Connexion — identité PME existante + identité Agent commercial terrain (OTP, ADR-107) =====
+function shell0ShowHero(){
+  document.getElementById('shell0-view-hero').hidden = false;
+  document.getElementById('shell0-view-login-pme').hidden = true;
+  document.getElementById('shell0-view-login-agent').hidden = true;
+  document.getElementById('shell0-view-cabinet-create').hidden = true;
+}
+function shell0ShowLogin(kind){
+  document.getElementById('shell0-view-hero').hidden = true;
+  document.getElementById('shell0-view-cabinet-create').hidden = true;
+  document.getElementById('shell0-view-login-pme').hidden = kind !== 'pme';
+  document.getElementById('shell0-view-login-agent').hidden = kind !== 'agent';
+  document.getElementById('login-' + kind + '-step-id').hidden = false;
+  document.getElementById('login-' + kind + '-step-otp').hidden = true;
+  document.getElementById('login-' + kind + '-id').value = '';
+  document.getElementById('login-' + kind + '-id-error').hidden = true;
+}
+function shell0ShowCabinetCreate(){
+  document.getElementById('shell0-view-hero').hidden = true;
+  document.getElementById('shell0-view-login-pme').hidden = true;
+  document.getElementById('shell0-view-login-agent').hidden = true;
+  document.getElementById('shell0-view-cabinet-create').hidden = false;
+  document.querySelectorAll('.cab-create-type').forEach(b => b.classList.remove('active'));
+  document.querySelector('.cab-create-type[data-type="cabinet_comptable"]').classList.add('active');
+  document.getElementById('cab-create-reg-label').textContent = 'Numéro Ordre OCAECG';
+  document.getElementById('cab-create-name').value = '';
+  document.getElementById('cab-create-reg').value = '';
+  document.getElementById('cab-create-name-error').hidden = true;
+}
+const CAB_CREATE_REG_LABEL = {
+  cabinet_comptable: 'Numéro Ordre OCAECG',
+  gestionnaire: 'RCCM',
+  fiduciaire: 'RCCM',
+  cga: 'Agrément CGA',
+};
+function shell0SelectPracticeType(btn){
+  document.querySelectorAll('.cab-create-type').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('cab-create-reg-label').textContent = CAB_CREATE_REG_LABEL[btn.dataset.type];
+}
+function shell0CreatePractice(){
+  const name = document.getElementById('cab-create-name').value.trim();
+  if (!name) {
+    document.getElementById('cab-create-name-error').hidden = false;
+    return;
+  }
+  document.getElementById('cab-create-name-error').hidden = true;
+  const type = document.querySelector('.cab-create-type.active')?.dataset.type || 'cabinet_comptable';
+  const reg = document.getElementById('cab-create-reg').value.trim();
+  showShell('shell2');
+  cab_initFreshPractice(type, name, reg);
+}
+function shell0SendOtp(kind){
+  const id = document.getElementById('login-' + kind + '-id').value.trim();
+  if (!id) {
+    document.getElementById('login-' + kind + '-id-error').hidden = false;
+    return;
+  }
+  document.getElementById('login-' + kind + '-id-error').hidden = true;
+  document.getElementById('login-' + kind + '-id-echo').textContent = id;
+  document.getElementById('login-' + kind + '-step-id').hidden = true;
+  document.getElementById('login-' + kind + '-step-otp').hidden = false;
+  document.getElementById('login-' + kind + '-otp').value = '';
+  document.getElementById('login-' + kind + '-otp-error').hidden = true;
+}
+function shell0VerifyOtp(kind){
+  const otp = document.getElementById('login-' + kind + '-otp').value.trim();
+  if (otp !== '0000') {
+    document.getElementById('login-' + kind + '-otp-error').hidden = false;
+    return;
+  }
+  document.getElementById('login-' + kind + '-otp-error').hidden = true;
+  if (kind === 'pme') {
+    showShell('shell-1');
+    s1_showScreen('s-accueil');
+  } else {
+    showShell('shell-agt');
+    agt_showScreen('agt-profile');
+  }
+}
 
 
 
