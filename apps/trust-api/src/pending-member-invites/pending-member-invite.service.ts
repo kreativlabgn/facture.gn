@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { OrganizationRole, PracticeMemberRole, Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { assertPracticeAdmin } from "../common/rbac/practice-access";
@@ -29,6 +29,8 @@ function pendingInviteNotExpiredWhere(): Prisma.PendingMemberInviteWhereInput {
 
 @Injectable()
 export class PendingMemberInviteService {
+  private readonly logger = new Logger(PendingMemberInviteService.name);
+
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     @Inject(SMS_PROVIDER) private readonly smsProvider: NotificationProvider,
@@ -210,6 +212,23 @@ export class PendingMemberInviteService {
           await tx.practiceMember.create({
             data: { practiceId: invite.practiceId, userId, role: invite.role as PracticeMemberRole },
           });
+        } else {
+          // Fix minor-followups 2026-08-24, revue post-fix #1 — organizationId
+          // ET practiceId peuvent désormais être tous les deux null : la cible
+          // de l'invitation (organisation ou cabinet) a été supprimée après
+          // coup (ON DELETE SET NULL, 20260824100000 + CHECK assoupli,
+          // 20260824110000). Le claim ci-dessus a déjà marqué l'invitation
+          // acceptedAt/resolvedUserId — choix délibéré de la laisser ainsi
+          // (jamais "acceptée à tort" : elle ne PEUT plus produire de
+          // membership puisque sa cible n'existe plus, donc rien à révoquer
+          // non plus) plutôt que de la laisser indéfiniment en attente pour un
+          // nouvel utilisateur qui ne pourra jamais la voir résolue. Log
+          // uniquement pour la visibilité opérationnelle — aucun membership
+          // créé, aucune erreur levée (ne doit jamais faire échouer
+          // AuthService.register()).
+          this.logger.warn(
+            `PendingMemberInvite ${invite.id} résolue sans cible : organisation/cabinet supprimé(e) entre l'envoi de l'invitation et l'inscription — aucun membership créé.`,
+          );
         }
       } catch (error) {
         // F10, revue post-fix #1 — le claim ci-dessus garantit qu'une seule

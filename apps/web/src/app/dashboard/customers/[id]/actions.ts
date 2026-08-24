@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireSessionToken } from "@/lib/session";
 import { mergeCustomer, TrustApiError } from "@/lib/trust-api";
 
@@ -15,16 +16,22 @@ export type MergeCustomerActionState = { error: string } | null;
 // MergeDuplicateForm, jamais ici : cette action ne fait AUCUNE hypothèse sur
 // la façon dont l'UI a obtenu le consentement, elle applique juste la fusion
 // demandée.
+//
+// Fix minor-followups 2026-08-24 — le formulaire n'envoie plus canonical/
+// duplicate directement (la fiche affichée n'est pas forcément celle à
+// conserver) mais pageCustomerId/candidateCustomerId + un flag "inverted" :
+// c'est ici, côté serveur, que le sens définitif de la fusion est tranché.
 export async function mergeCustomerAction(
   _prevState: MergeCustomerActionState,
   formData: FormData,
 ): Promise<MergeCustomerActionState> {
   const token = await requireSessionToken();
-  const canonicalCustomerId = String(formData.get("canonicalCustomerId") ?? "").trim();
-  const duplicateCustomerId = String(formData.get("duplicateCustomerId") ?? "").trim();
+  const pageCustomerId = String(formData.get("pageCustomerId") ?? "").trim();
+  const candidateCustomerId = String(formData.get("candidateCustomerId") ?? "").trim();
+  const inverted = formData.get("inverted") === "on";
   const confirmed = formData.get("confirmed") === "on";
 
-  if (!canonicalCustomerId || !duplicateCustomerId) {
+  if (!pageCustomerId || !candidateCustomerId) {
     return { error: "Fusion impossible : identifiant de client manquant" };
   }
   // Défense en profondeur — le bouton du formulaire est déjà désactivé tant
@@ -33,6 +40,9 @@ export async function mergeCustomerAction(
   if (!confirmed) {
     return { error: "Vous devez confirmer la fusion avant de continuer" };
   }
+
+  const canonicalCustomerId = inverted ? candidateCustomerId : pageCustomerId;
+  const duplicateCustomerId = inverted ? pageCustomerId : candidateCustomerId;
 
   try {
     await mergeCustomer(token, canonicalCustomerId, duplicateCustomerId);
@@ -45,5 +55,15 @@ export async function mergeCustomerAction(
 
   revalidatePath(`/dashboard/customers/${canonicalCustomerId}`);
   revalidatePath("/dashboard/customers");
+
+  // Si le sens est inversé, la fiche actuellement affichée (pageCustomerId)
+  // est celle qui vient d'être supprimée : rester sur cette page mènerait à
+  // un 404. On redirige vers la fiche survivante (canonicalCustomerId).
+  // Cas normal (non inversé) : pageCustomerId == canonicalCustomerId, la
+  // page reste valide, pas de redirection nécessaire.
+  if (inverted) {
+    redirect(`/dashboard/customers/${canonicalCustomerId}`);
+  }
+
   return null;
 }

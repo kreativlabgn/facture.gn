@@ -48,10 +48,10 @@ export default async function CustomerDetailPage({ params }: { params: Promise<P
 
       {customer.possibleDuplicateOf && customer.duplicateOf ? (
         <MergeDuplicateForm
-          canonicalCustomerId={customer.id}
-          canonicalCustomerName={customer.name}
-          duplicateCustomerId={customer.duplicateOf.id}
-          duplicateCustomerName={customer.duplicateOf.name}
+          pageCustomerId={customer.id}
+          pageCustomerName={customer.name}
+          candidateCustomerId={customer.duplicateOf.id}
+          candidateCustomerName={customer.duplicateOf.name}
         />
       ) : null}
     </div>

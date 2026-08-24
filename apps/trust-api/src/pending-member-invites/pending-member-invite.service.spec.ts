@@ -398,6 +398,33 @@ describe("PendingMemberInviteService", () => {
       expect(tx.practiceMember.create).toHaveBeenCalledTimes(1);
     });
 
+    it("ne crée AUCUN membership et ne lève pas si organizationId ET practiceId sont null (cible supprimée, revue post-fix #1)", async () => {
+      const tx: any = {
+        pendingMemberInvite: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue([{ id: "invite-orphan", organizationId: null, practiceId: null, role: "cashier" }]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        organizationMember: { create: vi.fn() },
+        practiceMember: { create: vi.fn() },
+      };
+      const service = new PendingMemberInviteService(createFakePrisma(), createFakeSmsProvider() as any);
+
+      // L'organisation ou le cabinet ciblé par l'invitation a été supprimé
+      // (ON DELETE SET NULL, 20260824100000 + CHECK assoupli, 20260824110000)
+      // entre l'envoi de l'invitation et l'inscription : le claim a déjà
+      // marqué l'invitation acceptée, mais aucune cible ne subsiste pour
+      // créer un membership — ne doit jamais lever.
+      await expect(service.resolveForNewUser(tx, "new-user-1", "+224600000001")).resolves.toBeUndefined();
+      expect(tx.organizationMember.create).not.toHaveBeenCalled();
+      expect(tx.practiceMember.create).not.toHaveBeenCalled();
+      expect(tx.pendingMemberInvite.updateMany).toHaveBeenCalledWith({
+        where: { id: "invite-orphan", acceptedAt: null, revokedAt: null },
+        data: { acceptedAt: expect.any(Date), resolvedUserId: "new-user-1" },
+      });
+    });
+
     it("propage toute autre erreur de création de membership (pas absorbée par le catch de doublon)", async () => {
       const tx: any = {
         pendingMemberInvite: {
