@@ -642,8 +642,19 @@ model PendingMemberInvite {
   resolvedUserId  String?   @map("resolved_user_id")
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  organization  Organization?         @relation(fields: [organizationId], references: [id])
-  practice      ProfessionalPractice? @relation(fields: [practiceId], references: [id])
+  // Fix minor-followups 2026-08-24 — organizationId/practiceId sont des FK
+  // optionnelles : onDelete: SetNull explicite pour s'aligner sur le pattern
+  // du reste du schema pour toute FK optionnelle (Customer.possibleDuplicateOf,
+  // Mandate.grantedBy, CreditLimitChangeRequest.resolvedByUserId...) — la
+  // migration initiale (20260823150000) les avait à tort en RESTRICT, copié du
+  // pattern des FK organizationId/practiceId REQUISES d'AssistedSession/Mandate/
+  // PracticeMember/OrganizationMember, seul cas où RESTRICT est correct dans ce
+  // schema. Aucune fonctionnalité de suppression d'organisation/cabinet
+  // n'existe aujourd'hui (impact pratique nul), mais RESTRICT bloquerait à
+  // tort cette suppression future à cause d'une invitation même déjà
+  // résolue/expirée/révoquée et jamais purgée.
+  organization  Organization?         @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  practice      ProfessionalPractice? @relation(fields: [practiceId], references: [id], onDelete: SetNull)
   invitedByUser User                  @relation("PendingMemberInviteInviter", fields: [invitedByUserId], references: [id])
   resolvedUser  User?                 @relation("PendingMemberInviteResolvedUser", fields: [resolvedUserId], references: [id])
 
