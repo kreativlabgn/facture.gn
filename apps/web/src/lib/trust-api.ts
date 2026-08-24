@@ -228,6 +228,58 @@ export async function mergeCustomer(
   return response.json();
 }
 
+// Champs consommés par la liste produits (dashboard) — mirroir de GET /products
+// (ProductsService.findAllByOrganization). possibleDuplicateOf : UUID brut
+// (même convention que CustomerListItem), utilisé seulement comme signal
+// booléen pour le badge — le nom lisible du candidat n'est résolu que sur
+// l'écran détail (ProductDetail ci-dessous, getProduct()). costPrice en
+// centimes GNF sérialisé string (comme creditLimit), nullable — E6 : la
+// création d'un produit n'est jamais bloquée par l'absence de coût.
+export interface ProductListItem {
+  id: string;
+  name: string;
+  costPrice: string | null;
+  possibleDuplicateOf: string | null;
+}
+
+export async function listProducts(
+  token: string,
+  organizationId: string,
+  pagination: { take?: number } = {},
+): Promise<ProductListItem[]> {
+  const params = new URLSearchParams({ organizationId });
+  if (pagination.take) {
+    params.set("take", String(pagination.take));
+  }
+  const response = await authenticatedFetch(`/products?${params.toString()}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les produits", response.status);
+  }
+  return response.json();
+}
+
+// Mirroir de GET /products/:id (findOneWithDuplicate) — écran détail produit
+// (UI backlog gap). duplicateOf {id, name} résolu côté trust-api seulement
+// quand possibleDuplicateOf est renseigné — jamais fabriqué ici. Pas de
+// runningBalance (aucun équivalent pour un produit) ni de merge() (E3,
+// décision actée : la fusion n'est demandée par le Backlog que pour les
+// clients, E4).
+export interface ProductDetail {
+  id: string;
+  name: string;
+  costPrice: string | null;
+  possibleDuplicateOf: string | null;
+  duplicateOf: { id: string; name: string } | null;
+}
+
+export async function getProduct(token: string, productId: string): Promise<ProductDetail> {
+  const response = await authenticatedFetch(`/products/${encodeURIComponent(productId)}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger ce produit", response.status);
+  }
+  return response.json();
+}
+
 export interface CreateInvoiceLineInput {
   description: string;
   quantity: number;
