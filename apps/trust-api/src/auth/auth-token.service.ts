@@ -10,10 +10,18 @@ export interface AuthTokenPayload {
   // jamais recalculé ici.
   jti: string;
   exp?: number;
+  // Cross-Story Audit 2026-08-24, finding #1 — portée du token. undefined/absent
+  // (login()/register()) = portée complète, comportement historique inchangé.
+  // "client_portal" (ClientPortalAuthService.verifyOtp(), OTP F13) = un contrôle
+  // de numéro de téléphone SEULEMENT, jamais un mot de passe — RolesGuard rejette
+  // désormais explicitement ce scope sur toute route @Roles(), et
+  // ClientPortalScopeGuard n'accepte que ce scope (ou son absence) sur les
+  // routes du portail client. Aucune autre valeur n'existe à ce jour.
+  scope?: string;
 }
 
 export interface AuthTokenService {
-  sign(payload: Pick<AuthTokenPayload, "sub">): Promise<string>;
+  sign(payload: Omit<AuthTokenPayload, "jti" | "exp">): Promise<string>;
   verify(token: string): Promise<AuthTokenPayload>;
 }
 
@@ -37,7 +45,7 @@ export class JwtAuthTokenService implements AuthTokenService {
     });
   }
 
-  sign(payload: Pick<AuthTokenPayload, "sub">): Promise<string> {
+  sign(payload: Omit<AuthTokenPayload, "jti" | "exp">): Promise<string> {
     return this.jwt.signAsync({ ...payload, jti: randomUUID() });
   }
 

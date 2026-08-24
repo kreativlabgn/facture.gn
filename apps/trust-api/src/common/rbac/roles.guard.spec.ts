@@ -66,6 +66,30 @@ describe("RolesGuard", () => {
     await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
   });
 
+  it("Cross-Story Audit 2026-08-24, finding #1 CRITIQUE — refuse (403) un token scope:\"client_portal\" sur une route @Roles(), même avec un membership par ailleurs valide", async () => {
+    const prisma: any = {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"]), prisma);
+    const context = buildContext({ user: { id: "user-1", scope: "client_portal" }, body: { organizationId: "org-1" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    // Rejeté avant même de consulter le membership réel — un token portail client
+    // ne doit jamais déclencher de résolution d'autorisation organisationnelle.
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("Cross-Story Audit 2026-08-24, finding #1 — non-régression : un token de portée complète (scope absent) reste accepté sur une route @Roles()", async () => {
+    const prisma: any = {
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "admin"]), prisma);
+    const context = buildContext({ user: { id: "user-1" }, body: { organizationId: "org-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalled();
+  });
+
   it("refuse (403) quand aucun membership n'existe pour cette organisation", async () => {
     const prisma: any = { organizationMember: { findUnique: vi.fn().mockResolvedValue(null) } };
     const guard = new RolesGuard(createReflector(["owner"]), prisma);

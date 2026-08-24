@@ -29,6 +29,23 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
+    const request = context.switchToHttp().getRequest();
+
+    // Cross-Story Audit 2026-08-24, finding #1 — défense en profondeur seulement
+    // depuis le correctif résiduel : le rejet non-négociable des tokens
+    // scope:"client_portal" vit maintenant dans JwtAuthGuard (global, s'exécute
+    // avant ce guard, deny-by-default sur TOUTE route sauf @AllowClientPortalScope())
+    // — voir auth/jwt-auth.guard.ts. Ce check-ci ne peut donc plus jamais être
+    // atteint par un tel token en pratique (JwtAuthGuard aurait déjà rejeté avant
+    // que ce guard ne s'exécute), mais reste volontairement en place : si
+    // JwtAuthGuard était un jour modifié sans que ce fichier le soit, une route
+    // @Roles() resterait quand même protégée contre un token scope:"client_portal"
+    // (ClientPortalAuthService.verifyOtp(), OTP F13, preuve de possession du
+    // téléphone UNIQUEMENT, jamais un mot de passe).
+    if (request.user?.scope === "client_portal") {
+      throw new ForbiddenException("Ce token (portail client) n'est pas autorisé sur cette route");
+    }
+
     // Défaut "invoice" : rétrocompatible avec toutes les routes existantes qui ne
     // déclarent pas @OrganizationIdSource() (issue/void/...).
     const idSource =
@@ -37,7 +54,6 @@ export class RolesGuard implements CanActivate {
         context.getClass(),
       ]) ?? "invoice";
 
-    const request = context.switchToHttp().getRequest();
     const organizationId = await this.resolveOrganizationId(request, idSource);
 
     const membership = await this.prisma.organizationMember.findUnique({

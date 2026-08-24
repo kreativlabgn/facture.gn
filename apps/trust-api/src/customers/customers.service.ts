@@ -39,24 +39,49 @@ export class CustomersService {
   // existante de l'organisation uniquement (pas de "lot en cours" ici, une seule ligne)
   // — jamais de fusion automatique, juste le signal possibleDuplicateOf pour résolution
   // manuelle ultérieure (merge(), E4).
+  //
+  // Cross-Story Audit 2026-08-24, finding #3 MOYENNE-HAUTE (verrou consultatif) —
+  // pg_advisory_xact_lock(hashtext(...)) posé AVANT le findFirst, sur une clé
+  // dérivée de organizationId+phone : sérialise les créations concurrentes pour
+  // LE MÊME téléphone (la seconde attend que la première commite son
+  // findFirst+create, voit alors le nouvel enregistrement et pose correctement
+  // possibleDuplicateOf) sans jamais bloquer deux créations pour des téléphones
+  // différents (hash différent → verrous différents, indépendants). `_xact_` :
+  // relâché automatiquement à la fin de CETTE transaction (commit ou rollback),
+  // jamais besoin d'un unlock explicite. Remplace la limite précédente
+  // (findFirst+create simplement englobés dans $transaction(), qui ne changeait
+  // rien sous isolation Read Committed — voir historique de ce commentaire) :
+  // un verrou consultatif n'est pas soumis à l'isolation des transactions,
+  // c'est un mécanisme de sérialisation explicite orthogonal à MVCC. Toujours
+  // pas une contrainte unique DB (ADR-038 l'exclut explicitement — deux clients
+  // légitimement différents PEUVENT partager un téléphone, ce n'est qu'un
+  // SIGNAL) : le verrou ne fait que garantir que le signal est posé de façon
+  // fiable sous course réelle, jamais qu'une seule ligne peut exister pour ce
+  // téléphone.
   async create(dto: CreateCustomerDto) {
-    const existingMatch = dto.phone
-      ? await this.prisma.customer.findFirst({
-          where: { organizationId: dto.organizationId, phone: dto.phone },
-        })
-      : null;
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.phone) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${dto.organizationId}:${dto.phone}`}))`;
+      }
 
-    return this.prisma.customer.create({
-      data: {
-        organizationId: dto.organizationId,
-        name: dto.name,
-        phone: dto.phone,
-        nif: dto.nif,
-        creditLimit: dto.creditLimit,
-        // undefined → Prisma applique le défaut schema ("sms"), jamais dupliqué ici.
-        notificationChannel: dto.notificationChannel,
-        possibleDuplicateOf: existingMatch?.id ?? null,
-      },
+      const existingMatch = dto.phone
+        ? await tx.customer.findFirst({
+            where: { organizationId: dto.organizationId, phone: dto.phone },
+          })
+        : null;
+
+      return tx.customer.create({
+        data: {
+          organizationId: dto.organizationId,
+          name: dto.name,
+          phone: dto.phone,
+          nif: dto.nif,
+          creditLimit: dto.creditLimit,
+          // undefined → Prisma applique le défaut schema ("sms"), jamais dupliqué ici.
+          notificationChannel: dto.notificationChannel,
+          possibleDuplicateOf: existingMatch?.id ?? null,
+        },
+      });
     });
   }
 
