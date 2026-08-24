@@ -653,6 +653,15 @@ model PendingMemberInvite {
   // n'existe aujourd'hui (impact pratique nul), mais RESTRICT bloquerait à
   // tort cette suppression future à cause d'une invitation même déjà
   // résolue/expirée/révoquée et jamais purgée.
+  //
+  // Revue post-fix #1 (20260824110000) — SetNull seul NE suffisait PAS : la
+  // contrainte CHECK pending_member_invite_xor_target_check imposait alors
+  // EXACTEMENT un des deux champs non-nul, donc (organizationId: null,
+  // practiceId: null) après un SET NULL violait le CHECK et bloquait quand
+  // même toute suppression. Le CHECK a été assoupli en "jamais les deux à la
+  // fois" (20260824110000) pour tolérer ce (null, null) comme état terminal
+  // légitime, et resolveForNewUser() (pending-member-invite.service.ts) gère
+  // désormais explicitement ce cas.
   organization  Organization?         @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   practice      ProfessionalPractice? @relation(fields: [practiceId], references: [id], onDelete: SetNull)
   invitedByUser User                  @relation("PendingMemberInviteInviter", fields: [invitedByUserId], references: [id])
