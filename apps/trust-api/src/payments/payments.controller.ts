@@ -1,9 +1,20 @@
-import { BadRequestException, Body, Controller, Headers, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  StreamableFile,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { Public } from "../auth/public.decorator";
 import { InternalAuthGuard } from "../common/internal-auth.guard";
+import { RenderingService } from "../rendering/rendering.service";
 import { createPaymentSchema, type CreatePaymentDto } from "./dto/create-payment.dto";
 import {
   confirmProviderPaymentSchema,
@@ -23,7 +34,27 @@ const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 @ApiBearerAuth()
 @Controller("invoices/:id/payments")
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly renderingService: RenderingService,
+  ) {}
+
+  // Lot A — reçu de paiement (PDF A5). :id (facture) alimente RolesGuard comme
+  // pour les POST ci-dessous ; RenderingService revérifie que :paymentId
+  // appartient bien à cette facture (IDOR → 404). Même trio de rôles que
+  // l'enregistrement d'un paiement + accountant_internal (besoin comptable).
+  @Get(":paymentId/receipt")
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "delivery_driver")
+  async downloadReceipt(
+    @Param("id") invoiceId: string,
+    @Param("paymentId") paymentId: string,
+  ): Promise<StreamableFile> {
+    const { pdf, filename } = await this.renderingService.renderReceiptPdf(invoiceId, paymentId);
+    return new StreamableFile(pdf, {
+      type: "application/pdf",
+      disposition: `attachment; filename="${filename}"`,
+    });
+  }
 
   // :id (facture) alimente RolesGuard.resolveOrganizationId() — voir le commentaire
   // sur le DTO, aucun invoiceId dans le body pour ne pas devoir généraliser le guard.
