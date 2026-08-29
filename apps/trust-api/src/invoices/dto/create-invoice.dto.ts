@@ -15,6 +15,12 @@ export const invoiceLineSchema = z.object({
   // (cas majoritaire actuel). Une ligne sans productId n'a simplement pas de
   // marge calculable, jamais une erreur.
   productId: z.string().uuid().optional(),
+  // Lot C, ADR-109 — EN 16931 BT-157 (identifiant standard de l'article :
+  // réf. catalogue acheteur, code CPV…). Déclaratif, jamais vérifié. Distinct
+  // de productId (catalogue interne). Pas de .min(1) — même discipline
+  // qu'ADR-090 (une chaîne vide envoyée explicitement est transportée telle
+  // quelle, jamais promue en erreur).
+  productCode: z.string().optional(),
 });
 
 export const createInvoiceSchema = z
@@ -54,6 +60,17 @@ export const createInvoiceSchema = z
     // avec "AUCUNE vérification automatique" : ce DTO ne juge pas le
     // contenu du champ, il le transporte tel quel.
     referenceMarche: z.string().optional(),
+    // Lot C, ADR-109 — contexte et références B2G structurées, alignement
+    // EN 16931. Tous DÉCLARATIFS, recopiés tels quels, AUCUNE vérification
+    // (même discipline qu'ADR-090 : la cohérence est rapprochée humainement
+    // par le DAF à la validation de liquidation — jamais de refine bloquant,
+    // notamment pas "marche_public exige referenceMarche" qui contredirait
+    // ADR-090). numeroBonCommande = BT-13, numeroContrat = BT-12,
+    // numeroEngagement = engagement budgétaire Trésor (hors EN 16931 core).
+    cadreFacturation: z.enum(["standard", "marche_public"]).default("standard"),
+    numeroBonCommande: z.string().optional(),
+    numeroContrat: z.string().optional(),
+    numeroEngagement: z.string().optional(),
   })
   .refine(
     (data) =>

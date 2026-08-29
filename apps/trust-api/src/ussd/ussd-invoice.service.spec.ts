@@ -139,6 +139,8 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
         customerId: "customer-1",
         lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
         discountPct: 0,
+        // Lot C — Option 4 (vente ordinaire) : cadre standard.
+        cadreFacturation: "standard",
       },
       // Lot D — canal 'ussd' posé côté serveur, jamais déduit d'un DTO.
       "ussd",
@@ -208,7 +210,20 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
         lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
         discountPct: 0,
         referenceMarche: undefined,
+        cadreFacturation: "standard",
       },
+      "ussd",
+    );
+  });
+
+  it("Option 6 : cadre 'marche_public' transmis à createDraft (Lot C)", async () => {
+    const invoicesService = createFakeInvoicesService();
+    const service = new UssdInvoiceService(createFakePrisma() as any, createFakeOrganizationsService() as any, invoicesService as any, createFakeVelocityTier() as any);
+
+    await service.emitInvoice(ORG_ID, 500_000n, "customer-1", "TELEMO-2026-000123", "marche_public");
+
+    expect(invoicesService.createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ cadreFacturation: "marche_public", referenceMarche: "TELEMO-2026-000123" }),
       "ussd",
     );
   });

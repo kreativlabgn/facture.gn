@@ -29,6 +29,8 @@ function invoiceInput(overrides: Partial<InvoiceRenderInput> = {}): InvoiceRende
     legalMentions: ["TVA au taux de 18 % incluse dans le montant TTC.", "Retard de paiement : pénalités exigibles."],
     verificationUrl: "https://verify.facture.gn/GN-12345678-2026-ABC123",
     qrDataUrl: QR_STUB,
+    untdidTypeCode: "380",
+    b2gReferences: [],
     ...overrides,
   };
 }
@@ -106,6 +108,33 @@ describe("buildInvoiceDocDefinition", () => {
     const json = JSON.stringify(buildInvoiceDocDefinition(invoiceInput()));
     expect(json).toContain("TVA au taux de 18");
     expect(json).toContain("https://verify.facture.gn/GN-12345678-2026-ABC123");
+  });
+
+  it("affiche le code UNTDID 1001 quand il est fourni, rien quand il est null (Lot C)", () => {
+    const withCode = JSON.stringify(buildInvoiceDocDefinition(invoiceInput({ untdidTypeCode: "380" })));
+    expect(withCode).toContain("380");
+
+    const withoutCode = JSON.stringify(buildInvoiceDocDefinition(invoiceInput({ untdidTypeCode: null })));
+    expect(withoutCode).not.toMatch(/UNTDID/i);
+  });
+
+  it("affiche un bloc de références B2G seulement si au moins une référence est présente (Lot C)", () => {
+    const none = JSON.stringify(buildInvoiceDocDefinition(invoiceInput({ b2gReferences: [] })));
+    expect(none).not.toMatch(/r[ée]f[ée]rences/i);
+
+    const withRefs = JSON.stringify(
+      buildInvoiceDocDefinition(
+        invoiceInput({
+          b2gReferences: [
+            { label: "Référence marché", value: "TELEMO-2026-000123" },
+            { label: "Bon de commande", value: "BC-MEF-2026-0042" },
+          ],
+        }),
+      ),
+    );
+    expect(withRefs).toMatch(/r[ée]f[ée]rences/i);
+    expect(withRefs).toContain("TELEMO-2026-000123");
+    expect(withRefs).toContain("BC-MEF-2026-0042");
   });
 });
 

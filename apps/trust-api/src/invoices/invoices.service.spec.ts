@@ -2402,3 +2402,57 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
     );
   });
 });
+
+describe("InvoicesService — champs EN 16931 / B2G (Lot C)", () => {
+  it("persiste cadreFacturation, numeroBonCommande, numeroContrat, numeroEngagement et le productCode de ligne", async () => {
+    const prisma = createFakePrismaForCreateDraft("tpu");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      cadreFacturation: "marche_public",
+      numeroBonCommande: "BC-MEF-2026-0042",
+      numeroContrat: "CT-2026-118",
+      numeroEngagement: "ENG-2026-00931",
+      lines: [{ description: "Fourniture ordinateurs", quantity: 10, unitPrice: 4_500_000n, productCode: "CPV-30213000" }],
+    } as any);
+
+    const createCall = (prisma.invoice.create as any).mock.calls[0][0];
+    expect(createCall.data).toMatchObject({
+      cadreFacturation: "marche_public",
+      numeroBonCommande: "BC-MEF-2026-0042",
+      numeroContrat: "CT-2026-118",
+      numeroEngagement: "ENG-2026-00931",
+    });
+    expect(createCall.data.lines.create[0]).toMatchObject({ productCode: "CPV-30213000" });
+  });
+
+  it("par défaut : cadreFacturation 'standard', références et productCode undefined", async () => {
+    const prisma = createFakePrismaForCreateDraft("tpu");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Vente comptoir", quantity: 1, unitPrice: 100_000n }],
+    } as any);
+
+    const createCall = (prisma.invoice.create as any).mock.calls[0][0];
+    expect(createCall.data.cadreFacturation).toBe("standard");
+    expect(createCall.data.numeroBonCommande).toBeUndefined();
+    expect(createCall.data.numeroContrat).toBeUndefined();
+    expect(createCall.data.numeroEngagement).toBeUndefined();
+    expect(createCall.data.lines.create[0].productCode).toBeUndefined();
+  });
+});

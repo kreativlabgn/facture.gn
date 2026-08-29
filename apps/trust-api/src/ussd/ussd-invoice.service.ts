@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { OrganizationRole, PrismaClient } from "@facture-gn/db";
+import type { InvoiceCadre, OrganizationRole, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { InvoicesService } from "../invoices/invoices.service";
@@ -67,6 +67,10 @@ export class UssdInvoiceService {
     amountCentimes: bigint,
     customerId: string | undefined,
     referenceMarche?: string,
+    // Lot C — Option 6 "Commande Publique" passe "marche_public" ; Option 4
+    // (vente ordinaire) garde le défaut. Jamais dérivé de referenceMarche
+    // (optionnel même en marche_public, ADR-090).
+    cadreFacturation: InvoiceCadre = "standard",
   ) {
     // D4, §2.4 Spec USSD — "plafonds velocity_tier vérifiés avant confirmation",
     // toujours avant toute création (jamais un brouillon abandonné en base).
@@ -80,6 +84,7 @@ export class UssdInvoiceService {
         lines: [{ description: "Vente USSD", quantity: 1, unitPrice: amountCentimes }],
         discountPct: 0,
         referenceMarche,
+        cadreFacturation,
       },
       // Lot D — canal *620#. Posé ici, jamais dans le DTO.
       "ussd",

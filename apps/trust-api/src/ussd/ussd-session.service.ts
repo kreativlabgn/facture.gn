@@ -959,7 +959,15 @@ export class UssdSessionService {
 
     let invoice;
     try {
-      invoice = await this.ussdInvoice.emitInvoice(organizationId, amountCentimes, customerId, referenceMarche);
+      // Lot C — Option 6 "Commande Publique" : cadre marche_public explicite
+      // (jamais dérivé de referenceMarche, optionnel — ADR-090).
+      invoice = await this.ussdInvoice.emitInvoice(
+        organizationId,
+        amountCentimes,
+        customerId,
+        referenceMarche,
+        "marche_public",
+      );
     } catch (error) {
       if (error instanceof ForbiddenException) {
         await this.setState(session.id, "emit_terminal", { emitTerminalMessage: error.message });

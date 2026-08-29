@@ -54,6 +54,11 @@ export interface InvoiceRenderInput {
   legalMentions: string[];
   verificationUrl: string;
   qrDataUrl: string;
+  // Lot C — code UNTDID 1001 (EN 16931 BT-3), null pour un devis. Bloc de
+  // références B2G déjà assemblé par RenderingService (label + valeur des seules
+  // références non-nulles) — le renderer n'inspecte jamais les champs bruts.
+  untdidTypeCode: string | null;
+  b2gReferences: { label: string; value: string }[];
 }
 
 function formatDate(date: Date): string {
@@ -176,6 +181,9 @@ export function buildInvoiceDocDefinition(input: InvoiceRenderInput): object {
             { text: "FACTURE", fontSize: 20, bold: true, color: PALETTE.accent },
             { text: `N° ${input.number}`, margin: [0, 4, 0, 0] },
             { text: `Émise le ${formatDate(input.issuedAt)}`, fontSize: 9, color: PALETTE.muted },
+            ...(input.untdidTypeCode
+              ? [{ text: `Type UNTDID 1001 : ${input.untdidTypeCode}`, fontSize: 8, color: PALETTE.muted }]
+              : []),
           ],
         },
       ],
@@ -184,6 +192,20 @@ export function buildInvoiceDocDefinition(input: InvoiceRenderInput): object {
 
   if (input.customer) {
     content.push(customerBlock(input.customer));
+  }
+
+  if (input.b2gReferences.length > 0) {
+    content.push({
+      margin: [0, 14, 0, 0],
+      stack: [
+        { text: "Références", fontSize: 8, color: PALETTE.muted, characterSpacing: 0.5 },
+        ...input.b2gReferences.map((ref) => ({
+          text: `${ref.label} : ${ref.value}`,
+          fontSize: 9,
+          margin: [0, 1, 0, 1],
+        })),
+      ],
+    });
   }
 
   content.push(linesTable(input.lines));

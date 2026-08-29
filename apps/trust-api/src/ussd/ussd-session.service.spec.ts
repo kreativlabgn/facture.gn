@@ -1355,7 +1355,8 @@ describe("UssdSessionService — option 6, commande publique (K3, §2.6 Spec USS
 
       const result = await service.handleRequest(SESSION_ID, PHONE, "TELEMO-2026-000123");
 
-      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", "TELEMO-2026-000123");
+      // Lot C — Option 6 pose le cadre marche_public (jamais dérivé de la réf).
+      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", "TELEMO-2026-000123", "marche_public");
       // Revue post-fix #4 — texte exact (pas seulement .toContain(numéro)) :
       // customerId est TOUJOURS renseigné sur l'Option 6 (client entité
       // publique obligatoirement sélectionné), donc C9 part TOUJOURS. Le
@@ -1377,7 +1378,7 @@ describe("UssdSessionService — option 6, commande publique (K3, §2.6 Spec USS
 
       const result = await service.handleRequest(SESSION_ID, PHONE, "");
 
-      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", undefined);
+      expect(ussdInvoice.emitInvoice).toHaveBeenCalledWith(ORG_ID, 50_000_000n, "customer-public-1", undefined, "marche_public");
       // Revue post-fix #4 — texte exact : même sans référence marché, le
       // client entité publique reste toujours renseigné, donc la mention SMS
       // reste toujours présente (identique au cas avec référence ci-dessus).

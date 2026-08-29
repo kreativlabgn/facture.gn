@@ -114,6 +114,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
         branchId: undefined,
         lines: SAMPLE_LINES,
         discountPct: 0,
+        cadreFacturation: "standard",
       },
       // Lot D — génération récurrente = canal "pwa" (endpoint PWA).
       "pwa",

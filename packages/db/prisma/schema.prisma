@@ -133,6 +133,16 @@ enum InvoiceDocumentType {
   quote
 }
 
+// Lot C, ADR-109 — marqueur de contexte de facturation B2G, posé explicitement
+// (jamais dérivé de customer.isPublicEntity). marche_public : la facture entre
+// dans un dossier de commande publique. Déclaratif, jamais bloquant — aucune
+// règle n'exige reference_marche même en marche_public (ADR-090 : optionnel,
+// cohérence vérifiée humainement par le DAF).
+enum InvoiceCadre {
+  standard
+  marche_public
+}
+
 // Lot D — canal par lequel une facture a été émise. Posé exclusivement côté
 // serveur par le chemin de code (2e argument de InvoicesService.createDraft),
 // jamais depuis un DTO client (un appelant PWA pourrait mentir sur son canal).
@@ -954,7 +964,19 @@ model Invoice {
   recurringTemplate RecurringInvoiceTemplate? @relation(fields: [recurringTemplateId], references: [id])
 
   quoteValidUntil DateTime? @map("quote_valid_until")
-  referenceMarche String?   @map("reference_marche")
+
+  // B2G — références déclaratives, recopiées telles quelles à l'émission, AUCUNE
+  // vérification automatique (même discipline que referenceMarche / ADR-090 ;
+  // le DAF rapproche humainement au moment de la validation de liquidation).
+  // Alignement EN 16931 (Lot C, ADR-109) : referenceMarche = BT-17 (marché/lot),
+  // numeroBonCommande = BT-13, numeroContrat = BT-12, numeroEngagement = hors
+  // EN 16931 core (engagement budgétaire Trésor, spécifique Guinée — mappera
+  // BT-19 à l'export UBL 2.1 / ADR-053). Jamais dans CertifiablePayload.
+  referenceMarche   String?      @map("reference_marche")
+  cadreFacturation  InvoiceCadre @default(standard) @map("cadre_facturation")
+  numeroBonCommande String?      @map("numero_bon_commande")
+  numeroContrat     String?      @map("numero_contrat")
+  numeroEngagement  String?      @map("numero_engagement")
 
   // K4/K5, ADR-089 — la seule présence de financedByPartnerId bloque tout second
   // financement (K5). Snapshot jamais réévalué : une facture financée le reste,
@@ -1115,6 +1137,11 @@ model InvoiceLine {
   taxRateBps  Int    @default(0) @map("tax_rate_bps")
 
   costPriceAtTime BigInt? @map("cost_price_at_time")
+
+  // Lot C, ADR-109 — EN 16931 BT-157 (identifiant standard de l'article :
+  // référence catalogue acheteur, nomenclature CPV…). Déclaratif, jamais
+  // vérifié. Distinct de productId (FK catalogue interne de la PME).
+  productCode String? @map("product_code")
 
   invoice         Invoice          @relation(fields: [invoiceId], references: [id])
   // ON DELETE SET NULL : la suppression future d'un produit ne doit jamais
