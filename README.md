@@ -111,6 +111,19 @@ Logs JSON structurés (pino) avec redaction PII systémique et corrélation par
 `LOG_LEVEL`. Ne jamais loguer un enregistrement Prisma entier — voir
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+## Observabilité
+
+| Endpoint | Rôle |
+|---|---|
+| `GET /health/live` | livenessProbe k8s — le process répond, aucun I/O |
+| `GET /health/ready` | readinessProbe — dépendances dures (Postgres ; + Redis sur money-api) |
+| `GET /metrics` | exposition Prometheus (histogramme de latence HTTP + métriques Node) |
+
+Ces trois routes sont **non authentifiées** et destinées au réseau interne du
+cluster — **ne jamais les exposer via l'ingress public**. SLO et requêtes de
+mesure : [`docs/slo.md`](docs/slo.md). Les traces OpenTelemetry sont une tranche
+suivante.
+
 ## Contribuer
 
 Workflow, conventions de commit et pièges connus : [`CONTRIBUTING.md`](CONTRIBUTING.md).
