@@ -653,5 +653,30 @@ Conséquences : Backlog F13 corrigé — « Vérification par PIN via USER_PHONE
 
 ---
 
-*facture.gn — Registre ADR — Document confidentiel — 20 août 2026*
+## Partie 24 — Alignement EN 16931 et références B2G structurées (ADR-109)
+
+Décision actée le 29 août 2026, en marge des travaux d'infrastructure « cap 10/10 » (restitution PDF, canal d'émission). Jusqu'ici le seul champ B2G modélisé est `INVOICE.reference_marche` (ADR-090, K3). L'agrément PDP visé Q3 2027 et l'export UBL 2.1 (ADR-053) supposent que la facture porte les *business terms* structurés d'EN 16931 — aujourd'hui absents, ce qui obligerait à les reconstruire ou les deviner au moment de l'export.
+
+**ADR-109 — Champs B2G structurés alignés EN 16931, tous déclaratifs**
+
+Décision : `INVOICE` gagne quatre champs et `INVOICE_LINE` un champ, tous **déclaratifs, recopiés tels quels à l'émission, sans aucune vérification automatique** — même discipline qu'ADR-090 (la cohérence avec le dossier de commande publique est rapprochée humainement par le DAF au moment de la validation de liquidation) :
+
+| Champ | Business term EN 16931 | Rôle |
+|---|---|---|
+| `reference_marche` *(existant)* | BT-17 — Tender or lot reference | référence d'attribution du marché (TELEMO) |
+| `cadre_facturation` *(nouveau, enum `standard` / `marche_public`)* | *hors EN 16931* | marqueur de contexte explicite, jamais dérivé de `customer.is_public_entity` |
+| `numero_bon_commande` *(nouveau)* | BT-13 — Purchase order reference | bon de commande de l'acheteur |
+| `numero_contrat` *(nouveau)* | BT-12 — Contract reference | référence du contrat/marché |
+| `numero_engagement` *(nouveau)* | *hors EN 16931 core* — mappe BT-19 (Buyer accounting reference) à l'export UBL | numéro d'engagement budgétaire du Trésor, spécifique au B2G Guinée |
+| `INVOICE_LINE.product_code` *(nouveau)* | BT-157 — Item standard identifier | référence article de l'acheteur / nomenclature (ex. CPV), distincte de `product_id` (catalogue interne PME) |
+
+Le code de type de document UNTDID 1001 (BT-3 : `380` facture, `325` proforma, aucun code pour le devis) n'est **pas** stocké — il est dérivé de `document_type` par une fonction pure au moment de la restitution (PDF) et le sera à l'export UBL.
+
+Aucune règle cross-field bloquante : `cadre_facturation = marche_public` **n'exige pas** `reference_marche` (ADR-090 impose ce champ optionnel, K3 l'a implémenté ainsi). `cadre_facturation` est posé côté serveur — `standard` par défaut, `marche_public` par l'Option 6 USSD « Commande Publique » et par le parcours PWA équivalent.
+
+Conséquences : Migration additive (`20260829130000`), les factures existantes prennent `cadre_facturation = standard` et `NULL` sur les références. `ERD-facture-gn.md` et `openapi-facture-gn.yaml` à compléter (INVOICE + INVOICE_LINE + `createInvoiceSchema`). Aucun de ces champs n'entre dans `CertifiablePayload` (posés à la création du brouillon, jamais dans la signature Ed25519 — même garantie que `cost_price_at_time`, ADR-084). Le PDF de facture (restitution, Lot A) affiche le code UNTDID et un bloc « Références » quand au moins une référence est renseignée. `RecurringInvoiceTemplate` ne porte pas ces champs — les factures récurrentes sont `standard` sans référence (extension possible du modèle de gabarit, hors périmètre). Ces ajouts sont une **décision du propriétaire produit** en anticipation de l'agrément PDP, non une story pré-existante du Backlog — tracés ici pour qu'ils ne soient pas une exigence silencieusement introduite.
+
+---
+
+*facture.gn — Registre ADR — Document confidentiel — 29 août 2026*
 
