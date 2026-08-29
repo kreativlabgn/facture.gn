@@ -1,6 +1,8 @@
 import { Writable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import pino from "pino";
+import { Test } from "@nestjs/testing";
+import { LoggerModule, PinoLogger } from "nestjs-pino";
 import { describe, expect, it, vi } from "vitest";
 import { loggerModuleParams, __test__ } from "./logging.config";
 
@@ -84,5 +86,31 @@ describe("logging.config (money-api) — genReqId", () => {
     expect(__test__.genReqId(req, fakeRes())).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
+  });
+});
+
+describe("logging.config (money-api) — intégration nestjs-pino", () => {
+  it("PinoLogger applique bien la redaction configurée", async () => {
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      captured.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      const params = { ...loggerModuleParams, pinoHttp: { ...loggerModuleParams.pinoHttp, transport: undefined } };
+      const moduleRef = await Test.createTestingModule({ imports: [LoggerModule.forRoot(params)] }).compile();
+      const logger = await moduleRef.resolve(PinoLogger);
+      logger.info({ secret: "s3cr3t", rawPayload: { msisdn: "+224" }, provider: "djomy" }, "integ");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+
+    const line = captured.join("").split("\n").find((l) => l.includes("integ")) ?? "";
+    expect(line).toContain('"secret":"[redacted]"');
+    expect(line).toContain('"rawPayload":"[redacted]"');
+    expect(line).toContain('"provider":"djomy"');
   });
 });

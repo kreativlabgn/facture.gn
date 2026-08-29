@@ -17,7 +17,6 @@ const REDACT_PATHS: string[] = [
   'req.headers["x-webhook-secret"]',
   'req.headers["x-djomy-signature"]',
   'req.headers["x-moneroo-signature"]',
-  'req.headers["x-request-id"]',
   "*.secret",
   "*.apiKey",
   "*.token",
@@ -64,20 +63,32 @@ function genReqId(req: IncomingMessage, res: ServerResponse): string {
 
 const isProduction = process.env.NODE_ENV === "production";
 
+// Voir apps/trust-api/src/common/logging.config.ts : JSON par défaut, pino-pretty
+// activé seulement s'il est réellement installé (devDependency).
+function isPrettyLoggerAvailable(): boolean {
+  if (isProduction || process.env.LOG_PRETTY === "false") return false;
+  try {
+    require.resolve("pino-pretty");
+    return true;
+  } catch {
+    return false;
+  }
+}
+const usePrettyLogs = isPrettyLoggerAvailable();
+
 export const loggerModuleParams: Params = {
   pinoHttp: {
     level: process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug"),
     genReqId,
     redact: { paths: REDACT_PATHS, censor: "[redacted]" },
-    transport: isProduction
-      ? undefined
-      : { target: "pino-pretty", options: { singleLine: true, translateTime: "SYS:HH:MM:ss" } },
+    transport: usePrettyLogs
+      ? { target: "pino-pretty", options: { singleLine: true, translateTime: "SYS:HH:MM:ss" } }
+      : undefined,
     autoLogging: {
       ignore: (req: IncomingMessage) => req.url === "/health" || req.url === "/health/ready" || req.url === "/health/live",
     },
     customProps: () => ({ service: "money-api" }),
   },
-  exclude: [],
 };
 
 export const __test__ = { REDACT_PATHS, genReqId };

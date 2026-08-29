@@ -19,7 +19,6 @@ const REDACT_PATHS: string[] = [
   'req.headers["x-internal-api-key"]',
   'req.headers["x-partner-key"]',
   'req.headers["x-partner-signature"]',
-  'req.headers["x-request-id"]',
   // Corps / objets métier — un niveau
   "*.password",
   "*.passwordHash",
@@ -74,23 +73,36 @@ function genReqId(req: IncomingMessage, res: ServerResponse): string {
 
 const isProduction = process.env.NODE_ENV === "production";
 
+// JSON structuré est le défaut de sortie (collecté par Loki, DAT §Observabilité).
+// pino-pretty (lisible en console, dev) n'est activé QUE s'il est réellement
+// installé : c'est une devDependency absente d'un `pnpm install --prod`, et un
+// `transport` pino-pretty pointant vers un module manquant ferait planter le
+// démarrage. `LOG_PRETTY=false` le désactive explicitement même en dev.
+function isPrettyLoggerAvailable(): boolean {
+  if (isProduction || process.env.LOG_PRETTY === "false") return false;
+  try {
+    require.resolve("pino-pretty");
+    return true;
+  } catch {
+    return false;
+  }
+}
+const usePrettyLogs = isPrettyLoggerAvailable();
+
 export const loggerModuleParams: Params = {
   pinoHttp: {
     level: process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug"),
     genReqId,
     redact: { paths: REDACT_PATHS, censor: "[redacted]" },
-    // En prod : JSON brut sur stdout (collecté par Loki, DAT §Observabilité).
-    // En dev : pino-pretty pour rester lisible en console.
-    transport: isProduction
-      ? undefined
-      : { target: "pino-pretty", options: { singleLine: true, translateTime: "SYS:HH:MM:ss" } },
+    transport: usePrettyLogs
+      ? { target: "pino-pretty", options: { singleLine: true, translateTime: "SYS:HH:MM:ss" } }
+      : undefined,
     // Le health check ne pollue pas les logs (bruit constant en k8s).
     autoLogging: {
       ignore: (req: IncomingMessage) => req.url === "/health" || req.url === "/health/ready" || req.url === "/health/live",
     },
     customProps: () => ({ service: "trust-api" }),
   },
-  exclude: [],
 };
 
 export const __test__ = { REDACT_PATHS, genReqId };

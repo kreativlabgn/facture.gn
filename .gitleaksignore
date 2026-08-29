@@ -1,0 +1,7 @@
+# Faux positifs gitleaks connus (fingerprint = commit:fichier:règle:ligne).
+# Chaque entrée doit être un vrai faux positif vérifié, jamais un vrai secret.
+
+# `idempotencyKey: "<valeur de test>"` dans un spec — la règle generic-api-key
+# matche la forme `clé: "..."`. Valeur de test (UUID de fixture), aucun secret.
+# Commit fd6fc93c du 2026-08-08, version historique du fichier.
+fd6fc93c0256eaac8175b863c748e4f64d323038:apps/trust-api/src/payments/payments.service.spec.ts:generic-api-key:202

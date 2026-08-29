@@ -11,9 +11,11 @@ useDefault = true
 
 [allowlist]
 description = "Placeholders de documentation, jamais de vrais secrets"
+# Portée volontairement étroite : seuls les *.env.example (placeholders EXAMPLE… +
+# bloc PEM factice). Le reste du dépôt, README inclus, reste scanné normalement —
+# un vrai secret collé ailleurs doit être détecté.
 paths = [
   '''.*\.env\.example$''',
-  '''README\.md$''',
 ]
 regexes = [
   '''EXAMPLE0+''',

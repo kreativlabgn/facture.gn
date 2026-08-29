@@ -1,6 +1,8 @@
 import { Writable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import pino from "pino";
+import { Test } from "@nestjs/testing";
+import { LoggerModule, PinoLogger } from "nestjs-pino";
 import { describe, expect, it, vi } from "vitest";
 import { loggerModuleParams, __test__ } from "./logging.config";
 
@@ -124,5 +126,31 @@ describe("logging.config — genReqId", () => {
   it("prend la première valeur si l'en-tête est un tableau", () => {
     const req = { headers: { "x-request-id": ["first", "second"] } } as unknown as IncomingMessage;
     expect(__test__.genReqId(req, fakeRes())).toBe("first");
+  });
+});
+
+describe("logging.config — intégration nestjs-pino", () => {
+  it("PinoLogger applique bien la redaction configurée (garde de non-régression de la lib)", async () => {
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      captured.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      const params = { ...loggerModuleParams, pinoHttp: { ...loggerModuleParams.pinoHttp, transport: undefined } };
+      const moduleRef = await Test.createTestingModule({ imports: [LoggerModule.forRoot(params)] }).compile();
+      const logger = await moduleRef.resolve(PinoLogger);
+      logger.info({ password: "SECRET", user: { pinHash: "H" }, invoiceId: "inv-1" }, "integ");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+
+    const line = captured.join("").split("\n").find((l) => l.includes("integ")) ?? "";
+    expect(line).toContain('"password":"[redacted]"');
+    expect(line).toContain('"pinHash":"[redacted]"');
+    expect(line).toContain('"invoiceId":"inv-1"');
   });
 });
