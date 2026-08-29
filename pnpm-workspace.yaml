@@ -21,4 +21,8 @@ allowBuilds:
   # fonctionne à l'identique), et la CI n'a pas besoin d'un compilateur C++.
   msgpackr-extract: false
   prisma: true
+  # Lot H — postinstall de protobufjs (dépendance transitive de l'exporter OTLP
+  # via @grpc/grpc-js) : ne fait qu'un contrôle de version, aucun code natif —
+  # false, l'exporter fonctionne à l'identique.
+  protobufjs: false
   unrs-resolver: true

@@ -1,4 +1,7 @@
 import "reflect-metadata";
+// Lot H — DOIT rester en 2e : démarre les traces OTel (si activées) avant que
+// @nestjs/core / express ne soient chargés, sinon l'instrumentation les rate.
+import "./observability/register";
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";

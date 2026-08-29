@@ -28,6 +28,11 @@ export default defineConfig({
         "src/**/*.tokens.ts",
         "src/**/*.decorator.ts",
         "src/main.ts",
+        // Lot H — bootstrap SDK OTel : câblage NodeSDK / exporter, non exerçable
+        // sans collecteur OTLP vivant. La logique pure — buildTracingConfig,
+        // redactSpanAttributes — reste mesurée et couverte.
+        "src/observability/register.ts",
+        "src/observability/tracing.ts",
         "src/scripts/**",
       ],
       thresholds: {
