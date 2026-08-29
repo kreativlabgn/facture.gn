@@ -285,6 +285,24 @@ export class InvoicesService {
       }
 
       const issuedAt = new Date();
+
+      // Lot B, ADR-110 — arrêté des comptes OHADA. issuedAt est toujours l'année
+      // courante (jamais fourni par le client) : cette garde refuse donc toute
+      // émission une fois l'exercice courant clos. Elle protège les BORNES
+      // temporelles, que la séquence Article 23 et le chaînage Ed25519 ne
+      // couvrent pas. getUTCFullYear() : cohérent avec les bornes UTC de
+      // FiscalPeriodsService.close() et de l'export FEC (la numérotation
+      // ci-dessous utilise getFullYear() local — équivalent tant que le serveur
+      // tourne en UTC, cas des conteneurs).
+      const closing = await tx.fiscalPeriodClosing.findUnique({
+        where: { organizationId_year: { organizationId: invoice.organizationId, year: issuedAt.getUTCFullYear() } },
+      });
+      if (closing) {
+        throw new ConflictException(
+          `Exercice ${closing.year} clos le ${closing.closedAt.toISOString()} — aucune facture ne peut plus y être émise (arrêté des comptes, OHADA)`,
+        );
+      }
+
       // Quality Audit 2026-08-23, revue post-fix #1 — tx passé explicitement :
       // sans lui, nextNumber() écrit sur le client Prisma global (autocommit,
       // hors du SELECT...FOR UPDATE ci-dessus), donc un numéro de séquence
