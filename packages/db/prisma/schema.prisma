@@ -133,6 +133,19 @@ enum InvoiceDocumentType {
   quote
 }
 
+// Lot D — canal par lequel une facture a été émise. Posé exclusivement côté
+// serveur par le chemin de code (2e argument de InvoicesService.createDraft),
+// jamais depuis un DTO client (un appelant PWA pourrait mentir sur son canal).
+// agent_terrain : aligné sur RegistrationSource.agent_terrain / User.isCommercialAgent
+// (ADR-107). api : modélisé pour le futur (auth par clé API, F15) — aucun code
+// ne le pose encore, même précédent que payment_link/bank_transfer avant câblage.
+enum EmissionChannel {
+  pwa
+  ussd
+  agent_terrain
+  api
+}
+
 // Une seule valeur aujourd'hui (C5) — enum plutôt que String brute pour rester
 // cohérent avec tous les autres champs discriminants de ce schema (RegimeFiscal,
 // InvoiceDocumentType, InvoiceStatus, PaymentMethod), et pour qu'une future
@@ -908,6 +921,11 @@ model Invoice {
   documentType  InvoiceDocumentType @default(invoice) @map("document_type")
   status        InvoiceStatus       @default(draft)
   disputeStatus DisputeStatus       @default(none) @map("dispute_status")
+
+  // Lot D — @default(pwa) : les factures antérieures à ce champ sont estampillées
+  // 'pwa' (canal primaire), on ne peut pas reconstruire a posteriori qu'une
+  // facture est venue de *620# ou d'un agent terrain. Jamais dans CertifiablePayload.
+  emissionChannel EmissionChannel @default(pwa) @map("emission_channel")
 
   validatedByAdministration Boolean @default(false) @map("validated_by_administration")
 

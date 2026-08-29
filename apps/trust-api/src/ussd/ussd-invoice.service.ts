@@ -72,14 +72,18 @@ export class UssdInvoiceService {
     // toujours avant toute création (jamais un brouillon abandonné en base).
     await this.velocityTier.assertWithinLimits(organizationId, amountCentimes);
 
-    const draft = await this.invoicesService.createDraft({
-      organizationId,
-      documentType: "invoice",
-      customerId,
-      lines: [{ description: "Vente USSD", quantity: 1, unitPrice: amountCentimes }],
-      discountPct: 0,
-      referenceMarche,
-    });
+    const draft = await this.invoicesService.createDraft(
+      {
+        organizationId,
+        documentType: "invoice",
+        customerId,
+        lines: [{ description: "Vente USSD", quantity: 1, unitPrice: amountCentimes }],
+        discountPct: 0,
+        referenceMarche,
+      },
+      // Lot D — canal *620#. Posé ici, jamais dans le DTO.
+      "ussd",
+    );
     return this.invoicesService.issue(draft.id);
   }
 

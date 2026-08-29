@@ -106,14 +106,18 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
 
     await service.generate("template-1", "user-1");
 
-    expect(invoicesService.createDraft).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      documentType: "invoice",
-      customerId: "cust-1",
-      branchId: undefined,
-      lines: SAMPLE_LINES,
-      discountPct: 0,
-    });
+    expect(invoicesService.createDraft).toHaveBeenCalledWith(
+      {
+        organizationId: "org-1",
+        documentType: "invoice",
+        customerId: "cust-1",
+        branchId: undefined,
+        lines: SAMPLE_LINES,
+        discountPct: 0,
+      },
+      // Lot D — génération récurrente = canal "pwa" (endpoint PWA).
+      "pwa",
+    );
   });
 
   it("rejette une génération avant l'intervalle écoulé (ConflictException)", async () => {

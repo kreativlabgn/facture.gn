@@ -41,6 +41,34 @@ describe("InvoicesController — POST /invoices/:id/send-reminder (I2)", () => {
   });
 });
 
+describe("InvoicesController — GET /invoices (filtre canal d'émission, Lot D)", () => {
+  it("transmet emissionChannel de la query au service", async () => {
+    const service = { findAllByOrganization: vi.fn().mockResolvedValue([]) };
+    const controller = new InvoicesController(service as any, {} as any);
+
+    await controller.findAll({ organizationId: "org-1", emissionChannel: "ussd" } as any);
+
+    expect(service.findAllByOrganization).toHaveBeenCalledWith("org-1", {
+      take: undefined,
+      skip: undefined,
+      emissionChannel: "ussd",
+    });
+  });
+
+  it("sans filtre, appelle le service sans emissionChannel", async () => {
+    const service = { findAllByOrganization: vi.fn().mockResolvedValue([]) };
+    const controller = new InvoicesController(service as any, {} as any);
+
+    await controller.findAll({ organizationId: "org-1" } as any);
+
+    expect(service.findAllByOrganization).toHaveBeenCalledWith("org-1", {
+      take: undefined,
+      skip: undefined,
+      emissionChannel: undefined,
+    });
+  });
+});
+
 describe("InvoicesController — GET /invoices/:id/pdf (Lot A)", () => {
   it("délègue au renderer et renvoie un StreamableFile application/pdf en pièce jointe", async () => {
     const pdf = Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(2000)]);

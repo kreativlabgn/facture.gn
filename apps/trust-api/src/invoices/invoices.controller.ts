@@ -3,12 +3,9 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
-import {
-  organizationScopedListQuerySchema,
-  type OrganizationScopedListQueryDto,
-} from "../common/dto/organization-scoped-list-query.dto";
 import { RenderingService } from "../rendering/rendering.service";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
+import { listInvoicesQuerySchema, type ListInvoicesQueryDto } from "./dto/list-invoices-query.dto";
 import { forfeitDepositSchema, type ForfeitDepositDto } from "./dto/forfeit-deposit.dto";
 import { InvoicesService } from "./invoices.service";
 
@@ -55,10 +52,12 @@ export class InvoicesController {
   // (lecture seule des factures) — jamais sur customers/audit-log/trust-score
   // ni sur FEC_ELIGIBLE_ROLES (export fiscal, hors périmètre d'un proche).
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
-  findAll(@Query(new ZodValidationPipe(organizationScopedListQuerySchema)) query: OrganizationScopedListQueryDto) {
+  findAll(@Query(new ZodValidationPipe(listInvoicesQuerySchema)) query: ListInvoicesQueryDto) {
     return this.invoicesService.findAllByOrganization(query.organizationId, {
       take: query.take,
       skip: query.skip,
+      // Lot D — filtre optionnel par canal d'émission ("mes ventes *620#", etc.).
+      emissionChannel: query.emissionChannel,
     });
   }
 
