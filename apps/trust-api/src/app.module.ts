@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { LoggingModule } from "./common/logging.module";
 import { PrismaModule } from "./common/prisma.module";
 import { CertificationModule } from "./certification/certification.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
@@ -36,6 +37,9 @@ import { RolesGuard } from "./common/rbac/roles.guard";
 
 @Module({
   imports: [
+    // Vague 0 (H1) — en premier : journalisation structurée + redaction PII
+    // disponible pour tous les modules suivants.
+    LoggingModule,
     // Security Audit 2026-08-23, finding #10 — filet générique par IP (100 req/min,
     // valeur raisonnable par défaut, ajustable) : aucun mécanisme de rate limiting
     // HTTP n'existait auparavant. Vient EN PLUS des verrous applicatifs déjà
