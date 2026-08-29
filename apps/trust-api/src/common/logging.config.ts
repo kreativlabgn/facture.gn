@@ -97,9 +97,11 @@ export const loggerModuleParams: Params = {
     transport: usePrettyLogs
       ? { target: "pino-pretty", options: { singleLine: true, translateTime: "SYS:HH:MM:ss" } }
       : undefined,
-    // Le health check ne pollue pas les logs (bruit constant en k8s).
+    // Health checks (k8s) et /metrics (scrape Prometheus) : bruit constant,
+    // jamais un signal utile dans les logs.
     autoLogging: {
-      ignore: (req: IncomingMessage) => req.url === "/health" || req.url === "/health/ready" || req.url === "/health/live",
+      ignore: (req: IncomingMessage) =>
+        req.url === "/metrics" || req.url === "/health" || req.url?.startsWith("/health/") === true,
     },
     customProps: () => ({ service: "trust-api" }),
   },

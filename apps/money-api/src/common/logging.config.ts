@@ -85,7 +85,8 @@ export const loggerModuleParams: Params = {
       ? { target: "pino-pretty", options: { singleLine: true, translateTime: "SYS:HH:MM:ss" } }
       : undefined,
     autoLogging: {
-      ignore: (req: IncomingMessage) => req.url === "/health" || req.url === "/health/ready" || req.url === "/health/live",
+      ignore: (req: IncomingMessage) =>
+        req.url === "/metrics" || req.url === "/health" || req.url?.startsWith("/health/") === true,
     },
     customProps: () => ({ service: "money-api" }),
   },
