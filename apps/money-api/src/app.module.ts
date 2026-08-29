@@ -3,18 +3,23 @@ import { APP_GUARD } from "@nestjs/core";
 import { LoggingModule } from "./common/logging.module";
 import { PrismaModule } from "./common/prisma.module";
 import { RequireExplicitAuthGuard } from "./common/require-explicit-auth.guard";
+import { QueueModule } from "./queue/queue.module";
 import { PaymentOrchestratorModule } from "./payment-orchestrator/payment-orchestrator.module";
 import { PaymentLinksModule } from "./payment-links/payment-links.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
+import { ReconciliationModule } from "./reconciliation/reconciliation.module";
 
 @Module({
   imports: [
     // Vague 0 (H1) — en premier : journalisation structurée + redaction PII.
     LoggingModule,
+    // Lot E — connexion Redis/BullMQ partagée, avant tout module qui déclare une file.
+    QueueModule,
     PrismaModule,
     PaymentOrchestratorModule,
     PaymentLinksModule,
     WebhooksModule,
+    ReconciliationModule,
   ],
   providers: [
     // Security Audit 2026-08-23, finding #16 — deny-by-default structurel : toute

@@ -1,0 +1,41 @@
+# Lot E — infra de développement local (Postgres + Redis). Alternative au
+# Postgres portable documenté dans le README. Un compose complet avec les trois
+# apps est un chantier séparé (Vague 2 / dimension I du benchmark).
+#
+#   docker compose up -d
+#
+# Mots de passe triviaux : environnement de dev uniquement. Les secrets réels
+# vivront dans un gestionnaire (Vault / sealed secrets), jamais ici.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: facture_gn_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - facture_gn_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - facture_gn_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  facture_gn_pgdata:
+  facture_gn_redisdata:
