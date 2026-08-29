@@ -37,6 +37,15 @@ pnpm --filter @facture-gn/db db:migrate        # applique les migrations (dev)
 pnpm turbo dev                                 # lance tous les services en watch
 ```
 
+### Infra locale avec Docker
+
+```bash
+docker compose up -d   # Postgres 16 + Redis 7 (docker-compose.yml)
+```
+
+Redis est requis par le worker de réconciliation des paiements de `money-api`
+(BullMQ) — sans lui, mettre `RECONCILIATION_ENABLED=false`.
+
 ### Base de données locale sans Docker
 
 Docker Desktop est instable sur certains postes de dev (WSL2). Contournement :
