@@ -119,10 +119,15 @@ function summaryTable(input: InvoiceRenderInput): object {
   const grossTtc = input.lines.reduce((sum, l) => sum + BigInt(l.quantity) * l.unitPrice, 0n);
   const rows: object[][] = [[{ text: "Sous-total TTC", style: "sumLabel" }, { text: formatGnf(grossTtc), style: "sumValue" }]];
 
-  if (input.discountPct > 0) {
+  // discountAmount = brut − net. Le rendu de la ligne exige les DEUX conditions
+  // (discountPct enregistré ET écart de montant positif) : sur des données
+  // cohérentes elles vont toujours ensemble ; le garde > 0n évite d'afficher
+  // "- -X GNF" si les lignes ont été retouchées après coup sans le total.
+  const discountAmount = grossTtc - input.totalTtc;
+  if (input.discountPct > 0 && discountAmount > 0n) {
     rows.push([
       { text: `Remise (${input.discountPct} %)`, style: "sumLabel" },
-      { text: `- ${formatGnf(grossTtc - input.totalTtc)}`, style: "sumValue" },
+      { text: `- ${formatGnf(discountAmount)}`, style: "sumValue" },
     ]);
   }
 

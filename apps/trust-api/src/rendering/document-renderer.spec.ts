@@ -74,13 +74,24 @@ describe("buildInvoiceDocDefinition", () => {
     expect(withoutCustomer).not.toContain("Mamadou Diallo");
   });
 
-  it("affiche une ligne de remise seulement si discountPct > 0", () => {
+  it("affiche une ligne de remise seulement si discountPct > 0 et l'écart de montant est réel", () => {
     const noDiscount = JSON.stringify(buildInvoiceDocDefinition(invoiceInput({ discountPct: 0 })));
     expect(noDiscount).not.toMatch(/remise/i);
 
-    const withDiscount = JSON.stringify(buildInvoiceDocDefinition(invoiceInput({ discountPct: 10 })));
+    // brut des lignes = 3×350 000 + 2×75 000 = 1 200 000 GNF ; remise 10 % → net 1 080 000
+    const withDiscount = JSON.stringify(
+      buildInvoiceDocDefinition(invoiceInput({ discountPct: 10, totalTtc: 1_080_000_00n })),
+    );
     expect(withDiscount).toMatch(/remise/i);
-    expect(withDiscount).toContain("10");
+    expect(withDiscount).toContain("10 %");
+    expect(withDiscount).toContain(formatGnf(120_000_00n)); // montant de la remise
+
+    // Garde : discountPct enregistré mais aucun écart de montant (données
+    // retouchées) → pas de ligne "- -0 GNF".
+    const inconsistent = JSON.stringify(
+      buildInvoiceDocDefinition(invoiceInput({ discountPct: 10, totalTtc: 1_200_000_00n })),
+    );
+    expect(inconsistent).not.toMatch(/remise/i);
   });
 
   it("appose un filigrane ANNULÉE si et seulement si le statut est voided", () => {
