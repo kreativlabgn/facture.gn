@@ -1,0 +1,474 @@
+# facture.gn — Charte Graphique & Design System
+
+**Version 1.3 · Juillet 2026 · Statut : verrouillé — décisions de marque validées**
+Périmètre : identité visuelle complète, design system, composants UI, tokens, applications de référence.
+Documents liés : DAT v2.2 · Note de Cadrage v1.2 · PRD v3.2 · CdC v1.1 · Brand Sheet A3
+
+---
+
+## Sommaire
+
+1. ADN de marque
+2. Système de logo
+3. Système de couleurs
+4. Système typographique
+5. Iconographie & motifs
+6. Composants UI
+7. Grille, espacement & tokens
+8. Applications de référence
+9. Règles & interdictions
+10. Guide pour agent IA
+11. Annexe — Pistes d'amélioration
+
+---
+
+## 01. ADN de marque
+
+**Positionnement.** facture.gn est une infrastructure privée de confiance transactionnelle pour les PME de Guinée. La confiance vient de la preuve cryptographique (Ed25519, SHA-256) — jamais d'un mandat gouvernemental.
+
+**Mission.** Offrir à chaque PME guinéenne un outil de facturation certifié, un encaissement fiable et un accès au financement — sans smartphone obligatoire, sans connexion permanente, sans alphabétisation avancée.
+
+**Promesse de marque.** Chaque facture est signée, horodatée et vérifiable par quiconque. Chaque paiement est traçable. Chaque commerçant construit un historique de confiance exploitable.
+
+### Valeurs de marque
+
+| Valeur | Description |
+|---|---|
+| Confiance technique | Ed25519 + SHA-256, pas un tampon administratif. Vérifiable, pas déclaratif. |
+| Accessibilité radicale | *620# USSD, offline 48h, multilingue. Aucun prérequis technologique. |
+| Souveraineté locale | Infrastructure guinéenne, montants en GNF, régimes fiscaux locaux, opérateurs locaux. |
+
+### Ton de communication
+
+| Registre | Exemple | À éviter |
+|---|---|---|
+| Direct & factuel | « Votre facture est signée et vérifiable. » | « Nous sommes fiers de vous offrir un service innovant… » |
+| Technique sans jargon | « Preuve cryptographique vérifiable par QR. » | « Algorithme de hachage à courbe elliptique… » |
+| Respectueux, jamais paternaliste | « Composez *620# pour payer. » | « Même sans smartphone, vous pouvez… » |
+| Jamais « officiel » | « Certifié facture.gn » | « Registre officiel de la République de Guinée » |
+
+### Ce que la marque n'affirme jamais
+
+- Un statut officiel ou un rattachement étatique.
+- Un tampon, sceau ou validation émis par une administration.
+- Toute fonctionnalité hors périmètre validé (alias, hors scope V1).
+- Des couleurs du drapeau guinéen (rouge/vert) dans l'identité — risque de confusion avec un service public.
+
+---
+
+## 02. Système de logo
+
+### Construction & anatomie
+
+| Propriété | Valeur |
+|---|---|
+| Typeface | Geometric sans-serif · weight 800 |
+| Tracking | -10 |
+| Case | Lowercase only — jamais uppercase |
+| Dot ø | 22 % de la hauteur du « g » |
+| Dot couleur | `#F2B705` · Pantone 1235 C |
+| Dot position | Baseline, entre « . » et « g » |
+| Clear space | = hauteur du « f » (4 côtés) |
+| Ratio L:H | 4,76 : 1 |
+
+Espace de protection minimal = hauteur du « f » tout autour du logo. Aucun élément ne pénètre cette zone.
+
+### Déclinaisons approuvées
+
+- Blanc sur Navy — usage institutionnel
+- Navy sur blanc — usage digital
+- Mono noir — print noir & blanc
+
+### Tailles minimales
+
+| Contexte | Taille |
+|---|---|
+| Digital (hauteur) | 24 px |
+| Impression | 12 mm |
+| Icône / avatar (sinon point seul) | 32 px |
+
+### Icône *620#
+
+Canevas carré 1:1 (1092×1092 px). Texte *620# centré, point-signature isolé en angle bas-droit (ø ≈ 6,6 % de la largeur du canevas). Utilisé comme favicon, icône d'app, avatar réseaux sociaux.
+
+### Interdictions
+
+- Dot recoloré
+- Logo étiré ou déformé
+- Ombre portée
+- Fond dégradé
+- Texte en uppercase
+- Mention « officiel » / « République de Guinée » / sceau d'État
+- Fond jaune (le dot devient invisible)
+- Opacité réduite
+- Rotation du logo
+
+### Co-branding
+
+- Le logo facture.gn n'est jamais subordonné (plus petit ou moins visible) à un logo partenaire.
+- Séparateur vertical de 1px Navy entre les deux logos, espacement minimum = 2× clear space.
+- Le dot `#F2B705` n'est jamais fusionné avec les couleurs du partenaire.
+- Aucun logo partenaire ne pénètre la zone de protection du logo facture.gn.
+
+---
+
+## 03. Système de couleurs
+
+### Palette primaire
+
+| Couleur | Hex | RGB | CMYK | Usage |
+|---|---|---|---|---|
+| Navy Autorité | `#0B1D3A` | 11, 29, 58 | 96, 85, 45, 48 | Headers, titres, éléments structurels · 60 % de la palette |
+| Jaune Fatoora | `#F2B705` | 242, 183, 5 | 0, 28, 97, 0 · Pantone 1235 C | Dot du logo, badges #FG, CTA, accents · 30 % de la palette |
+| Blanc | `#FFFFFF` | — | — | Fonds principaux, zones de lecture |
+| Light Gray | `#F5F7F9` | — | — | Fonds secondaires, lignes alternées · 10 % de la palette |
+
+**Ratio d'usage : Navy 60 % — Jaune 30 % — Light Gray 10 %.**
+
+### Palette étendue
+
+> ⚠️ Le PDF source affiche des rampes de teintes Navy (900→50) et Jaune (700→50) sous forme de bandes visuelles, sans lister les valeurs hexadécimales intermédiaires. Les valeurs ci-dessous sont **interpolées** pour reconstituer la rampe et n'ont pas été validées explicitement par l'équipe de marque — à confirmer avant tout usage en production.
+
+| Teinte Navy | Hex (interpolé) |
+|---|---|
+| 900 | `#060E1F` |
+| 800 (brand) | `#0B1D3A` |
+| 700 | `#17325C` |
+| 500 | `#3E5A85` |
+| 300 | `#8FA3C0` |
+| 200 | `#BAC8DC` |
+| 100 | `#DCE4EF` |
+| 50 | `#EEF2F7` |
+
+| Teinte Jaune | Hex (interpolé) |
+|---|---|
+| 700 | `#B8850A` |
+| 500 (brand) | `#F2B705` |
+| 300 | `#F7D157` |
+| 50 | `#FDF3D6` |
+
+### Couleurs sémantiques (UI uniquement)
+
+| Rôle | Hex | Usage |
+|---|---|---|
+| Succès | `#16A34A` | Payé, validé |
+| Erreur | `#DC2626` | Échu, rejeté |
+| Alerte | `#D97706` | En attente, attention |
+| Info | `#2563EB` | Information, aide |
+
+Les couleurs sémantiques ne sont jamais utilisées comme couleurs décoratives ou de marque. Rouge et vert ne sont jamais utilisés ensemble (confusion avec le drapeau guinéen).
+
+### Accessibilité — matrice de contraste
+
+| Combinaison | Ratio | WCAG AA | Usage |
+|---|---|---|---|
+| Navy sur blanc | 16.5:1 | AAA | Texte principal, titres |
+| Navy sur jaune | 7.2:1 | AA | Badges, CTA |
+| Blanc sur navy | 16.5:1 | AAA | Headers, pieds de page |
+| Blanc sur jaune | 1.9:1 | **FAIL** | Interdit — contraste insuffisant |
+| Jaune sur navy | 7.2:1 | AA | Accents sur fond sombre |
+
+---
+
+## 04. Système typographique
+
+Trois familles, deux rôles + un usage technique : **Poppins** pour l'affirmation (display, titres, boutons), **Inter** pour la lecture (texte courant, labels, formulaires), **JetBrains Mono** pour la preuve (codes, hash, timestamps).
+
+### Échelle typographique complète
+
+| Token | Famille | Weight | Taille | Line-height | Usage |
+|---|---|---|---|---|---|
+| display | Poppins | 800 | 28px | 1.2 | Couvertures, splash |
+| h1 | Poppins | 700 | 20px | 1.3 | Titres de section |
+| h2 | Poppins | 600 | 14px | 1.3 | Sous-titres |
+| h3 | Inter | 500 | 12px | 1.4 | Labels de bloc |
+| body | Inter | 400 | 11px | 1.5 | Texte courant |
+| body-sm | Inter | 400 | 10px | 1.5 | Texte secondaire |
+| caption | Inter | 400 | 9px | 1.4 | Légendes, notes |
+| code | JetBrains Mono | 700 | 11px | 1.4 | Codes, hash, IDs |
+| code-sm | JetBrains Mono | 700 | 9px | 1.4 | Badges, tags |
+
+### Règles d'appairage
+
+- Poppins ne descend jamais en dessous de 12px — en dessous, Inter prend le relais.
+- JetBrains Mono est exclusivement réservé aux données vérifiables (codes #FG, hash, timestamps).
+- Maximum 2 graisses par écran (ex. Poppins Bold + Inter Regular).
+- Le souligné n'est jamais utilisé pour l'emphase — réservé aux liens hypertexte.
+
+---
+
+## 05. Iconographie & motifs
+
+### Badge #FG
+
+JetBrains Mono Bold sur fond Jaune Fatoora, contour Navy 1px obligatoire.
+
+| Propriété | Valeur |
+|---|---|
+| Background | `#F2B705` |
+| Text color | `#0B1D3A` |
+| Border | 1px solid `#0B1D3A` |
+| Font | JetBrains Mono Bold 11px |
+| Padding | 4px 10px |
+| Radius | 4px |
+
+### QR de vérification
+
+Présent sur toute facture et tout certificat. Pointe vers `/verify/{code}`.
+
+| Propriété | Valeur |
+|---|---|
+| Module color | `#0B1D3A` |
+| Background | `#FFFFFF` |
+| Taille min. | 18×18mm print · 80×80px digital |
+| Correction | Level M (15%) |
+
+### Triple badge de certification
+
+Remplace le tampon administratif — documente la preuve cryptographique réelle, jamais une validation d'État : **SIGNÉ · ED25519** — **HORODATÉ · SHA-256** — **VÉRIFIABLE · \*620#**.
+
+| Propriété | Valeur |
+|---|---|
+| Background | `#0B1D3A` (Navy) |
+| Border | 1.5px solid `#F2B705` |
+| Text color | `#F2B705` |
+| Font | JetBrains Mono Bold · 9px |
+| Radius | 8px |
+| Padding | 6px 8px |
+
+### Motif « chaîne »
+
+Maillons reliés en filigrane léger — symbolise le chaînage SHA-256. Toujours en arrière-plan, opacité ≤ 30 %, jamais comme élément principal. Utilisable sur fond Navy uniquement, trait Jaune Fatoora.
+
+---
+
+## 06. Composants UI
+
+### Boutons
+
+| Propriété | Primary | Secondary | Accent / CTA | Ghost |
+|---|---|---|---|---|
+| Background | `#0B1D3A` | transparent | `#F2B705` | transparent |
+| Text | `#FFFFFF` | `#0B1D3A` | `#0B1D3A` | `#0B1D3A` |
+| Border | none | 1.5px `#0B1D3A` | 1px `#0B1D3A` | none |
+| Radius | 8px (sm : 4px, lg : 8px) | idem | idem | idem |
+| Padding | sm 5px 10px · default 7px 14px · lg 10px 20px | | | |
+| Font | Poppins SemiBold · sm 9px · default 10px · lg 12px | | | |
+
+Variantes : Confirmer (primary) · Annuler (secondary) · Payer \*620# (accent/CTA) · En savoir plus (ghost).
+Tailles : Small · Default · Large. États : Normal · Hover · Focus · Disabled.
+
+> ⚠️ La charte source ne précise pas de couleur explicite pour l'état **Hover** — non spécifiée dans le PDF, à valider avec l'équipe de marque avant implémentation (une teinte Navy-700 a été proposée par défaut dans la version interactive).
+
+### Badges de statut
+
+| Statut | Couleur |
+|---|---|
+| Payé | `#16A34A` (succès) |
+| Échu | `#DC2626` (erreur) |
+| En attente | `#D97706` (alerte) |
+| Info | `#2563EB` (info) |
+| Brouillon | gris neutre |
+| Code (ex. #FG-7Y2P) | badge #FG (jaune/navy) |
+
+### Alertes
+
+- ✓ **Paiement confirmé** — facture #FG-7Y2P encaissée via Orange Money. *(succès)*
+- ✕ **Échéance dépassée** — cette facture est en retard de 15 jours. *(erreur)*
+- ▲ **Vérification en cours** — le paiement sera confirmé sous 24h. *(alerte)*
+- ⓘ **Nouveau** : émettez une facture directement depuis \*620#. *(info)*
+
+### Champs de formulaire
+
+| État | Border | Background |
+|---|---|---|
+| Default | 1.5px `#D1D5DB` | `#FFFFFF` |
+| Focus | 2px `#0B1D3A` | `#FFFFFF` |
+| Error | 1.5px `#DC2626` | `#FEF2F2` |
+| Disabled | 1px `#E4E7EB` | `#F5F7F9` |
+
+Label : Poppins SemiBold 9px Navy. Hint : Inter Regular 8px Muted. Error : Inter Regular 8px Red.
+
+### Table de données
+
+| Élément | Spécification |
+|---|---|
+| Header | Navy `#0B1D3A` · texte blanc · Poppins SemiBold 8px |
+| Row | Inter Regular 9px · padding 6px · alternance blanc/`#F5F7F9` |
+| Border | bottom 1px `#E4E7EB` |
+| Code cells | JetBrains Mono Bold |
+
+Exemple :
+
+| Facture | Client | Montant | Statut |
+|---|---|---|---|
+| `#FG-7Y2P` | TECHSOL SARL | 2 950 000 | Payé |
+| `#FG-3K1M` | Ét. Diallo | 850 000 | En attente |
+| `#FG-9P4R` | Camara & Fils | 1 200 000 | Échu |
+
+### Cartes
+
+| Variante | Spécification |
+|---|---|
+| Carte par défaut | Border 1px `#E4E7EB` · radius 12px · padding 12px · shadow-sm |
+| Carte élevée | Border 1px Navy-10 · shadow-md · hover : shadow-lg |
+
+---
+
+## 07. Grille, espacement & tokens
+
+### Espacement — base 4px
+
+`space-1` 4px · `space-2` 8px · `space-3` 12px · `space-4` 16px · `space-5` 20px · `space-6` 24px · `space-8` 32px · `space-10` 40px · `space-12` 48px · `space-16` 64px
+
+### Breakpoints
+
+| Token | Min-width | Cible | Colonnes | Gouttière |
+|---|---|---|---|---|
+| mobile | 0 | Feature phones / USSD | 1 | 8px |
+| sm | 640px | Smartphones | 1 | 16px |
+| md | 768px | Tablettes | 2 | 20px |
+| lg | 1024px | Desktop | 3 | 24px |
+| xl | 1280px | Large desktop | 4 | 24px |
+
+### Design tokens — référence complète
+
+| Catégorie | Token | Valeur |
+|---|---|---|
+| Radius | radius-sm | 4px |
+| Radius | radius-md | 8px |
+| Radius | radius-lg | 12px |
+| Radius | radius-full | 9999px |
+| Shadow | shadow-sm | `0 1px 2px rgba(11,29,58,.06)` |
+| Shadow | shadow-md | `0 4px 12px rgba(11,29,58,.08)` |
+| Shadow | shadow-lg | `0 8px 24px rgba(11,29,58,.12)` |
+| Z-index | z-dropdown | 100 |
+| Z-index | z-modal | 200 |
+| Z-index | z-toast | 300 |
+| Transition | ease-default | 150ms ease-in-out |
+| Transition | ease-slow | 300ms ease-in-out |
+| Opacity | disabled | 0.45 |
+| Opacity | overlay | 0.5 |
+
+---
+
+## 08. Applications de référence
+
+### 8.1 Facture source — TECHSOL, 2 950 000 GNF TTC
+
+```
+┌─────────────────────────────────────────────┐
+│ facture.gn                        [#FG-7Y2P] │
+│  INFRASTRUCTURE DE FACTURATION CERTIFIÉE     │
+├─────────────────────────────────────────────┤
+│ Émetteur                  Client             │
+│ TECHSOL SARL               Ét. Diallo        │
+│ RCCM GC-KAL-2021-B-1042    RCCM GC-MAT-2019… │
+│ Kaloum, Conakry             Matam, Conakry   │
+│                                               │
+│ Désignation      Qté   PU HT      Montant    │
+│ Conseil IT        1   2 500 000   2 500 000  │
+│ Licence annuelle  1     450 000     450 000  │
+│                                               │
+│               TVA 18% : 531 000              │
+│               2 950 000 GNF TTC              │
+├─────────────────────────────────────────────┤
+│ [SIGNÉ ED25519] [HORODATÉ SHA-256] [*620#]  QR│
+└─────────────────────────────────────────────┘
+```
+
+### 8.2 Certificat de paiement
+
+En-tête navy avec badge jaune « PAIEMENT CONFIRMÉ » · titre « CERTIFICAT DE PAIEMENT CERTIFIÉ FACTURE.GN — #FG-7Y2P-C » · triple badge de certification en pied.
+
+### 8.3 Menu USSD *620#
+
+```
+          *620#
+1. Payer une facture
+2. Vérifier un reçu
+3. Mes factures
+4. Émettre une facture
+```
+
+Rendu monochrome — aucune couleur de marque n'apparaît sur l'écran USSD réel (texte brut opérateur).
+
+---
+
+## 09. Règles & interdictions
+
+### Règles absolues
+
+| # | Règle | Périmètre |
+|---|---|---|
+| R-01 | Aucun dégradé, sur aucun support. | Logo, UI, print, digital |
+| R-02 | Le dot est toujours `#F2B705` — jamais blanc, jamais noir, jamais d'une autre couleur. | Logo |
+| R-03 | Le wordmark est toujours en lowercase — jamais d'uppercase même partiel. | Logo, texte |
+| R-04 | Pas de Jaune Fatoora sur fond blanc sans contour Navy 1px minimum. | UI, print |
+| R-05 | Pas de facture sans QR de vérification. | Factures |
+| R-06 | Pas de certificat sans les trois badges de certification cryptographique. | Certificats |
+| R-07 | Jamais « officiel », « République de Guinée » comme sous-titre, ni visuel évoquant un sceau d'État. | Tout support |
+| R-08 | La fonctionnalité alias (hors scope V1) n'apparaît dans aucune maquette ou exemple. | Tout support |
+| R-09 | Pas d'ombre portée, de bevel, d'outline ou de glow sur le logo. | Logo |
+| R-10 | Pas de rotation du logo. | Logo |
+| R-11 | Pas de texte blanc sur fond Jaune Fatoora (contraste WCAG insuffisant). | UI, print |
+| R-12 | Les couleurs sémantiques (vert, rouge, ambre, bleu) ne sont jamais utilisées comme couleurs décoratives. | UI |
+| R-13 | Jamais de rouge et vert ensemble dans un contexte de marque (confusion drapeau guinéen). | Tout support |
+| R-14 | Le logo ne peut être rendu à une opacité inférieure à 100 %. | Logo |
+| R-15 | Le menu USSD *620# est monochrome — aucune couleur de marque n'apparaît sur l'écran opérateur. | USSD |
+
+### Processus de validation
+
+- Toute nouvelle maquette, exemple ou support de communication est vérifié contre la liste R-01 → R-15 avant diffusion.
+- Le sponsor exécutif (Bou Bakar) valide les dérogations exceptionnelles — aucune auto-dérogation par l'équipe créative.
+- Ce document fait autorité sur tout autre brief ou maquette antérieur.
+
+### Changelog
+
+| Version | Changements |
+|---|---|
+| 1.3 | Refonte complète en document exhaustif agence. Ajout ADN de marque, tokens, composants UI complets, matrice d'accessibilité, grille d'espacement, règles de gouvernance numérotées R-01→R-15, co-branding, palette étendue avec teintes, couleurs sémantiques (amber, blue), breakpoints responsive. |
+| 1.2 | Menu USSD option 4 corrigée. Refonte visuelle PDF avec mockups d'application. |
+| 1.1 | Poppins Bold/ExtraBold remplace Inter Black pour les titres (aligné sur le lettering du logo). |
+| 1.0 | Version initiale. Positionnement « infrastructure privée certifiée » verrouillé. Retrait mentions « officiel » et alias. |
+
+---
+
+## 10. Guide pour agent IA
+
+Référence rapide à coller dans un prompt pour générer une interface fidèle à cette identité :
+
+```
+Navy    #0B1D3A
+Jaune   #F2B705
+Fond    #F5F7F9
+Succès  #16A34A
+Erreur  #DC2626
+Alerte  #D97706
+Info    #2563EB
+```
+
+**Exemples de prompts**
+
+1. Un header `#0B1D3A`, wordmark `facture.gn` en Poppins 800 lowercase, badge de code jaune contour navy à droite.
+2. Un bouton CTA « Payer *620# » — fond `#F2B705`, texte `#0B1D3A`, contour 1px navy, radius 8px.
+3. Une table de factures — header navy, lignes Inter alternées blanc/`#F5F7F9`, badges de statut sémantiques.
+4. Un footer de certificat avec les trois badges `SIGNÉ · HORODATÉ · VÉRIFIABLE` et un QR de vérification.
+
+---
+
+## 11. Annexe — Pistes d'amélioration
+
+Points à considérer pour une prochaine itération de la charte ou de sa version interactive :
+
+1. **CMYK/RGB manquants sur la version interactive.** La charte source donne RGB et CMYK pour Navy et Jaune (utile pour l'impression des factures papier à 12 mm minimum) — ajoutés ici dans ce document, à reporter également sur la page interactive.
+2. **Ambiguïté du radius bouton « large ».** Le PDF indique « 8px (sm : 4px, lg : 8px) » pour le radius des boutons, alors que la table des tokens définit `radius-lg` = 12px. À clarifier : le bouton large doit-il utiliser 8px ou 12px ?
+3. **Teintes intermédiaires de la palette étendue non spécifiées.** Les rampes Navy (900→50) et Jaune (700→50) ne listent que des bandes visuelles dans le PDF, sans valeurs hex. Les valeurs de ce document sont interpolées et doivent être validées avant tout usage en production (Figma, code).
+4. **État « hover » des boutons non documenté.** Aucune valeur n'est donnée pour l'état hover des boutons — seule une teinte par défaut (Navy-700) a été proposée à titre d'exemple.
+5. **Export développeur.** Un fichier de tokens machine-readable (JSON / variables CSS ou Figma Tokens) accélérerait l'implémentation, en complément de ce document de référence humaine.
+6. **Version imprimable / hors-ligne.** Le positionnement de la marque insiste sur l'accessibilité offline (48h, USSD) — une version PDF ou imprimable de cette charte serait cohérente avec ce principe, pour les équipes terrain sans connexion fiable.
+7. **Contraste des badges de statut.** Vérifier le ratio WCAG des badges « En attente » (`#D97706` sur blanc) et « Info » (`#2563EB` sur blanc) avec du texte blanc — non testé explicitement dans la matrice de contraste fournie, qui ne couvre que Navy/Jaune/Blanc.
+
+---
+
+*Document généré à partir de la Charte Graphique & Design System facture.gn v1.3 (juillet 2026). Une version interactive et navigable de ce document est disponible sous forme de page de référence.*
