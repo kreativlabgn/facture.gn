@@ -2,68 +2,106 @@
 
 Infrastructure de facturation certifiée pour les PME de Guinée. Monorepo pnpm workspaces + Turborepo.
 
-## Bounded contexts
+> Documentation métier de référence : `../V/` (PRD, DAT, ERD, Registre ADR, Backlog, Spec USSD).
+> Toute divergence du schéma avec l'ERD doit être documentée dans `packages/db/prisma/schema.prisma`.
 
-- `apps/trust-api` — Trust Context : IAM, organisations, facturation core, certification (Ed25519 stub Node en attendant le Cert-Engine Rust)
-- `packages/db` — schéma Prisma partagé, Postgres 16
+## Contenu du monorepo
 
-Money, Capital et Platform Contexts ne sont pas encore scaffoldés — voir `docs/plans/`.
+| Paquet | Rôle | État |
+|---|---|---|
+| `apps/trust-api` | **Trust Context** — IAM, organisations multi-tenant, facturation core (invoice / proforma / devis / avoir / remboursement), certification (Ed25519, chaînage SHA-256), vérification publique, USSD, portail client, portail acheteur public (B2G), cabinet/CGA, FEC | actif — backlog 77/77 |
+| `apps/money-api` | **Money Context** — orchestrateur de paiement multi-provider (interface `PaymentProvider` unique), circuit breaker Djomy → Moneroo, webhooks normalisés + idempotents | actif — stubs providers (pas de credentials réels) |
+| `apps/web` | PWA Next.js — dashboard PME, page de paiement publique, page de vérification publique, portail client, vue cabinet | actif — périmètre réduit |
+| `packages/db` | Schéma Prisma partagé (Postgres 16), client généré, migrations écrites à la main | actif |
 
-## Développement
+**Capital Context** et **Platform Context** ne sont pas encore scaffoldés (voir `docs/plans/` et `../V/DAT-facture-gn.md`).
+
+Le **Cert-Engine** (cible : service Rust isolé, 12 k signatures/s, HSM) est pour l'instant un stub Node (`@noble/curves` / `@noble/hashes`) intégré à `trust-api`.
+
+## Architecture
+
+Voir [`docs/architecture/`](docs/architecture/) — diagrammes C4 (contexte + conteneurs) et flux d'authentification inter-services.
+
+## Prérequis
+
+- Node ≥ 20 (la CI tourne sur Node 20 — ne pas figer une décision sur une version locale plus récente sans revérifier en CI)
+- pnpm 11 (`packageManager` épinglé dans `package.json`)
+- PostgreSQL 16
+
+## Démarrage
 
 ```bash
 pnpm install
-pnpm --filter @facture-gn/db db:migrate
-pnpm turbo dev
+pnpm --filter @facture-gn/db db:generate      # génère le client Prisma
+pnpm --filter @facture-gn/db db:migrate        # applique les migrations (dev)
+pnpm turbo dev                                 # lance tous les services en watch
 ```
 
 ### Base de données locale sans Docker
 
-Docker Desktop est instable sur certains postes de dev (souci WSL2). Solution de
-contournement : Postgres 16 portable (binaires ZIP EDB, sans installeur ni droits
-admin), extrait dans `../pgtools/` (hors dépôt git, au même niveau que `code/`).
+Docker Desktop est instable sur certains postes de dev (WSL2). Contournement :
+Postgres 16 portable (binaires ZIP EDB, sans installeur ni droits admin), extrait
+dans `../pgtools/` (hors dépôt git, au même niveau que `code/`).
 
 ```bash
-# une seule fois : télécharger et extraire https://www.postgresql.org/download/windows/
-# (binaires ZIP EDB Windows x64) dans facture.gn/pgtools/pgsql
-
 pgtools/pgsql/bin/initdb.exe -D pgtools/pgdata -U postgres --pwfile=<fichier contenant "postgres">
 pgtools/pgsql/bin/pg_ctl.exe -D pgtools/pgdata -l pgtools/pg.log start
 pgtools/pgsql/bin/createdb.exe -U postgres -h localhost -p 5432 facture_gn_dev
 ```
 
 `packages/db/.env` (copié depuis `.env.example`) pointe déjà vers
-`postgresql://postgres:postgres@localhost:5432/facture_gn_dev`. La CI GitHub
-Actions, elle, utilise un vrai service `postgres:16` conteneurisé et n'est pas
-affectée par ce contournement.
+`postgresql://postgres:postgres@localhost:5432/facture_gn_dev`. La CI utilise un
+service `postgres:16` conteneurisé, non affecté par ce contournement.
 
-### Authentification (JWT RS256, ADR-011)
+### Variables d'environnement
 
-`apps/trust-api` a besoin de `DATABASE_URL`, `JWT_PRIVATE_KEY` et `JWT_PUBLIC_KEY`
-comme vraies variables d'environnement au démarrage (aucun chargement automatique
-de `.env` côté NestJS — copier `apps/trust-api/.env.example` en `.env` documente le
-format mais ne suffit pas à lui seul ; exporter les variables ou passer par un
-gestionnaire de process qui charge le `.env`, ex. `dotenv -e .env -- pnpm dev`).
+Chaque service a un `.env.example` documentant le format **et la raison** de chaque
+variable — les copier en `.env` puis renseigner de vraies valeurs :
 
-Générer une paire de clés RS256 de dev (jamais la même qu'en prod — voir ADR-008
-pour la cible Vault Transit) :
+| Service | Fichier | Secrets notables |
+|---|---|---|
+| `trust-api` | `apps/trust-api/.env.example` | `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` (RS256), `CERTIFICATION_PRIVATE_KEY` (Ed25519), `CERTIFICATION_MASTER_KEY` (enveloppe AES des clés d'organisation), 5 secrets inter-services **strictement distincts** |
+| `money-api` | `apps/money-api/.env.example` | `MONEY_API_INTERNAL_KEY` (partagé avec trust-api), secrets de webhook par provider |
+| `web` | `apps/web/.env.example` | `TRUST_API_URL` (server-only, jamais `NEXT_PUBLIC_`) |
+| `db` | `packages/db/.env.example` | `DATABASE_URL` |
+
+NestJS ne charge **pas** automatiquement `.env` — exporter les variables ou utiliser
+un lanceur (`dotenv -e .env -- pnpm dev`). Un secret manquant fait échouer le
+démarrage (fail-fast) plutôt que de générer une valeur aléatoire silencieuse.
+
+Générer des paires/clés de dev (jamais celles de prod — cible : Vault, ADR-008) :
 
 ```bash
+# JWT RS256
 node -e "const{generateKeyPairSync}=require('crypto');const{privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});console.log('JWT_PRIVATE_KEY=\"'+privateKey.replace(/\n/g,'\\\\n')+'\"');console.log('JWT_PUBLIC_KEY=\"'+publicKey.replace(/\n/g,'\\\\n')+'\"');"
+# Clé Ed25519 / secret 32 octets
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-### Certification (Ed25519, ADR-021/022)
-
-`CERTIFICATION_PRIVATE_KEY` doit aussi être une vraie variable d'environnement (même
-raison que `JWT_PRIVATE_KEY` ci-dessus). Sans elle, `CertificationModule` échoue au
-démarrage plutôt que de générer silencieusement une clé aléatoire à chaque
-redémarrage — un stub sans clé fixe rendrait `GET /verify` incapable de confirmer
-l'intégrité de toute facture émise avant le redémarrage du process.
+## Scripts
 
 ```bash
-node -e "const{randomBytes}=require('crypto');console.log('CERTIFICATION_PRIVATE_KEY=\"'+randomBytes(32).toString('hex')+'\"');"
+pnpm turbo lint        # ESLint (type-checked ; règles strictes — voir eslint.config.js)
+pnpm turbo typecheck   # tsc --noEmit
+pnpm turbo test        # vitest — avec gate de couverture sur trust-api et money-api
+pnpm turbo build
 ```
 
-## Documentation de référence
+Après **tout** changement de `packages/db/prisma/schema.prisma` :
+`pnpm --filter @facture-gn/db db:generate` **puis** `pnpm --filter @facture-gn/db build`
+(dans cet ordre — `packages/db` expose `dist/` compilé, pas les sources).
 
-Voir `../V/` (PRD, DAT, ERD, Registre ADR) pour les invariants métier — toute divergence du schéma avec l'ERD doit être documentée.
+Un test d'intégration exige un vrai Postgres et échoue en local sans lui —
+`apps/trust-api/src/invoices/invoice-numbering.service.integration.spec.ts`.
+Pré-existant, indépendant, passe en CI.
+
+## Journalisation
+
+Logs JSON structurés (pino) avec redaction PII systémique et corrélation par
+`x-request-id`. En dev, sortie lisible via `pino-pretty`. Niveau ajustable par
+`LOG_LEVEL`. Ne jamais loguer un enregistrement Prisma entier — voir
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Contribuer
+
+Workflow, conventions de commit et pièges connus : [`CONTRIBUTING.md`](CONTRIBUTING.md).
