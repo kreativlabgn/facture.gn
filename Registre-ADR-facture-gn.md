@@ -713,6 +713,20 @@ Non couvert (phase 2, décision explicite) : `payment_webhook` (aucun lien organ
 
 Conséquences : Migration additive, tournée par la CI (rôle superuser `postgres` → RLS reste dormant, les ~1290 tests inchangés). `schema.prisma` non modifié (RLS non représentable). Aucun câblage applicatif dans ce lot — donc aucune régression possible. Surcoût à surveiller après adoption : chaque opération scopée devient une transaction. Décision **du propriétaire produit** — pose l'infrastructure sans en assumer l'activation, qui reste une opération d'exploitation supervisée.
 
+## Partie 27 — Cert-Engine isolé : contrat figé, frontière au hash seul (ADR-112)
+
+Décision actée le 29 août 2026, travaux « cap 10/10 » Vague 2. Le DAT décrit un « Cert-Engine en Rust isolé (12 000 signatures/s) » ; le code signe aujourd'hui en processus dans `trust-api` (`@noble/curves`, `StubEd25519CertificationService`). L'isolation réelle demande (a) le service Rust et (b) un modèle de custodie des clés — deux chantiers dédiés. Ce lot **fige l'interface** pour qu'ils puissent démarrer indépendamment, sans réécrire le chemin critique de certification à l'aveugle.
+
+**ADR-112 — La frontière du Cert-Engine ne transporte qu'un hash SHA-256**
+
+Décision : `trust-api` conserve toute la logique métier de certification — canonicalisation **FGN-Canon-v1** (RFC 8785 JCS, entiers), `hash = SHA-256(canonical)`, `certification_id = GN-{NIF8}-{YYYY}-{HASH6}`. Le Cert-Engine ne reçoit **que le hash (32 octets) + une référence de clé** ; il ne voit jamais la facture, les montants, le NIF. Conséquence de sécurité : une compromission de `trust-api` n'expose aucune clé Ed25519, une compromission du Cert-Engine n'expose aucune donnée métier.
+
+Le Cert-Engine devient le **seul** détenteur des clés privées Ed25519 par organisation. `provisionRootKey` / `revoke` / `sign` / `verify` deviennent des appels HTTP (mTLS, réseau interne, jamais l'ingress ; en-tête `X-Internal-Api-Key` dédié en complément). Contrat complet dans `docs/contracts/cert-engine.md` (API `POST /v1/{keys,sign,verify}`, deux options de custodie A/B tranchées à l'implémentation).
+
+Seam côté `trust-api` (à extraire, chantier E4) : interface `SignatureEngine` avec `InProcessSignatureEngine` (comportement actuel, défaut) et `RemoteSignatureEngine` (activé par `CERT_ENGINE_URL`). `OrganizationSigningKeyService` et `certification.service.ts` délèguent ; la canonicalisation et le `certification_id` ne partent JAMAIS dans le Cert-Engine.
+
+Conséquences : Aucun changement de code applicatif dans ce lot (hors un commentaire `TODO` pointant le contrat) — l'extraction du seam + le service Rust + la migration des clés sont des chantiers suivants, sous couverture des suites `certification.service.spec.ts` / `organization-signing-key.service.spec.ts`. `CertifiablePayload` reste **exactement 6 champs** (invariant réaffirmé : ni le seam ni le Cert-Engine ne l'élargissent). Décision **du propriétaire produit** — fige la frontière, n'assume pas l'implémentation.
+
 ---
 
 *facture.gn — Registre ADR — Document confidentiel — 29 août 2026*
