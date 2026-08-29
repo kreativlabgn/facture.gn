@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
-import type { Prisma, PrismaClient } from "@facture-gn/db";
+import type { EmissionChannel, Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
 import { resolveNifForCertification } from "../certification/certification.service";
@@ -70,7 +70,11 @@ export class InvoicesService {
     private readonly paymentReminderService?: PaymentReminderService,
   ) {}
 
-  async createDraft(dto: CreateInvoiceDto) {
+  // Lot D — channel est un argument SERVEUR, jamais dans CreateInvoiceDto : un
+  // appelant PWA pourrait mentir sur son canal. Défaut "pwa" (le cas majoritaire,
+  // et le backfill des factures antérieures). Seuls createAssisted() ("agent_terrain")
+  // et UssdInvoiceService.emitInvoice() ("ussd") le surchargent aujourd'hui.
+  async createDraft(dto: CreateInvoiceDto, channel: EmissionChannel = "pwa") {
     const organization = await this.prisma.organization.findUniqueOrThrow({
       where: { id: dto.organizationId },
     });
@@ -128,6 +132,7 @@ export class InvoicesService {
       data: {
         organizationId: dto.organizationId,
         documentType: dto.documentType,
+        emissionChannel: channel,
         customerId: dto.customerId,
         branchId: dto.branchId,
         status: "draft",
@@ -194,7 +199,7 @@ export class InvoicesService {
       );
     }
 
-    const draft = await this.createDraft(dto);
+    const draft = await this.createDraft(dto, "agent_terrain");
     return this.issue(draft.id);
   }
 
@@ -672,11 +677,20 @@ export class InvoicesService {
   // (seul findOne() par id). take plafonné à MAX_LIST_PAGE_SIZE quelle que soit la
   // valeur demandée par le client : le DAT cible 1M factures/mois, une réponse non
   // bornée n'est jamais acceptable (dev-code-reviewer, Agent 4).
-  async findAllByOrganization(organizationId: string, pagination: { take?: number; skip?: number }) {
-    const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
-    const skip = pagination.skip ?? 0;
+  async findAllByOrganization(
+    organizationId: string,
+    options: { take?: number; skip?: number; emissionChannel?: EmissionChannel },
+  ) {
+    const take = Math.min(options.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
+    const skip = options.skip ?? 0;
+    // Lot D — clé ajoutée seulement si le filtre est fourni (jamais
+    // `emissionChannel: undefined` dans le where).
+    const where: Prisma.InvoiceWhereInput = { organizationId };
+    if (options.emissionChannel) {
+      where.emissionChannel = options.emissionChannel;
+    }
     return this.prisma.invoice.findMany({
-      where: { organizationId },
+      where,
       orderBy: { createdAt: "desc" },
       take,
       skip,

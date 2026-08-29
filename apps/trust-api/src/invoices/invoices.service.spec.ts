@@ -2315,3 +2315,90 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 });
+
+describe("InvoicesService — canal d'émission (Lot D)", () => {
+  it("createDraft sans 2e argument estampille la facture 'pwa' (défaut serveur, jamais un champ client)", async () => {
+    const prisma = createFakePrismaForCreateDraft("tpu");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "invoice",
+      lines: [{ description: "Vente comptoir", quantity: 1, unitPrice: 100_000n }],
+    } as any);
+
+    expect(result.emissionChannel).toBe("pwa");
+  });
+
+  it("createDraft propage le canal passé en 2e argument (ex. 'ussd')", async () => {
+    const prisma = createFakePrismaForCreateDraft("tpu");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft(
+      {
+        organizationId: "org-1",
+        documentType: "invoice",
+        lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 100_000n }],
+      } as any,
+      "ussd",
+    );
+
+    expect(result.emissionChannel).toBe("ussd");
+  });
+
+  it("createAssisted estampille la facture émise 'agent_terrain'", async () => {
+    const prisma = createFakePrismaForCreateAssisted();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createAssisted(assistedInvoiceDto as any, "agent-1");
+
+    expect(result.emissionChannel).toBe("agent_terrain");
+  });
+
+  it("findAllByOrganization filtre par emissionChannel quand il est fourni", async () => {
+    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", { emissionChannel: "ussd" });
+
+    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-1", emissionChannel: "ussd" } }),
+    );
+  });
+
+  it("findAllByOrganization n'ajoute pas de clé emissionChannel au where quand le filtre est absent", async () => {
+    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", {});
+
+    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-1" } }),
+    );
+  });
+});

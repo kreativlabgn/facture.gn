@@ -132,13 +132,17 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
 
     const result = await service.emitInvoice(ORG_ID, 500_000n, "customer-1");
 
-    expect(invoicesService.createDraft).toHaveBeenCalledWith({
-      organizationId: ORG_ID,
-      documentType: "invoice",
-      customerId: "customer-1",
-      lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
-      discountPct: 0,
-    });
+    expect(invoicesService.createDraft).toHaveBeenCalledWith(
+      {
+        organizationId: ORG_ID,
+        documentType: "invoice",
+        customerId: "customer-1",
+        lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
+        discountPct: 0,
+      },
+      // Lot D — canal 'ussd' posé côté serveur, jamais déduit d'un DTO.
+      "ussd",
+    );
     expect(invoicesService.issue).toHaveBeenCalledWith("inv-1");
     expect(result.number).toBe("FG-2026-000001");
   });
@@ -151,6 +155,7 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
 
     expect(invoicesService.createDraft).toHaveBeenCalledWith(
       expect.objectContaining({ customerId: undefined }),
+      "ussd",
     );
   });
 
@@ -185,6 +190,7 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
 
     expect(invoicesService.createDraft).toHaveBeenCalledWith(
       expect.objectContaining({ referenceMarche: "TELEMO-2026-000123" }),
+      "ussd",
     );
   });
 
@@ -194,14 +200,17 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
 
     await service.emitInvoice(ORG_ID, 500_000n, "customer-1");
 
-    expect(invoicesService.createDraft).toHaveBeenCalledWith({
-      organizationId: ORG_ID,
-      documentType: "invoice",
-      customerId: "customer-1",
-      lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
-      discountPct: 0,
-      referenceMarche: undefined,
-    });
+    expect(invoicesService.createDraft).toHaveBeenCalledWith(
+      {
+        organizationId: ORG_ID,
+        documentType: "invoice",
+        customerId: "customer-1",
+        lines: [{ description: "Vente USSD", quantity: 1, unitPrice: 500_000n }],
+        discountPct: 0,
+        referenceMarche: undefined,
+      },
+      "ussd",
+    );
   });
 });
 
