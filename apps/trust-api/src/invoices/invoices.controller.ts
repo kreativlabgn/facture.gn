@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UsePipes } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, StreamableFile, UsePipes } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
@@ -7,6 +7,7 @@ import {
   organizationScopedListQuerySchema,
   type OrganizationScopedListQueryDto,
 } from "../common/dto/organization-scoped-list-query.dto";
+import { RenderingService } from "../rendering/rendering.service";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { forfeitDepositSchema, type ForfeitDepositDto } from "./dto/forfeit-deposit.dto";
 import { InvoicesService } from "./invoices.service";
@@ -15,7 +16,10 @@ import { InvoicesService } from "./invoices.service";
 @ApiBearerAuth()
 @Controller("invoices")
 export class InvoicesController {
-  constructor(private readonly invoicesService: InvoicesService) {}
+  constructor(
+    private readonly invoicesService: InvoicesService,
+    private readonly renderingService: RenderingService,
+  ) {}
 
   @Post()
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
@@ -69,6 +73,19 @@ export class InvoicesController {
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
   findOne(@Param("id") id: string) {
     return this.invoicesService.findOne(id);
+  }
+
+  // Lot A — PDF de la facture certifiée. Même trio de rôles que GET /invoices/:id
+  // (lecture). idSource "invoice" (défaut) : RolesGuard résout l'organisation via
+  // params.id. 409 si la facture n'est pas encore émise (RenderingService).
+  @Get(":id/pdf")
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
+  async downloadPdf(@Param("id") id: string): Promise<StreamableFile> {
+    const { pdf, filename } = await this.renderingService.renderInvoicePdf(id);
+    return new StreamableFile(pdf, {
+      type: "application/pdf",
+      disposition: `attachment; filename="${filename}"`,
+    });
   }
 
   @Post(":id/issue")
