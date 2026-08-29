@@ -96,6 +96,10 @@ export class RecurringTemplatesService {
         branchId: template.branchId ?? undefined,
         lines,
         discountPct: template.discountPct,
+        // Lot C — RecurringInvoiceTemplate ne porte pas de contexte B2G ; les
+        // factures générées sont "standard" (suivi possible : ajouter les
+        // références au template, hors périmètre Lot C).
+        cadreFacturation: "standard",
       },
       // Lot D — génération récurrente déclenchée via l'endpoint PWA
       // (POST /recurring-templates/:id/generate) : canal "pwa" explicite plutôt

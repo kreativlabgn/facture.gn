@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { untdidTypeCode } from "../invoices/untdid";
 import { legalMentionsFor } from "./legal-mentions";
 import { buildVerificationQrDataUrl, verificationUrl } from "./verification-qr";
 import {
@@ -15,6 +16,23 @@ export interface RenderedPdf {
   pdf: Buffer;
   // Nom de fichier lisible proposé au téléchargement (jamais l'UUID interne).
   filename: string;
+}
+
+// Lot C — assemble le bloc "Références" du PDF à partir des seules références
+// B2G renseignées ET non vides ("" transportée telle quelle par le DTO,
+// discipline ADR-090 — jamais une ligne "Label : " vide). Pur, testable.
+export function b2gReferencesFrom(invoice: {
+  referenceMarche: string | null;
+  numeroBonCommande: string | null;
+  numeroContrat: string | null;
+  numeroEngagement: string | null;
+}): { label: string; value: string }[] {
+  return [
+    { label: "Référence marché", value: invoice.referenceMarche },
+    { label: "Bon de commande", value: invoice.numeroBonCommande },
+    { label: "N° de contrat", value: invoice.numeroContrat },
+    { label: "N° d'engagement", value: invoice.numeroEngagement },
+  ].filter((ref): ref is { label: string; value: string } => ref.value != null && ref.value !== "");
 }
 
 // Orchestration de la couche restitution : charge les données via Prisma, vérifie
@@ -68,6 +86,10 @@ export class RenderingService {
       legalMentions: legalMentionsFor(invoice.organization.regimeFiscal),
       verificationUrl: verificationUrl(invoice.certificationId),
       qrDataUrl: await buildVerificationQrDataUrl(invoice.certificationId),
+      // Lot C — EN 16931 / B2G. Le bloc de références est assemblé ici (seules
+      // les valeurs non-nulles), le renderer ne voit jamais les champs bruts.
+      untdidTypeCode: untdidTypeCode(invoice.documentType),
+      b2gReferences: b2gReferencesFrom(invoice),
     };
 
     return {

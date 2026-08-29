@@ -151,6 +151,15 @@ export class InvoicesService {
         // K3, ADR-090 — recopiée telle quelle, jamais vérifiée côté serveur (même
         // discipline que referenceCurrency ci-dessus). undefined si non fournie.
         referenceMarche: dto.referenceMarche,
+        // Lot C, ADR-109 — B2G structuré, déclaratif, jamais vérifié. `??` sur
+        // cadreFacturation : les appelants directs (USSD, récurrent) ne passent
+        // pas par le .default() de Zod. Jamais dans CertifiablePayload (posé ici,
+        // certifyForOrganization() dans issue() ne signe que 6 champs — voir
+        // organization-signing-key.service.ts).
+        cadreFacturation: dto.cadreFacturation ?? "standard",
+        numeroBonCommande: dto.numeroBonCommande,
+        numeroContrat: dto.numeroContrat,
+        numeroEngagement: dto.numeroEngagement,
         lines: {
           create: dto.lines.map((line) => ({
             description: line.description,
@@ -158,6 +167,7 @@ export class InvoicesService {
             unitPrice: line.unitPrice,
             taxRateBps,
             productId: line.productId,
+            productCode: line.productCode,
             // undefined si pas de productId (pas de champ envoyé, cohérent avec
             // referenceCurrency etc. plus haut) ; costPriceByProductId.get() peut
             // légitimement retourner null (E6, cost_price jamais renseigné) —

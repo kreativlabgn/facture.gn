@@ -47,6 +47,8 @@ describe("renderToBuffer", () => {
       legalMentions: ["TVA au taux de 18 % incluse dans le montant TTC."],
       verificationUrl: "https://verify.facture.gn/GN-12345678-2026-ABC123",
       qrDataUrl: qr,
+      untdidTypeCode: "380",
+      b2gReferences: [{ label: "Référence marché", value: "TELEMO-2026-000123" }],
     });
     expect(isValidPdf(await renderToBuffer(doc))).toBe(true);
   });

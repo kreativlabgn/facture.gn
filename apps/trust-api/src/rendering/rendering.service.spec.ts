@@ -1,6 +1,6 @@
 import { ConflictException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
-import { RenderingService } from "./rendering.service";
+import { RenderingService, b2gReferencesFrom } from "./rendering.service";
 
 const CERT_ID = "GN-12345678-2026-ABC123";
 
@@ -19,6 +19,10 @@ function issuedInvoice(overrides: Record<string, unknown> = {}) {
     amountPaid: 0n,
     amountDue: 1_200_000_00n,
     issuedAt: new Date("2026-03-12T14:30:00Z"),
+    referenceMarche: null,
+    numeroBonCommande: null,
+    numeroContrat: null,
+    numeroEngagement: null,
     organization: { name: "Boutique Aissatou", nif: "123456789", rccm: null, regimeFiscal: "normal_tva" },
     customer: { name: "Mamadou Diallo", phone: "+224620000000", nif: null },
     lines: [{ description: "Sac de riz 25kg", quantity: 3, unitPrice: 400_000_00n }],
@@ -81,6 +85,48 @@ describe("RenderingService.renderInvoicePdf", () => {
   it("produit un PDF pour une facture annulée (garde son numéro et sa certification)", async () => {
     const service = new RenderingService(fakePrisma(issuedInvoice({ status: "voided" })) as never);
     expect(isPdf((await service.renderInvoicePdf("inv-1")).pdf)).toBe(true);
+  });
+
+  it("produit un PDF valide pour une facture de marché public avec références B2G (Lot C)", async () => {
+    // Le contenu rendu (bloc "Références", codes) est vérifié dans
+    // document-renderer.spec — ici on garde le chemin service→renderer contre une
+    // régression de câblage (mapping des champs Invoice → b2gReferences).
+    const service = new RenderingService(
+      fakePrisma(
+        issuedInvoice({
+          cadreFacturation: "marche_public",
+          referenceMarche: "TELEMO-2026-000123",
+          numeroBonCommande: "BC-MEF-2026-0042",
+          numeroContrat: null,
+          numeroEngagement: "ENG-2026-00931",
+        }),
+      ) as never,
+    );
+
+    expect(isPdf((await service.renderInvoicePdf("inv-1")).pdf)).toBe(true);
+  });
+
+});
+
+describe("b2gReferencesFrom (Lot C)", () => {
+  it("ne garde que les références non-nulles et non vides", () => {
+    expect(
+      b2gReferencesFrom({
+        referenceMarche: "TELEMO-1",
+        numeroBonCommande: "",
+        numeroContrat: null,
+        numeroEngagement: "ENG-9",
+      }),
+    ).toEqual([
+      { label: "Référence marché", value: "TELEMO-1" },
+      { label: "N° d'engagement", value: "ENG-9" },
+    ]);
+  });
+
+  it("renvoie un tableau vide quand aucune référence n'est renseignée", () => {
+    expect(
+      b2gReferencesFrom({ referenceMarche: null, numeroBonCommande: null, numeroContrat: null, numeroEngagement: null }),
+    ).toEqual([]);
   });
 });
 

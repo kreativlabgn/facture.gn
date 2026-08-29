@@ -199,3 +199,48 @@ describe("createInvoiceSchema — référence marché (K3, ADR-090)", () => {
     }
   });
 });
+
+describe("createInvoiceSchema — champs EN 16931 / B2G (Lot C, ADR-109)", () => {
+  const base = {
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    documentType: "invoice" as const,
+    lines: [{ description: "Ligne", quantity: 1, unitPrice: 1000n }],
+  };
+
+  it("cadreFacturation vaut 'standard' par défaut", () => {
+    const result = createInvoiceSchema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.cadreFacturation).toBe("standard");
+  });
+
+  it("accepte cadreFacturation 'marche_public' et les 3 références B2G + productCode de ligne", () => {
+    const result = createInvoiceSchema.safeParse({
+      ...base,
+      cadreFacturation: "marche_public",
+      numeroBonCommande: "BC-MEF-2026-0042",
+      numeroContrat: "CT-2026-118",
+      numeroEngagement: "ENG-2026-00931",
+      lines: [{ description: "Ordinateurs", quantity: 10, unitPrice: 4_500_000n, productCode: "CPV-30213000" }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.cadreFacturation).toBe("marche_public");
+      expect(result.data.numeroBonCommande).toBe("BC-MEF-2026-0042");
+      expect(result.data.lines[0].productCode).toBe("CPV-30213000");
+    }
+  });
+
+  it("rejette un cadreFacturation inconnu", () => {
+    expect(createInvoiceSchema.safeParse({ ...base, cadreFacturation: "chorus_pro" }).success).toBe(false);
+  });
+
+  it("n'exige jamais referenceMarche, même en marche_public (ADR-090 — pas de refine bloquant)", () => {
+    expect(createInvoiceSchema.safeParse({ ...base, cadreFacturation: "marche_public" }).success).toBe(true);
+  });
+
+  it("transporte une référence vide telle quelle, sans la promouvoir en erreur", () => {
+    const result = createInvoiceSchema.safeParse({ ...base, numeroContrat: "" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.numeroContrat).toBe("");
+  });
+});
