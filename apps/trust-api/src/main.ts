@@ -7,6 +7,7 @@ import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
+import { assertSecretsValid, TRUST_API_SECRETS } from "./common/secrets";
 
 // Les montants (ADR-014, entiers GNF) sont des BigInt côté Prisma — JSON.stringify
 // ne sait pas les sérialiser nativement. En string plutôt qu'en number pour ne
@@ -16,6 +17,12 @@ import { AppModule } from "./app.module";
 };
 
 async function bootstrap() {
+  // Lot J (C5) — valide TOUS les secrets d'un coup avant de démarrer Nest.
+  // Fonction pure hors du graphe DI → n'affecte pas app.module.spec.ts.
+  assertSecretsValid(process.env, TRUST_API_SECRETS, {
+    production: process.env.NODE_ENV === "production",
+  });
+
   // rawBody: true (F11, ADR-082) — expose request.rawBody (Buffer) SANS affecter
   // le parsing JSON normal des autres routes. Requis par PartnerWebhookAuthGuard
   // pour vérifier HMAC-SHA256 sur le corps EXACTEMENT tel que reçu — un

@@ -7,6 +7,7 @@ import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
+import { assertSecretsValid, MONEY_API_SECRETS } from "./common/secrets";
 
 // Les montants (ADR-014, entiers GNF) sont des BigInt côté Prisma — JSON.stringify
 // ne sait pas les sérialiser nativement. En string plutôt qu'en number pour ne
@@ -16,6 +17,11 @@ import { AppModule } from "./app.module";
 };
 
 async function bootstrap() {
+  // Lot J (C5) — valide TOUS les secrets d'un coup avant de démarrer Nest.
+  assertSecretsValid(process.env, MONEY_API_SECRETS, {
+    production: process.env.NODE_ENV === "production",
+  });
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
 
