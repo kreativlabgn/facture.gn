@@ -678,5 +678,24 @@ Conséquences : Migration additive (`20260829130000`), les factures existantes p
 
 ---
 
+## Partie 25 — Clôture d'exercice OHADA (arrêté des comptes scellé) (ADR-110)
+
+Décision actée le 29 août 2026, en marge des travaux « cap 10/10 ». Le DAT affirme la conformité OHADA/SYSCOHADA (« séquence sans trou Article 23, export FEC ») mais aucun mécanisme ne matérialise l'**arrêté des comptes** : la numérotation Article 23 et le chaînage Ed25519 protègent l'*ordre relatif* des factures, jamais les *bornes* d'un exercice. Rien n'empêche techniquement d'émettre « dans » un exercice déjà arrêté. C'est une exigence attendue pour l'agrément PDP (Q3 2027).
+
+**ADR-110 — Sceau d'exercice irréversible, garde d'émission**
+
+Décision : Nouvelle entité `FISCAL_PERIOD_CLOSING` — une organisation peut clôturer un exercice comptable (année civile) `year <= année courante` (jamais un exercice futur). La clôture :
+- **agrège et fige** les totaux (HT / TVA / TTC), le nombre de factures et le dernier numéro/hash de séquence des factures *émises* (`issued` / `partially_paid` / `paid` / `voided` — jamais les `draft` / `proforma` / `quote`) dont `issued_at` tombe dans l'année (bornes **UTC**) ;
+- calcule un `seal_hash` (SHA-256 canonique de l'ensemble, même primitive que la certification, ADR-021) ;
+- est **idempotente** au niveau base (`@@unique(organization_id, year)`) et **irréversible** — aucune route de réouverture. Une erreur d'arrêté se corrige comptablement dans l'exercice suivant (principe OHADA), jamais en rouvrant.
+
+`InvoicesService.issue()` gagne une garde, **dans la transaction verrouillée existante** : si l'exercice de l'année de `issued_at` (toujours l'année courante — `issued_at` n'est jamais fourni par le client) est clos, l'émission est refusée (409). C'est le seul vecteur réel : aucun antidatage n'existe dans le code.
+
+Rôles : `POST /organizations/:id/fiscal-periods/:year/close` réservé à `owner` / `admin` / `accountant_internal` (le comptable salarié fait l'arrêté, ADR-099). Lecture `GET /organizations/:id/fiscal-periods` étendue à `auditor` et `tax_controller_readonly` (pièce de contrôle par nature).
+
+Conséquences : Migration additive (`20260829140000`). `ERD-facture-gn.md` à compléter (nouvelle entité). Intégration du `seal_hash` dans `GET /verify` (vérification publique de la continuité d'un exercice) = évolution ultérieure, hors de cette décision. `seal_hash` n'entre jamais dans `CertifiablePayload` d'une facture (concerne l'exercice, pas la facture). Course `close()` × `issue()` concurrent : le sceau est un instantané meilleur-effort à la seconde ; une facture émise juste après le `close()` est bloquée par la garde, jamais silencieusement exclue de l'exercice suivant. Décision **du propriétaire produit** en anticipation de l'agrément PDP — non une story pré-existante du Backlog.
+
+---
+
 *facture.gn — Registre ADR — Document confidentiel — 29 août 2026*
 
