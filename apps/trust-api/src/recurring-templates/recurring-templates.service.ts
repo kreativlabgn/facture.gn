@@ -88,14 +88,22 @@ export class RecurringTemplatesService {
       productId: line.productId,
     }));
 
-    const invoice = await this.invoicesService.createDraft({
-      organizationId: template.organizationId,
-      documentType: "invoice",
-      customerId: template.customerId ?? undefined,
-      branchId: template.branchId ?? undefined,
-      lines,
-      discountPct: template.discountPct,
-    });
+    const invoice = await this.invoicesService.createDraft(
+      {
+        organizationId: template.organizationId,
+        documentType: "invoice",
+        customerId: template.customerId ?? undefined,
+        branchId: template.branchId ?? undefined,
+        lines,
+        discountPct: template.discountPct,
+      },
+      // Lot D — génération récurrente déclenchée via l'endpoint PWA
+      // (POST /recurring-templates/:id/generate) : canal "pwa" explicite plutôt
+      // que le défaut, pour lever l'ambiguïté "oubli vs. intention". Pas de
+      // valeur "recurring" dédiée (mélangerait canal d'interface et mécanisme
+      // de déclenchement — voir plan Lot D).
+      "pwa",
+    );
 
     // ADR-056 — "alerte, jamais un mur silencieux" : jamais bloquant, seulement
     // une trace de revue sur la facture nouvellement générée.
