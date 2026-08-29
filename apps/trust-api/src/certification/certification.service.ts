@@ -76,9 +76,11 @@ function buildCertificationId(payload: CertifiablePayload, hash: string): string
   return `GN-${nif8}-${year}-${hash6}`;
 }
 
-// TODO(Cert-Engine Rust) : stub de bootstrap en Node — cible 12k signatures/s
-// en isolation Rust (DAT §1). Interface stable pour permettre la migration
-// sans changer les appelants (organizations/invoices services).
+// TODO(Cert-Engine Rust, E4/ADR-112) : stub de bootstrap en Node — cible 12k
+// signatures/s en isolation Rust (DAT §1). Contrat figé dans
+// docs/contracts/cert-engine.md : la frontière ne porte qu'un hash SHA-256, la
+// canonicalisation FGN-Canon-v1 et le certification_id restent ici. Interface
+// stable (CertificationService) pour migrer sans changer les appelants.
 export class StubEd25519CertificationService implements CertificationService {
   private readonly privateKey: Uint8Array;
   readonly publicKey: Uint8Array;
