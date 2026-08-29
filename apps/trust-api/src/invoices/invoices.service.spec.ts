@@ -2,7 +2,7 @@ import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { InvoicesService } from "./invoices.service";
 
-function createFakePrisma(overrides: { invoice?: any; organization?: any } = {}) {
+function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscalPeriodClosing?: any } = {}) {
   // update() cumulatif (comme le vrai Prisma, qui renvoie toujours la ligne complète,
   // pas seulement les champs patchés) — nécessaire car issue() peut faire deux
   // update() successifs (certification, puis lien de paiement en meilleur effort).
@@ -55,6 +55,11 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any } = {})
           return invoiceState;
         });
       })(),
+    },
+    // Lot B — garde d'exercice clos dans issue() : null par défaut (aucun
+    // exercice clos), surchargé par les tests dédiés.
+    fiscalPeriodClosing: {
+      findUnique: vi.fn().mockResolvedValue(overrides.fiscalPeriodClosing ?? null),
     },
     organization: {
       // commercialTier: freemium par défaut (grille commission, ADR-074) — reflète
@@ -987,6 +992,7 @@ describe("InvoicesService — machine à états", () => {
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", nif: "GN12345678", commercialTier: "freemium" }),
       },
+      fiscalPeriodClosing: { findUnique: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockImplementation(() => acquireLock()),
       $transaction: vi.fn(async (callback: any) => {
         try {
@@ -1895,6 +1901,7 @@ function createFakePrismaForCreateAssisted(
     },
     // Quality Audit 2026-08-23, finding #1 — voir createFakePrisma() plus haut
     // dans ce fichier pour le même ajout et sa justification.
+    fiscalPeriodClosing: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn((callback: any) => callback(prisma)),
     $queryRaw: vi.fn().mockResolvedValue([]),
   };
@@ -2454,5 +2461,41 @@ describe("InvoicesService — champs EN 16931 / B2G (Lot C)", () => {
     expect(createCall.data.numeroContrat).toBeUndefined();
     expect(createCall.data.numeroEngagement).toBeUndefined();
     expect(createCall.data.lines.create[0].productCode).toBeUndefined();
+  });
+});
+
+describe("InvoicesService.issue — garde d'exercice clos (Lot B, ADR-110)", () => {
+  it("refuse d'émettre si l'exercice de l'année courante est clos", async () => {
+    const currentYear = new Date().getUTCFullYear();
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", documentType: "invoice", organizationId: "org-1", totalTtc: 100_000n }) },
+      fiscalPeriodClosing: { id: "fpc-1", year: currentYear, closedAt: new Date(`${currentYear}-02-01T00:00:00Z`) },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await expect(service.issue("inv-1")).rejects.toThrow(/exercice/i);
+    expect(prisma.fiscalPeriodClosing.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_year: { organizationId: "org-1", year: currentYear } },
+    });
+  });
+
+  it("émet normalement quand aucun exercice n'est clos (non-régression)", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1", status: "draft", documentType: "invoice", organizationId: "org-1", totalTtc: 100_000n }) },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.issue("inv-1");
+    expect(result.status).toBe("issued");
   });
 });

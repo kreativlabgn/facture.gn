@@ -294,6 +294,7 @@ model User {
   apiKeysRevoked                ApiKey[]                   @relation("ApiKeyRevoker")
   pendingMemberInvitesSent      PendingMemberInvite[]      @relation("PendingMemberInviteInviter")
   pendingMemberInvitesResolved  PendingMemberInvite[]      @relation("PendingMemberInviteResolvedUser")
+  fiscalPeriodClosingsMade      FiscalPeriodClosing[]
 
   @@map("user")
 }
@@ -568,6 +569,7 @@ model Organization {
   recurringTemplates    RecurringInvoiceTemplate[]
   commissionBypassCases CommissionBypassCase[]
   pendingMemberInvites  PendingMemberInvite[]
+  fiscalPeriodClosings  FiscalPeriodClosing[]
 
   @@map("organization")
 }
@@ -1247,6 +1249,37 @@ model InvoiceEvent {
   actor   User?   @relation(fields: [actorId], references: [id])
 
   @@map("invoice_event")
+}
+
+// Lot B, ADR-110 — arrêté des comptes OHADA/SYSCOHADA. Sceau IRRÉVERSIBLE d'un
+// exercice : une fois posé, InvoicesService.issue() refuse toute émission dont
+// l'année d'issuedAt est close (protège les BORNES temporelles — la séquence
+// Article 23 et le chaînage Ed25519 ne protègent que l'ordre relatif). Aucune
+// réouverture : une erreur se corrige comptablement dans l'exercice suivant.
+// @@unique([organizationId, year]) = idempotence (une seule clôture par
+// exercice). sealHash : SHA-256 canonique de {org, year, lastInvoiceNumber,
+// lastInvoiceHash, totalHt, totalTva, totalTtc, invoiceCount} — même primitive
+// que certification.service.ts. lastInvoice* nullables : un exercice sans
+// aucune facture émise est clôturable (totaux 0).
+model FiscalPeriodClosing {
+  id                String   @id @default(uuid())
+  organizationId    String   @map("organization_id")
+  year              Int
+  lastInvoiceNumber String?  @map("last_invoice_number")
+  lastInvoiceHash   String?  @map("last_invoice_hash")
+  totalHt           BigInt   @map("total_ht")
+  totalTva          BigInt   @map("total_tva")
+  totalTtc          BigInt   @map("total_ttc")
+  invoiceCount      Int      @map("invoice_count")
+  sealHash          String   @map("seal_hash")
+  closedAt          DateTime @default(now()) @map("closed_at")
+  closedByUserId    String   @map("closed_by_user_id")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  closedBy     User         @relation(fields: [closedByUserId], references: [id])
+
+  @@unique([organizationId, year])
+  @@map("fiscal_period_closing")
 }
 
 // ===== Money Context (Squad Money) — orchestrateur de paiement =====
