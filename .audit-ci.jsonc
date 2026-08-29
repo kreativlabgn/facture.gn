@@ -1,0 +1,33 @@
+// Vague 0 (C1) — gate d'audit des dépendances, exécuté en CI (job `security`).
+// Bloque le merge sur toute vulnérabilité HIGH ou CRITICAL non explicitement
+// tolérée ci-dessous. Les MODERATE/LOW sont rapportées mais non bloquantes pour
+// l'instant (ratchet dans une vague ultérieure).
+//
+// Chaque entrée de `allowlist` DOIT être justifiée par un commentaire : soit la
+// dépendance est purement dev/build-time (jamais dans le bundle runtime des
+// services déployés), soit le vecteur d'attaque n'est pas atteignable. À revoir
+// à chaque PR Dependabot — l'objectif est que cette liste se vide.
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "pnpm": true,
+  "high": true,
+  "moderate": false,
+  "low": false,
+  "report-type": "summary",
+  "allowlist": [
+    // glob CLI command injection — tiré par @nestjs/cli (devDependency). Le CLI
+    // `glob` n'est jamais invoqué. Corrigé dès que @nestjs/cli le remonte.
+    "GHSA-5j98-mcp5-4vw2",
+    // picomatch ReDoS — @nestjs/cli > @angular-devkit (dev, build de schematics).
+    "GHSA-c2c7-rcm5-vvqj",
+    // tmp path traversal — @nestjs/cli > inquirer > external-editor (dev, prompt CLI).
+    "GHSA-ph9p-34f9-6g65",
+    // vite server.fs.deny bypass — vitest (dev). Aucun serveur de dev Vite exposé.
+    "GHSA-fx2h-pf6j-xcff",
+    // nanoid boucle infinie sur size=0 — tiré par postcss (build-time : next et
+    // webpack/@nestjs/cli). Jamais atteint au runtime des services NestJS.
+    "GHSA-2v37-7h3g-55p8",
+    // vitest UI arbitrary file read — le mode UI (`vitest --ui`) n'est jamais lancé.
+    "GHSA-5xrq-8626-4rwp"
+  ]
+}

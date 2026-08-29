@@ -2,6 +2,7 @@ import "reflect-metadata";
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 
 // Les montants (ADR-014, entiers GNF) sont des BigInt côté Prisma — JSON.stringify
@@ -12,7 +13,8 @@ import { AppModule } from "./app.module";
 };
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
 
   // Security Audit 2026-08-23, finding #15 — voir apps/trust-api/src/main.ts.
   app.use(helmet());
@@ -33,4 +35,4 @@ async function bootstrap() {
   await app.listen(port);
 }
 
-bootstrap();
+void bootstrap();

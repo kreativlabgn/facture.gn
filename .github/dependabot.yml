@@ -1,0 +1,43 @@
+# Vague 0 (C1) — mises à jour de dépendances automatisées.
+# Les CVE des dépendances transitives (multer / lodash / js-yaml, corrigées à la
+# main via pnpm-workspace.yaml overrides le 2026-08-23) doivent remonter seules
+# désormais, jamais être découvertes lors d'un audit ponctuel.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Africa/Conakry
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    groups:
+      # Un seul PR par semaine pour tous les patch/minor non risqués.
+      minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    ignore:
+      # NestJS 11 = migration majeure coordonnée (breaking sur les guards/pipes),
+      # jamais un bump Dependabot isolé.
+      - dependency-name: "@nestjs/*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(ci)"

@@ -2,6 +2,7 @@ import "reflect-metadata";
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 
 // Les montants (ADR-014, entiers GNF) sont des BigInt côté Prisma — JSON.stringify
@@ -17,7 +18,11 @@ async function bootstrap() {
   // pour vérifier HMAC-SHA256 sur le corps EXACTEMENT tel que reçu — un
   // JSON.stringify(request.body) reconstruit ne serait pas bit-à-bit identique
   // au corps réellement signé par l'expéditeur (ordre des clés, espacement).
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  // bufferLogs (H1) — les logs du démarrage sont mis en tampon puis rejoués par
+  // le logger pino une fois qu'il est résolu ci-dessous, jamais perdus ni émis
+  // en format console non structuré.
+  const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
+  app.useLogger(app.get(Logger));
 
   // Security Audit 2026-08-23, finding #15 — config par défaut de helmet (HSTS,
   // X-Content-Type-Options, X-Frame-Options DENY, etc.), aucune sur-configuration :
@@ -46,4 +51,4 @@ async function bootstrap() {
   await app.listen(port);
 }
 
-bootstrap();
+void bootstrap();

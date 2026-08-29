@@ -1,0 +1,25 @@
+# Vague 0 (C1) — configuration gitleaks. Étend le jeu de règles par défaut et
+# tolère uniquement les faux positifs connus : les fichiers *.env.example ne
+# contiennent que des placeholders (`EXAMPLE000…`) et un bloc PEM factice
+# (`MIIExAMPLE…`) servant à documenter le format — jamais un vrai secret.
+# Tout secret réel doit vivre dans un gestionnaire (Vault / sealed secrets),
+# jamais dans le dépôt (voir CONTRIBUTING.md).
+title = "facture.gn gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders de documentation, jamais de vrais secrets"
+# Portée volontairement étroite : seuls les *.env.example (placeholders EXAMPLE… +
+# bloc PEM factice). Le reste du dépôt, README inclus, reste scanné normalement —
+# un vrai secret collé ailleurs doit être détecté.
+paths = [
+  '''.*\.env\.example$''',
+]
+regexes = [
+  '''EXAMPLE0+''',
+  '''EXAMPLE1+''',
+  '''MIIExAMPLE''',
+  '''MIIBExAMPLE''',
+]
