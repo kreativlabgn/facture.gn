@@ -695,6 +695,24 @@ Rôles : `POST /organizations/:id/fiscal-periods/:year/close` réservé à `owne
 
 Conséquences : Migration additive (`20260829140000`). `ERD-facture-gn.md` à compléter (nouvelle entité). Intégration du `seal_hash` dans `GET /verify` (vérification publique de la continuité d'un exercice) = évolution ultérieure, hors de cette décision. `seal_hash` n'entre jamais dans `CertifiablePayload` d'une facture (concerne l'exercice, pas la facture). Course `close()` × `issue()` concurrent : le sceau est un instantané meilleur-effort à la seconde ; une facture émise juste après le `close()` est bloquée par la garde, jamais silencieusement exclue de l'exercice suivant. Décision **du propriétaire produit** en anticipation de l'agrément PDP — non une story pré-existante du Backlog.
 
+## Partie 26 — Row-Level Security PostgreSQL par organisation, dormante par défaut (ADR-111)
+
+Décision actée le 29 août 2026, travaux « cap 10/10 » Vague 2. Le DAT annonce « PostgreSQL 16 + TimescaleDB (RLS par organisation et par cabinet/CGA) » mais l'isolation multi-tenant repose à 100 % sur des filtres applicatifs `where: { organizationId }` et le `RolesGuard`. Un seul oubli de filtre est une fuite cross-organisation — l'audit du 23/08/2026 en a trouvé un réel (`listMine()` exposait `bankAccountDetails` d'autres membres). RLS est la défense en profondeur attendue (Loi L/2016/037/AN, agrément PDP).
+
+**ADR-111 — Politiques RLS posées mais dormantes ; activation par runbook supervisé**
+
+Décision : La migration `20260829150000_enable_row_level_security` active `ROW LEVEL SECURITY` et crée une politique `org_isolation` sur 27 tables (18 à `organization_id` direct + `organization` + 8 indirectes via `invoice_id` / `credit_note` / `product`). Chaque politique est **doublement dormante** :
+1. `ENABLE` **sans `FORCE`** → le rôle propriétaire des tables (rôle actuel des apps et des migrations) contourne toujours RLS ;
+2. le prédicat commence par `current_setting('app.current_org_id', true) IS NULL OR …` → tant que le paramètre de session n'est pas défini, la politique laisse tout passer.
+
+Le seul émetteur du paramètre est `organizationScopedClient(prisma, organizationId)` (`packages/db`) : une extension Prisma `$allOperations` qui exécute chaque opération dans une transaction précédée de `SELECT set_config('app.current_org_id', <orgId>, TRUE)` (`is_local = TRUE` → portée transaction, compatible pooler transaction-mode type PgBouncer, contrairement à un `SET` de session).
+
+**Activation = chantier suivant, non ce lot.** Étapes réversibles décrites dans `docs/runbooks/rls-rollout.md` : (1) adopter `organizationScopedClient` service par service (du plus sensible au moins — `invoices`, `payments`, `customers`…) ; (2) créer un rôle applicatif `facture_app` non-propriétaire, sans `BYPASSRLS` ; (3) basculer `DATABASE_URL` applicative dessus, **valider l'isolation réelle sur staging** (Postgres réel — un test d'intégration `packages/db` gated `RLS_INTEGRATION_TEST=1` le vérifie) ; (4) `FORCE ROW LEVEL SECURITY` une fois tout le code migré.
+
+Non couvert (phase 2, décision explicite) : `payment_webhook` (aucun lien organisation — table ops), `pending_member_invite` seulement partiellement (XOR `organization_id`/`practice_id` — clause NULL-permissive), et **toutes les tables scoped-practice** (le modèle d'accès mandat cabinet/CGA — un cabinet voit N organisations — demande sa propre conception RLS).
+
+Conséquences : Migration additive, tournée par la CI (rôle superuser `postgres` → RLS reste dormant, les ~1290 tests inchangés). `schema.prisma` non modifié (RLS non représentable). Aucun câblage applicatif dans ce lot — donc aucune régression possible. Surcoût à surveiller après adoption : chaque opération scopée devient une transaction. Décision **du propriétaire produit** — pose l'infrastructure sans en assumer l'activation, qui reste une opération d'exploitation supervisée.
+
 ---
 
 *facture.gn — Registre ADR — Document confidentiel — 29 août 2026*
