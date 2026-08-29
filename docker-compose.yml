@@ -1,11 +1,11 @@
-# Lot E — infra de développement local (Postgres + Redis). Alternative au
-# Postgres portable documenté dans le README. Un compose complet avec les trois
-# apps est un chantier séparé (Vague 2 / dimension I du benchmark).
+# Infra + apps pour le développement / la CI locale.
 #
-#   docker compose up -d
+#   docker compose up -d              # Postgres + Redis seuls (on lance les apps via `pnpm dev`)
+#   docker compose --profile full up  # + trust-api + money-api + web (images buildées)
 #
-# Mots de passe triviaux : environnement de dev uniquement. Les secrets réels
-# vivront dans un gestionnaire (Vault / sealed secrets), jamais ici.
+# Le profil `full` lit les secrets depuis apps/<svc>/.env (à créer depuis
+# .env.example). Mots de passe d'infra triviaux : dev uniquement — les secrets
+# réels vivront dans un gestionnaire (Vault / sealed secrets), jamais ici.
 services:
   postgres:
     image: postgres:16
@@ -35,6 +35,50 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  trust-api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/trust-api/Dockerfile
+    env_file:
+      - path: apps/trust-api/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/facture_gn_dev?schema=public
+      PORT: 3000
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  money-api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/money-api/Dockerfile
+    env_file:
+      - path: apps/money-api/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/facture_gn_dev?schema=public
+      REDIS_URL: redis://redis:6379
+      TRUST_API_URL: http://trust-api:3000
+      PORT: 3001
+    ports: ["3001:3001"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      TRUST_API_URL: http://trust-api:3000
+      PORT: 3002
+    ports: ["3002:3002"]
+    depends_on: [trust-api]
 
 volumes:
   facture_gn_pgdata:

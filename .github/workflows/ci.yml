@@ -118,3 +118,26 @@ jobs:
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | tar -xz gitleaks
           ./gitleaks git . --config .gitleaks.toml --redact --no-banner --exit-code 1
+
+  # Lot G — valide que les Dockerfiles buildent (le seul vrai test dans cet
+  # environnement sans Docker en local). Pas de push d'image.
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write # export du cache de build vers le service de cache GHA
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [trust-api, money-api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.service }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

@@ -1,0 +1,17 @@
+# Lot G — contexte de build minimal.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/*.log
+.git
+.github
+docs
+V
+pgtools
+**/.env
+**/.env.*
+!**/.env.example
+**/*.spec.ts
+**/*.test.ts
