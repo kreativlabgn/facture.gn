@@ -71,9 +71,37 @@ histogram_quantile(0.95,
 `/health/*` et `/metrics` sont **internes au cluster** — jamais exposés par
 l'ingress public.
 
-## Reste à faire (hors Lot F)
+## Traces distribuées (Lot H)
 
-- Traces OpenTelemetry (SDK + collecteur OTLP → Tempo/Jaeger).
+OpenTelemetry, **opt-in**. Activation via l'environnement :
+
+| Variable | Rôle |
+|---|---|
+| `OTEL_TRACES_ENABLED` | `true` requis (avec un endpoint) pour instrumenter quoi que ce soit |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | collecteur OTLP/HTTP — le path `/v1/traces` est ajouté |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | override spécifique traces (utilisé tel quel) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `clé1=valeur1,clé2=valeur2` (auth collecteur) |
+| `OTEL_TRACES_SAMPLER_ARG` | ratio racine `[0..1]`, défaut `1` — `ParentBasedSampler` |
+
+Instrumentation : HTTP (client + serveur), Express, NestJS, ioredis, pino
+(corrélation `trace_id` dans les logs). La propagation W3C `traceparent` fait
+suivre la trace de trust-api → money-api → provider sans configuration.
+
+Sécurité : un `RedactingSpanProcessor` efface les attributs sensibles
+(`Authorization`, `db.statement`, `*pin*`, `*nif*`, `*signature*`, query strings
+d'URL) **avant** l'export — même discipline que la redaction pino.
+
+Robustesse : `BatchSpanProcessor` (export hors chemin critique), init en
+try/catch — un collecteur injoignable ne bloque jamais le démarrage ni une
+requête. Désactivé (défaut) = zéro surcoût, aucun module patché.
+
+**Non couvert** : spans Prisma (le client DB) — `@prisma/instrumentation` est
+bloqué en `5.22.0`, trop en retard sur l'écosystème OTel installé ; à ajouter
+lors d'une montée de version de Prisma.
+
+## Reste à faire (hors Lots F/H)
+
+- Collecteur OTLP déployé (Tempo/Jaeger) + validation bout-en-bout des traces.
 - Dashboards Grafana + règles d'alerte Prometheus (burn-rate d'error budget).
 - Métriques métier : worker de réconciliation (Lot E), file d'attente BullMQ
   (jobs en attente / échoués), certification (signatures/s).
