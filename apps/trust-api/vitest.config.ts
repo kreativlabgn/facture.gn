@@ -6,8 +6,13 @@ import { defineConfig } from "vitest/config";
 // non encore testé. À remonter dans les vagues suivantes.
 //
 // Mesure locale (hors invoice-numbering.service.integration.spec.ts qui exige un
-// vrai Postgres, absent en local mais présent en CI — la couverture CI est donc
-// ≥ cette mesure) : statements 80.8 · branches 93.4 · functions 88.1 · lines 80.8
+// vrai Postgres — la couverture CI est ≥ cette mesure). Le smoke test
+// app.module.spec.ts compile tout l'AppModule : il instancie chaque provider
+// (les statements montent à ~92 %) et fait apparaître dans le rapport toutes les
+// fonctions de tous les fichiers, y compris non testées (functions ~81 %). Ne
+// jamais supprimer ce spec pour "remonter" la couverture de fonctions — c'est
+// la seule garde contre un graphe DI cassé.
+// Mesure du 2026-08-29 : statements 92.5 · branches 94.2 · functions 81.4 · lines 92.5
 export default defineConfig({
   test: {
     coverage: {
@@ -26,10 +31,10 @@ export default defineConfig({
         "src/scripts/**",
       ],
       thresholds: {
-        statements: 79,
-        branches: 90,
-        functions: 85,
-        lines: 79,
+        statements: 90,
+        branches: 92,
+        functions: 79,
+        lines: 90,
       },
     },
   },
