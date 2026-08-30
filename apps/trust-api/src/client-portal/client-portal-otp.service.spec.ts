@@ -4,13 +4,16 @@ import { ClientPortalOtpService } from "./client-portal-otp.service";
 
 const MSISDN = "+224622334455";
 
-function createFakePrisma(overrides: { otp?: unknown } = {}) {
+function createFakePrisma(overrides: { otp?: unknown; customers?: unknown[] } = {}) {
   const prisma: any = {
     clientPortalOtp: {
       create: vi.fn().mockResolvedValue({ id: "otp-1" }),
       findFirst: vi.fn().mockResolvedValue(overrides.otp ?? null),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    customer: {
+      findMany: vi.fn().mockResolvedValue(overrides.customers ?? []),
     },
   };
   return prisma;
@@ -81,6 +84,39 @@ describe("ClientPortalOtpService", () => {
       expect(JSON.stringify(writeCall)).not.toContain(hashedCode);
 
       expect(smsProvider.send).toHaveBeenCalledWith(MSISDN, expect.stringContaining(hashedCode));
+    });
+
+    it("résout la langue via les organisations rattachées au numéro (i18n)", async () => {
+      const prisma = createFakePrisma({
+        customers: [
+          { organization: { preferredLanguage: "pular" } },
+          { organization: { preferredLanguage: "fr" } },
+        ],
+      });
+      const smsProvider = createFakeSmsProvider();
+      const service = new ClientPortalOtpService(prisma, createFakePasswordService() as any, smsProvider as any);
+
+      await service.request(MSISDN);
+
+      expect(prisma.customer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { phone: MSISDN } }),
+      );
+      // 2 langues distinctes → fr ; pular étant un stub vide, le message reste
+      // FR de toute façon. On vérifie surtout que la résolution ne casse rien.
+      expect(smsProvider.send).toHaveBeenCalledWith(
+        MSISDN,
+        expect.stringMatching(/^Votre code facture\.gn : \d{4} \(valable 5 minutes\)\.$/),
+      );
+    });
+
+    it("ne lève jamais si la résolution de langue échoue", async () => {
+      const prisma = createFakePrisma();
+      prisma.customer.findMany = vi.fn().mockRejectedValue(new Error("db down"));
+      const smsProvider = createFakeSmsProvider();
+      const service = new ClientPortalOtpService(prisma, createFakePasswordService() as any, smsProvider as any);
+
+      await expect(service.request(MSISDN)).resolves.toBeUndefined();
+      expect(smsProvider.send).toHaveBeenCalledOnce();
     });
 
     it("F13, revue post-fix #4 — invalide tout OTP précédent non consommé du même numéro avant d'en créer un nouveau", async () => {

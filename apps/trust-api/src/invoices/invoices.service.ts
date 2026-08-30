@@ -6,6 +6,7 @@ import { resolveNifForCertification } from "../certification/certification.servi
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
 import { computePlatformFee } from "../common/commission-grid";
+import { resolveLocale } from "../i18n";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
 import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
@@ -433,7 +434,12 @@ export class InvoicesService {
       try {
         const customer = await this.prisma.customer.findUnique({ where: { id: invoiceWithLink.customerId } });
         if (customer) {
-          await this.notificationService.notify(customer, paymentLink.paymentLinkUrl, invoiceWithLink.totalTtc);
+          await this.notificationService.notify(
+            customer,
+            paymentLink.paymentLinkUrl,
+            invoiceWithLink.totalTtc,
+            resolveLocale(organization.preferredLanguage),
+          );
         }
       } catch (error) {
         this.logger.warn(`Facture ${invoiceId} certifiée mais la notification du client a échoué : ${(error as Error).message}`);
@@ -659,7 +665,7 @@ export class InvoicesService {
   async sendReminder(invoiceId: string, actorId: string) {
     const invoice = await this.prisma.invoice.findUniqueOrThrow({
       where: { id: invoiceId },
-      include: { customer: true },
+      include: { customer: true, organization: { select: { preferredLanguage: true } } },
     });
 
     if (!isOverdue(invoice)) {
@@ -683,6 +689,7 @@ export class InvoicesService {
       { phone: invoice.customer.phone, notificationChannel: invoice.customer.notificationChannel },
       invoice.number as string,
       invoice.amountDue / 100n,
+      resolveLocale(invoice.organization.preferredLanguage),
     );
 
     return this.prisma.$transaction(async (tx) => {

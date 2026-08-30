@@ -1151,6 +1151,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       { phone: "+224622334455", notificationChannel: "sms" },
       resolvedLink.paymentLinkUrl,
       result.totalTtc,
+      "fr",
     );
   });
 
@@ -2228,6 +2229,7 @@ const OVERDUE_INVOICE_BASE = {
   amountDue: 150_000n,
   customerId: "cust-1",
   customer: { id: "cust-1", phone: "+224622334455", notificationChannel: "sms" },
+  organization: { preferredLanguage: "fr" },
 };
 
 describe("InvoicesService — rappel de paiement après échéance (I2)", () => {
@@ -2249,6 +2251,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       { phone: "+224622334455", notificationChannel: "sms" },
       "FG-2026-000001",
       1_500n,
+      "fr",
     );
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: { invoiceId: "inv-1", type: "payment_reminder_sent", actorId: "user-djenabou" },

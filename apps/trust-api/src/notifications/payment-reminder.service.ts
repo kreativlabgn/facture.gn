@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { NotificationChannel } from "@facture-gn/db";
+import { type Locale, t } from "../i18n";
 import type { NotificationProvider } from "./notification-provider.interface";
 import { SMS_PROVIDER, WHATSAPP_PROVIDER } from "./notifications.tokens";
 import { resolveNotificationProviders } from "./notification-dispatch";
@@ -26,8 +27,16 @@ export class PaymentReminderService {
   // Meilleur effort — même garantie que PaymentLinkNotificationService.notify() :
   // ne lève jamais, l'action déclenchante (InvoicesService.sendReminder) reste
   // considérée réussie même si l'envoi effectif échoue côté provider.
-  async send(customer: ReminderRecipient, invoiceNumber: string, amountDueGnf: bigint): Promise<void> {
-    const message = `Rappel : votre facture ${invoiceNumber} de ${amountDueGnf.toLocaleString("fr-FR")} GNF reste impayée. Merci de régulariser rapidement.`;
+  async send(
+    customer: ReminderRecipient,
+    invoiceNumber: string,
+    amountDueGnf: bigint,
+    locale: Locale = "fr",
+  ): Promise<void> {
+    const message = t("notification.paymentReminder", locale, {
+      invoiceNumber,
+      amountGnf: amountDueGnf.toLocaleString("fr-FR"),
+    });
 
     const providers = resolveNotificationProviders(customer.notificationChannel, this.smsProvider, this.whatsappProvider);
 

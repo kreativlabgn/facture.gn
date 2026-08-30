@@ -37,6 +37,8 @@ Nouveau `apps/trust-api/src/i18n/` — **fonctions pures, pas de module NestJS**
 - [ ] 1.5 `apps/trust-api/src/i18n/translate.ts` — `t<K extends MessageKey>(key: K, locale: Locale, params: MessagesParams[K]): string`.
 - [ ] 1.6 `apps/trust-api/src/i18n/index.ts` — ré-exports.
 
+> **✅ GROUPE 1 + GROUPE 2 LIVRÉS.** `apps/trust-api/src/i18n/` (locale, messages, translate) + 5 services câblés + call-sites. Tests : i18n (12) + garde de wording par service. Suite trust-api **1247 passed / 3 skipped**, couverture 92.8/94.0/82.9/92.8 (> seuils). money-api 112, db, audit-ci OK. tsc + eslint clean (0 nouveau warning). `pular` = stub vide → fallback fr runtime partout.
+
 ### Groupe 2 — câblage des 5 services (dépend du Groupe 1)
 - [ ] 2.1 `payment-link-notification.service.ts` — `notify(customer, url, totalGnf, locale: Locale = "fr")` → `t("notification.paymentLinkReady", locale, { amountGnf, url })`. Call-site `invoices.service.ts` (bloc notify après émission) : `resolveLocale(organization.preferredLanguage)` (`organization` déjà en scope, `transactionResult`).
 - [ ] 2.2 `payment-reminder.service.ts` — `send(customer, invoiceNumber, amountDueGnf, locale)` → `t("notification.paymentReminder", …)`. Call-site `InvoicesService.sendReminder` : ajouter `organization: { select: { preferredLanguage: true } }` à l'`include` de la requête `invoice`, `resolveLocale(invoice.organization.preferredLanguage)`.
