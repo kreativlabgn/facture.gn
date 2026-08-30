@@ -71,5 +71,10 @@ externe. L'ancre externe réelle est différée.**
 - eIDAS / TSA qualifié RFC 3161 = **hors scope** (CdC : « eIDAS avant 2027 »).
 - Compatible avec « IPFS + Cloudflare, pinning 10 ans » (DAT) et MinIO WORM
   (ADR-013) comme cibles de publication.
-- Fast-follow : construire un `AnchorSink` réel (décider Bitcoin RPC vs IPFS à
-  l'exploitation) ; cache de la preuve d'inclusion si `/verify` est scrappé.
+- Fast-follow :
+  - construire un `AnchorSink` réel (décider Bitcoin RPC vs IPFS à l'exploitation) ;
+  - **`/verify` (public, sans auth) fait désormais un `findMany` (~1400 lignes) +
+    un arbre Merkle en mémoire par appel** — la preuve d'inclusion est immuable
+    une fois la tranche scellée : la mettre en cache (par `certificationId` ou
+    par `anchorBatchId`) si l'endpoint est scrappé. Throttle dédié à évaluer
+    (aujourd'hui : filet global 100/min/IP).
