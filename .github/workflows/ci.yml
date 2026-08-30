@@ -45,6 +45,7 @@ jobs:
       # ≠ "true" donc non armé — explicite quand même).
       RECONCILIATION_ENABLED: "false"
       RETENTION_ENABLED: "false"
+      MERKLE_ANCHOR_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
 

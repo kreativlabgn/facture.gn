@@ -15,10 +15,11 @@ function createFakeSigningKeyService(certification: StubEd25519CertificationServ
   };
 }
 
-function createFakePrisma(invoice: any) {
+function createFakePrisma(invoice: any, batchLeaves: { hash: string }[] = []) {
   return {
     invoice: {
       findUnique: vi.fn().mockResolvedValue(invoice),
+      findMany: vi.fn().mockResolvedValue(batchLeaves),
     },
   };
 }
@@ -51,6 +52,8 @@ function issueGenuineInvoice(certification: StubEd25519CertificationService, org
     hash: result.hash,
     signature: Buffer.from(result.signature, "hex"),
     organization: { name: "Boutique Aissatou", nif: organizationNif },
+    anchorBatchId: null as string | null,
+    anchorBatch: null as Record<string, unknown> | null,
   };
 }
 
@@ -262,5 +265,62 @@ describe("VerificationService — keyValidAtIssuance (A4, ADR-025)", () => {
     const result = await service.verifyByCertificationId(invoice.certificationId);
 
     expect(result.keyValidAtIssuance).toBe(false);
+  });
+
+  describe("preuve d'inclusion Merkle (E1, ADR-115)", () => {
+    it("anchor: null tant que la facture n'est pas scellée dans une tranche", async () => {
+      const certification = new StubEd25519CertificationService();
+      const invoice = issueGenuineInvoice(certification);
+      const prisma = createFakePrisma(invoice);
+      const service = new VerificationService(prisma as any, certification, {} as any);
+
+      const result = await service.verifyByCertificationId(invoice.certificationId);
+
+      expect(result.anchor).toBeNull();
+      expect(prisma.invoice.findMany).not.toHaveBeenCalled();
+    });
+
+    it("facture scellée : la preuve d'inclusion reconstruit la racine de la tranche", async () => {
+      const { buildInclusionProof, buildMerkleRoot, verifyInclusionProof } = await import(
+        "../certification/merkle-anchor/merkle"
+      );
+      const certification = new StubEd25519CertificationService();
+      const invoice = issueGenuineInvoice(certification);
+      // tranche = notre facture + 2 autres hashes
+      const other1 = "aa".repeat(32);
+      const other2 = "bb".repeat(32);
+      const leaves = [{ hash: invoice.hash }, { hash: other1 }, { hash: other2 }].sort((a, b) =>
+        a.hash.localeCompare(b.hash),
+      );
+      const merkleRoot = buildMerkleRoot(leaves.map((l) => l.hash));
+
+      invoice.anchorBatchId = "batch-1";
+      invoice.anchorBatch = {
+        id: "batch-1",
+        hourStart: new Date("2026-08-08T09:00:00.000Z"),
+        merkleRoot,
+        previousRoot: "GENESIS",
+        anchorStatus: "pending",
+        anchorRef: null,
+        anchoredAt: null,
+      };
+      const prisma = createFakePrisma(invoice, leaves);
+      const service = new VerificationService(prisma as any, certification, {} as any);
+
+      const result = await service.verifyByCertificationId(invoice.certificationId);
+
+      expect(result.anchor).not.toBeNull();
+      expect(result.anchor!.merkleRoot).toBe(merkleRoot);
+      expect(result.anchor!.previousRoot).toBe("GENESIS");
+      expect(result.anchor!.externalAnchor.status).toBe("pending");
+      // round-trip : la preuve exposée reconstruit bien la racine
+      expect(
+        verifyInclusionProof(invoice.hash, result.anchor!.inclusionProof, result.anchor!.merkleRoot),
+      ).toBe(true);
+      // cohérence avec un calcul indépendant
+      expect(result.anchor!.inclusionProof).toEqual(
+        buildInclusionProof(leaves.map((l) => l.hash), invoice.hash),
+      );
+    });
   });
 });

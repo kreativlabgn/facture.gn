@@ -35,6 +35,7 @@ import { ClientPortalModule } from "./client-portal/client-portal.module";
 import { FiscalPeriodsModule } from "./fiscal-periods/fiscal-periods.module";
 import { QueueModule } from "./queue/queue.module";
 import { RetentionModule } from "./retention/retention.module";
+import { MerkleAnchorModule } from "./certification/merkle-anchor/merkle-anchor.module";
 import { PendingMemberInvitesModule } from "./pending-member-invites/pending-member-invites.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
@@ -88,6 +89,8 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     FiscalPeriodsModule,
     // Lot J3 — purge périodique des tables opérationnelles éphémères.
     RetentionModule,
+    // Lot E1 — registre Merkle des factures + seam d'ancrage externe (opt-in).
+    MerkleAnchorModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même

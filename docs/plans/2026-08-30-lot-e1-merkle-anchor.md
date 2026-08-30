@@ -93,6 +93,14 @@ Nouveau `apps/trust-api/src/certification/merkle-anchor/`. Modèle `MerkleAnchor
 - **R7 — la preuve d'inclusion calculée à la volée coûte cher sur `/verify`** (public, potentiellement scrappé) → `findMany` sur `anchor_batch_id` indexé, ~1400 hashes, arbre en mémoire O(n log n) trivial ; pas de cache pour l'instant, à surveiller.
 - **R8 — un futur sink réel (Bitcoin RPC) réintroduit une dépendance lourde** → le seam isole ça dans un module optionnel, chargé seulement si `MERKLE_ANCHOR_SINK` le désigne ; `audit-ci` réévalué à ce moment.
 
+## ✅ LIVRÉ (avant revue)
+- **G1** `merkle.ts` (RFC 6962, pur) + 18 tests (oracle `node:crypto` indépendant, vecteurs 1–13 feuilles, round-trip, détection d'altération cible/sibling/racine).
+- **G2** `schema.prisma` (`MerkleAnchorBatch` registre horaire chaîné, `MerkleAnchorStatus`, `Invoice.anchorBatchId`) + migration `20260830150000` (`CREATE TYPE/TABLE/INDEX` + FK `ON DELETE SET NULL` + fonction plpgsql + trigger `merkle_anchor_batch_identity_immutable` : `hour_start`/`merkle_root`/`previous_root`/`leaf_count`/`created_at` immuables, `DELETE` interdit, `anchor_*` modifiables). ADR-115.
+- **G3** `merkle-anchor/` : `constants`, `metrics`, `anchor-sink` (`AnchorSink` + `NoopAnchorSink`, +spec), `merkle-anchor-seal.service` (`sealDue()` — une tranche/run, `issuedAt < borne`, feuilles triées ASC, `updateMany` gardé `anchorBatchId: null`, catch P2002 → `already-sealed`, +6 tests), `merkle-anchor-flush.service` (try/catch par tranche, `failed` jamais auto, +4 tests), `processor` (2 wrappers, throw si flush global KO), `module` (2 files BullMQ, opt-in `MERKLE_ANCHOR_ENABLED`, non-bloquant, +3 tests). `app.module` + `app.module.spec` + `ci.yml` + `.env.example` + `docker-compose.yml`.
+- **G4** `verification.service` : champ `anchor: AnchorProof | null` — preuve d'inclusion reconstruite à la volée (`findMany anchorBatchId, orderBy hash asc` → `buildInclusionProof`). +2 tests (round-trip `verifyInclusionProof`, `anchor: null` si non scellée).
+- **G5** `docs/runbooks/merkle-anchor.md` + note RLS.
+- **Validation** : trust-api **1296 passed / 3 skipped**, couv. 92.9/93.9/83.6/92.9 (> seuils). money-api 112, db, audit-ci OK (**aucune nouvelle dépendance**). tsc + eslint clean (0 nouveau warning).
+
 ## Séquence
 1. Groupe 1 (Merkle pur) — livrable seul.
 2. Groupe 2 (modèle + migration + ADR).

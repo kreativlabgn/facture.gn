@@ -1,10 +1,15 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import type { MerkleAnchorStatus, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import { resolveNifForCertification } from "../certification/certification.service";
 import type { CertificationResult, CertificationService } from "../certification/certification.service";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
+import {
+  buildInclusionProof,
+  leafHash,
+  type InclusionStep,
+} from "../certification/merkle-anchor/merkle";
 
 export interface PublicInvoiceVerification {
   certificationId: string;
@@ -25,6 +30,26 @@ export interface PublicInvoiceVerification {
   // à l'horloge courante. Toujours true pour la clé légataire globale
   // (signingKeyId null), qui n'a pas de registre de révocation dans ce repo.
   keyValidAtIssuance: boolean;
+  // E1 (ADR-115) — preuve d'inclusion Merkle. null tant que la facture n'a pas
+  // été scellée dans une tranche horaire (job merkle-anchor-seal). Un
+  // vérificateur reconstruit `leafHash → …inclusionProof… → merkleRoot`, puis
+  // (quand externalAnchor.status === "anchored") vérifie `anchorProof` contre
+  // le support externe (Bitcoin / IPFS).
+  anchor: AnchorProof | null;
+}
+
+export interface AnchorProof {
+  batchId: string;
+  hourStart: string;
+  merkleRoot: string;
+  previousRoot: string;
+  leafHash: string;
+  inclusionProof: InclusionStep[];
+  externalAnchor: {
+    status: MerkleAnchorStatus;
+    ref: string | null;
+    anchoredAt: string | null;
+  };
 }
 
 @Injectable()
@@ -44,7 +69,7 @@ export class VerificationService {
   async verifyByCertificationId(certificationId: string): Promise<PublicInvoiceVerification> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { certificationId },
-      include: { organization: true },
+      include: { organization: true, anchorBatch: true },
     });
 
     if (!invoice || !invoice.number || !invoice.hash || !invoice.signature || !invoice.issuedAt) {
@@ -92,6 +117,34 @@ export class VerificationService {
     // OU révoquée APRÈS issuedAt.
     const keyValidAtIssuance = revokedAt === null || invoice.issuedAt < revokedAt;
 
+    // E1 — preuve d'inclusion reconstruite à la volée depuis les feuilles de la
+    // tranche (invoice.hash des factures rattachées, triées ASC — même ordre
+    // déterministe que le scellement).
+    let anchor: AnchorProof | null = null;
+    if (invoice.anchorBatch) {
+      const leaves = await this.prisma.invoice.findMany({
+        where: { anchorBatchId: invoice.anchorBatchId },
+        select: { hash: true },
+        orderBy: { hash: "asc" },
+      });
+      const leafHashes = leaves
+        .map((l) => l.hash)
+        .filter((h): h is string => h !== null);
+      anchor = {
+        batchId: invoice.anchorBatch.id,
+        hourStart: invoice.anchorBatch.hourStart.toISOString(),
+        merkleRoot: invoice.anchorBatch.merkleRoot,
+        previousRoot: invoice.anchorBatch.previousRoot,
+        leafHash: leafHash(invoice.hash),
+        inclusionProof: buildInclusionProof(leafHashes, invoice.hash),
+        externalAnchor: {
+          status: invoice.anchorBatch.anchorStatus,
+          ref: invoice.anchorBatch.anchorRef,
+          anchoredAt: invoice.anchorBatch.anchoredAt?.toISOString() ?? null,
+        },
+      };
+    }
+
     return {
       certificationId,
       number: invoice.number,
@@ -104,6 +157,7 @@ export class VerificationService {
       validatedByAdministration: invoice.validatedByAdministration,
       integrityValid,
       keyValidAtIssuance,
+      anchor,
     };
   }
 }
