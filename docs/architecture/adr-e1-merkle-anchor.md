@@ -30,7 +30,11 @@ externe. L'ancre externe réelle est différée.**
   factures incluses = période réellement engagée), `merkleRoot`, `previousRoot`
   (chaînage, `"GENESIS"` au départ), `leafCount`, `anchorAttempts`. Colonnes
   d'identité **immuables en base** (trigger, pattern J1) ; `DELETE` **et
-  `TRUNCATE`** interdits (triggers ROW + STATEMENT). `CHECK` de cohérence :
+  `TRUNCATE`** interdits (triggers ROW + STATEMENT). `previousRoot` **`@unique`** :
+  la chaîne ne peut pas forker — deux runs de scellement concurrents qui liraient
+  le même prédécesseur → le second `INSERT` échoue (`P2002`), ses factures
+  repartent au run suivant. C'est la contrainte, pas la lecture dans la
+  transaction, qui garantit la non-fourche. `CHECK` de cohérence :
   `anchored ⟺ anchoredAt renseigné`, `proof`/`ref` ensemble, `proof ⟹ anchored`
   — les états incohérents sont irreprésentables, pas seulement évités par le call
   site. FK `Invoice.anchorBatch` en `onDelete: Restrict`.
@@ -41,9 +45,11 @@ externe. L'ancre externe réelle est différée.**
   naturellement). `asOf` = début de l'heure courante ; `coverageFrom` remonte au
   plus vieux `issuedAt` réellement scellé. Feuilles triées par `(hash ASC, id
   ASC)` — ordre **total** déterministe. Plafond `MAX_LEAVES_PER_BATCH = 20 000`
-  (borne la mémoire du job ET la reconstruction de preuve sur `/verify`).
-  `previousRoot` lu **dans la transaction** de création. `Invoice.anchorBatchId`
-  assigné une seule fois (garde + trigger `invoice_anchor_batch_id_write_once`).
+  (borne la mémoire du job ET la reconstruction de preuve sur `/verify`, qui
+  reprend ce `take` en défense en profondeur). `previousRoot` lu dans la
+  transaction + `@unique` (non-fourche garantie par la contrainte).
+  `Invoice.anchorBatchId` assigné une seule fois (garde + trigger
+  `invoice_anchor_batch_id_write_once`).
 - **Seam `AnchorSink`** : `interface { anchor(rootHex, batchId): Promise<AnchorReceipt | null> }`.
   `NoopAnchorSink` par défaut (retourne `null` → la tranche reste `pending`).
   Un sink réel (Bitcoin RPC maintenu, ou IPFS+Cloudflare per DAT) = provider

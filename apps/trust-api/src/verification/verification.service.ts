@@ -11,6 +11,7 @@ import {
   leafHash,
   type InclusionStep,
 } from "../certification/merkle-anchor/merkle";
+import { MAX_LEAVES_PER_BATCH } from "../certification/merkle-anchor/merkle-anchor.constants";
 
 export interface PublicInvoiceVerification {
   certificationId: string;
@@ -141,6 +142,11 @@ export class VerificationService {
         where: { anchorBatchId: invoice.anchorBatchId },
         select: { hash: true },
         orderBy: [{ hash: "asc" }, { id: "asc" }],
+        // Défense en profondeur : la borne réelle est le plafond au scellement
+        // (une tranche ne dépasse jamais MAX_LEAVES_PER_BATCH). Ce `take` garde
+        // l'endpoint public borné même si le plafond de scellement est relevé
+        // un jour sans revenir ici.
+        take: MAX_LEAVES_PER_BATCH,
       });
       const leafHashes = leaves
         .map((l) => l.hash)

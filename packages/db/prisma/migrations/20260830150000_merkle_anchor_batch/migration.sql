@@ -40,6 +40,11 @@ CREATE TABLE "merkle_anchor_batch" (
 );
 
 CREATE UNIQUE INDEX "merkle_anchor_batch_as_of_key" ON "merkle_anchor_batch"("as_of");
+-- Chaînage non forkable : au plus une tranche par prédécesseur. Deux runs de
+-- scellement concurrents d'as_of différents qui liraient la même dernière
+-- tranche → le second insert échoue (unique_violation), ses factures repartent
+-- au run suivant (garde anchor_batch_id IS NULL). 'GENESIS' n'apparaît qu'une fois.
+CREATE UNIQUE INDEX "merkle_anchor_batch_previous_root_key" ON "merkle_anchor_batch"("previous_root");
 CREATE INDEX "merkle_anchor_batch_anchor_status_idx" ON "merkle_anchor_batch"("anchor_status");
 
 ALTER TABLE "invoice" ADD COLUMN "anchor_batch_id" TEXT;

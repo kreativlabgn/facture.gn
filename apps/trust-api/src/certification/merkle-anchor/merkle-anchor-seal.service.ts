@@ -68,8 +68,11 @@ export class MerkleAnchorSealService {
 
     try {
       const batch = await this.prisma.$transaction(async (tx) => {
-        // previousRoot lu DANS la transaction : ferme la fenêtre où deux runs
-        // concurrents d'`asOf` différents liraient le même prédécesseur.
+        // previousRoot lu DANS la transaction. En READ COMMITTED (défaut PG),
+        // deux runs concurrents d'`asOf` différents PEUVENT encore lire le même
+        // prédécesseur — mais l'index unique `previous_root` fait alors échouer
+        // le second insert (P2002 → skipped, factures reprises au run suivant).
+        // La contrainte, pas la lecture, garantit la non-fourche.
         const last = await tx.merkleAnchorBatch.findFirst({
           orderBy: { asOf: "desc" },
           select: { merkleRoot: true },
@@ -102,7 +105,10 @@ export class MerkleAnchorSealService {
         skipped: null,
       };
     } catch (error) {
-      // Seul as_of @unique est faillible ici (course entre deux runs).
+      // Course entre deux runs concurrents : collision sur as_of @unique (même
+      // borne) ou sur previous_root @unique (bornes différentes, même
+      // prédécesseur lu). Dans les deux cas les factures restent anchor_batch_id
+      // NULL et repartent au run suivant.
       if ((error as { code?: string }).code === "P2002") {
         return { batchCreated: false, asOf: asOf.toISOString(), leafCount: 0, capped: false, skipped: "already-sealed" };
       }

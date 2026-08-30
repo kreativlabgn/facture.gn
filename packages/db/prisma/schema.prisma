@@ -1060,7 +1060,11 @@ model MerkleAnchorBatch {
   // Min(issuedAt) des factures de la tranche : la période réellement engagée.
   coverageFrom DateTime           @map("coverage_from")
   merkleRoot   String             @map("merkle_root")
-  previousRoot String             @map("previous_root")
+  // Chaînage. previousRoot @unique : la chaîne ne peut pas FORKER (deux tranches
+  // partageant un prédécesseur) même si deux runs de scellement concurrents
+  // d'asOf différents lisent la même dernière tranche — le second insert échoue
+  // (P2002), ses factures repartent au run suivant. "GENESIS" pour la 1re.
+  previousRoot String             @unique @map("previous_root")
   leafCount    Int                @map("leaf_count")
   anchorStatus MerkleAnchorStatus @default(pending) @map("anchor_status")
   anchorProof  String?            @map("anchor_proof")
