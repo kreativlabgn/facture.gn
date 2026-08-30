@@ -565,7 +565,7 @@ model Organization {
   mandates              Mandate[]
   customers             Customer[]
   branches              Branch[]
-  signingKey            OrganizationSigningKey?
+  signingKeys           OrganizationSigningKey[]
   creditLimitRequests   CreditLimitChangeRequest[]
   apiKeys               ApiKey[]
   products              Product[]
@@ -578,34 +578,40 @@ model Organization {
   @@map("organization")
 }
 
-// A3, ADR-026 — "clé racine Ed25519 en HSM, jamais exportée". Une seule clé par
-// organisation pour cette story (organizationId @unique) — le schéma reste
-// rotation-safe (Invoice.signingKeyId référence CETTE clé précise, jamais
-// "la clé courante de l'organisation") mais aucun mécanisme de rotation actif
-// n'est construit ici. encryptedPrivateKey : chiffrement enveloppe AES-256-GCM
-// (envelope-encryption.ts) avec CERTIFICATION_MASTER_KEY — jamais en clair au
-// repos, jamais journalisé. Approximation MVP honnête d'un vrai HSM cloud
-// (aucun SDK Vault/KMS dans ce repo) — même posture déjà documentée pour
-// CERTIFICATION_PRIVATE_KEY (TODO ADR-026/A3 dans certification.module.ts).
+// A3, ADR-026 — "clé racine Ed25519 en HSM, jamais exportée". encryptedPrivateKey :
+// chiffrement enveloppe AES-256-GCM (envelope-encryption.ts) avec
+// CERTIFICATION_MASTER_KEY — jamais en clair au repos, jamais journalisé.
+// Approximation MVP honnête d'un vrai HSM cloud (aucun SDK Vault/KMS dans ce
+// repo) — même posture déjà documentée pour CERTIFICATION_PRIVATE_KEY (TODO
+// ADR-026/A3 dans certification.module.ts).
+//
+// E3 (ADR-114 provisoire, DAT §Crypto "rotation 365j") — N lignes par
+// organisation dans le temps. AU PLUS UNE active : index unique partiel
+// organization_signing_key_one_active_per_org (WHERE retired_at IS NULL AND
+// revoked_at IS NULL). retiredAt = clé remplacée par rotation ; retrait ≠
+// révocation : une clé retirée (non révoquée) reste valide pour les factures
+// signées pendant qu'elle était active — verifyWithKey() suit Invoice.signingKeyId,
+// jamais "la clé courante". Une facture déjà signée n'est JAMAIS re-vérifiée
+// différemment.
 model OrganizationSigningKey {
-  id                  String   @id @default(uuid())
-  organizationId      String   @unique @map("organization_id")
-  publicKey           String   @map("public_key")
-  encryptedPrivateKey String   @map("encrypted_private_key")
-  createdAt           DateTime @default(now()) @map("created_at")
+  id                  String    @id @default(uuid())
+  organizationId      String    @map("organization_id")
+  publicKey           String    @map("public_key")
+  encryptedPrivateKey String    @map("encrypted_private_key")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  // E3 — posé par rotate() sur la clé sortante. NULL = pas remplacée.
+  retiredAt           DateTime? @map("retired_at")
 
   // A4, ADR-025 — "révocation jamais rétroactive" : ne bloque JAMAIS
   // verifyWithKey() (intégrité des factures déjà signées), uniquement
   // certifyForOrganization() (nouvelles signatures) et le champ public
-  // keyValidAtIssuance (VerificationService). Pas de rotation construite ici
-  // (voir commentaire A3/ADR-026 plus haut, "rotation-safe mais aucun
-  // mécanisme actif") — une organisation révoquée ne peut plus émettre tant
-  // qu'une story future ne construit pas le remplacement de clé.
+  // keyValidAtIssuance (VerificationService).
   revokedAt DateTime? @map("revoked_at")
 
   organization Organization @relation(fields: [organizationId], references: [id])
   invoices     Invoice[]
 
+  @@index([organizationId])
   @@map("organization_signing_key")
 }
 

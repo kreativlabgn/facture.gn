@@ -262,9 +262,11 @@ export class OrganizationsService {
           },
         });
         // A3, ADR-026 — même discipline que create()/createAssisted(). Jamais sur
-        // la branche idempotente ci-dessous : provisionner une 2e clé pour une
-        // organisation qui en a déjà une violerait la contrainte @unique et
-        // casserait la redélivraison webhook (ADR-016).
+        // la branche idempotente ci-dessous : provisionner une 2e clé ACTIVE pour
+        // une organisation qui en a déjà une violerait l'index unique partiel
+        // organization_signing_key_one_active_per_org (E3/ADR-114) et casserait
+        // la redélivraison webhook (ADR-016). L'organisation est fraîche par
+        // transaction ici → non atteignable, l'index reste le filet.
         await this.signingKeyService.provisionRootKey(organization.id, tx);
         return organization;
       });
@@ -447,6 +449,17 @@ export class OrganizationsService {
   // jamais rétroactif).
   async revokeSigningKey(organizationId: string) {
     return this.signingKeyService.revoke(organizationId);
+  }
+
+  // E3, ADR-114 — rotation self-service owner/admin (DAT §Crypto "rotation 365j").
+  // Délégation : OrganizationSigningKeyService porte toute la logique (retrait
+  // atomique de l'active + provision d'une neuve, garde de course).
+  async rotateSigningKey(organizationId: string) {
+    return this.signingKeyService.rotate(organizationId);
+  }
+
+  async getSigningKeyStatus(organizationId: string) {
+    return this.signingKeyService.getKeyStatus(organizationId);
   }
 
   // Security Audit 2026-08-23, finding #8 — self-service owner/admin, même posture
