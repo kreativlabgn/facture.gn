@@ -41,30 +41,25 @@
 - **J3 (rétention)** : `invoice_event` est explicitement **hors périmètre de purge** (WORM, ADR-015). Le pattern d'isolation des tests d'intégration `packages/db` (aujourd'hui `TRUNCATE` global) est à consolider quand J3 ajoutera d'autres specs.
 - **Suivi hors Vague 3** : (a) hash-chaining d'`invoice_event` (le trigger empêche l'altération/suppression mais pas l'injection d'événements forgés — `facture_app` garde INSERT sans chaînage d'intégrité type Ed25519) → proposer un ADR ; (b) validation croisée `type`↔`amount`↔`metadata` à la création (`InvoiceEventsService.append()` typé + CHECK DB) — l'enjeu monte puisque les lignes sont désormais définitives.
 
-### Groupe 2 — J3 : brique BullMQ trust-api (livrable seul, inerte)
-- [ ] Tâche 2.1 : `apps/trust-api/package.json` — ajouter `@nestjs/bullmq` (^12), `bullmq` (^6), `ioredis` (^6). `@opentelemetry/instrumentation-ioredis` **déjà présent** (Lot H). `pnpm install`, vérifier lockfile.
-- [ ] Tâche 2.2 : `apps/trust-api/src/queue/queue.config.ts` + `queue.config.spec.ts` — copie littérale de money-api (`buildRedisConnection` : `url` depuis `REDIS_URL` défaut `redis://localhost:6379`, `maxRetriesPerRequest: null`, `lazyConnect: true`) + ses 3 tests.
-- [ ] Tâche 2.3 : `apps/trust-api/src/queue/queue.module.ts` — `@Global` `QueueModule` avec `BullModule.forRoot({ connection: buildRedisConnection() })`, `exports: [BullModule]` (copie money-api).
-- [ ] Tâche 2.4 : `apps/trust-api/src/app.module.ts` — importer `QueueModule` (après `PrismaModule`, avant les modules métier).
-- [ ] Tâche 2.5 : vérifier `apps/trust-api/src/app.module.spec.ts` (smoke DI) vert avec `QueueModule` (lazyConnect → aucune connexion Redis à l'instanciation, comme money-api).
+### Groupe 2 — J3 : brique BullMQ trust-api — ✅ LIVRÉ
+- [x] 2.1 `package.json` : `@nestjs/bullmq`^12, `bullmq`^6, `ioredis`^6 ajoutés (déjà dans le store via money-api, lockfile +9 l.). `@opentelemetry/instrumentation-ioredis` déjà présent.
+- [x] 2.2 `src/queue/queue.config.ts` + `.spec.ts` (3 tests verts) — `buildRedisConnection` calqué sur money-api.
+- [x] 2.3 `src/queue/queue.module.ts` — `@Global QueueModule` (`BullModule.forRoot` + `exports`).
+- [x] 2.4 `app.module.ts` — `QueueModule` importé après `PrismaModule`.
+- [x] 2.5 smoke DI (`app.module.spec.ts`) vert avec `QueueModule` + `RetentionModule` (2267 ms, lazyConnect → aucune connexion Redis).
 
-### Groupe 3 — J3 : purge de rétention (livrable seul)
-- [ ] Tâche 3.1 : `apps/trust-api/src/retention/retention.constants.ts` — `RETENTION_INTERVAL_MS = 24h` ; délais de grâce (après `expiresAt`) : `USSD_SESSION_GRACE_MS = 24h`, `CLIENT_PORTAL_OTP_GRACE_MS = 7j`, `REVOKED_TOKEN_GRACE_MS = 24h`, `PENDING_MEMBER_INVITE_GRACE_MS = 30j`, `ASSISTED_SESSION_REVOKED_GRACE_MS = 90j`. En-tête : aucune spec ADR/Backlog ne fixe ces durées (comme `ASSISTED_SESSION_TTL_MS`/`PENDING_MEMBER_INVITE_TTL_MS`) — ajustables ici uniquement.
-- [ ] Tâche 3.2 : `apps/trust-api/src/retention/retention.service.ts` — `RetentionService` injecte `PRISMA_CLIENT`. `async runOnce(now = new Date()): Promise<RetentionSummary>` : pour chacune des 5 tables, `try { count += (await deleteMany({ where })).count } catch (e) { log.error ; errored.push(table) }`. `where` par table :
-  - `ussdSession` : `{ expiresAt: { lt: now - USSD_SESSION_GRACE_MS } }`
-  - `clientPortalOtp` : `{ OR: [{ consumedAt: { not: null } }, { expiresAt: { lt: now } }], expiresAt: { lt: now - CLIENT_PORTAL_OTP_GRACE_MS } }` → simplifier : `{ expiresAt: { lt: now - CLIENT_PORTAL_OTP_GRACE_MS } }` (un OTP consommé a de toute façon un `expiresAt` proche).
-  - `revokedToken` : `{ expiresAt: { lt: now - REVOKED_TOKEN_GRACE_MS } }`
-  - `pendingMemberInvite` : `{ acceptedAt: null, expiresAt: { lt: now - PENDING_MEMBER_INVITE_GRACE_MS } }` (jamais purger une invitation acceptée : `resolvedUserId` est une trace utile).
-  - `assistedSession` : `{ revokedAt: { not: null, lt: now - ASSISTED_SESSION_REVOKED_GRACE_MS } }` — **jamais** sur `expiresAt` seul (preuve de consentement).
-  Retourne `{ deletedByTable: Record<string, number>, errored: string[] }`.
-- [ ] Tâche 3.3 : `apps/trust-api/src/retention/retention.metrics.ts` — compteur prom-client `trust_api_retention_rows_deleted_total` labels `{table}` (registre préfixé `trust_api_`, cf. `HttpMetricsInterceptor`). Incrémenté par `RetentionService` après chaque table.
-- [ ] Tâche 3.4 : `apps/trust-api/src/retention/retention.processor.ts` — `@Processor(RETENTION_QUEUE)` `extends WorkerHost`, `process()` → `runOnce()` + `logger.log(JSON.stringify(summary))` (copie mince, cf. `ReconciliationProcessor`).
-- [ ] Tâche 3.5 : `apps/trust-api/src/retention/retention.module.ts` — `BullModule.registerQueue({ name: RETENTION_QUEUE })`, providers `[RetentionService, RetentionProcessor]`, `onModuleInit` : si `RETENTION_ENABLED === "false"` → `logger.warn` + return ; sinon `try { await queue.upsertJobScheduler("retention-daily", { every: RETENTION_INTERVAL_MS }, { name: "run" }) } catch { logger.error(...) }` (démarrage jamais bloqué).
-- [ ] Tâche 3.6 : `apps/trust-api/src/app.module.ts` — importer `RetentionModule`.
-- [ ] Tâche 3.7 : `.github/workflows/ci.yml` — job `build`, bloc `env:` : ajouter `RETENTION_ENABLED: "false"` (le service `redis` et `REDIS_URL` existent déjà, ajoutés au Lot E).
-- [ ] Tâche 3.8 : `docker-compose.yml` — service `trust-api` (profil `full`) : ajouter `REDIS_URL` et `RETENTION_ENABLED` à `environment` si absent. `.env.example` : documenter `REDIS_URL`, `RETENTION_ENABLED`.
-- [ ] Tâche 3.9 : `apps/trust-api/src/app.module.spec.ts` — vérifier vert avec `RetentionModule` (env de test : `RETENTION_ENABLED=false`, `redisConnection` lazy).
-- [ ] Tâche 3.10 : `docs/runbooks/retention.md` — tables purgées, délais de grâce et leur justification (dont le cas `assisted_session`), `RETENTION_ENABLED`, déclenchement manuel via `redis-cli`/script, où ajuster les constantes.
+### Groupe 3 — J3 : purge de rétention — ✅ LIVRÉ
+- [x] 3.1 `retention.constants.ts` — `RETENTION_INTERVAL_MS` 24 h + 5 délais de grâce (USSD 24 h, OTP 7 j, revoked_token 24 h, pending_invite 30 j, assisted_session **révoquée** 90 j). En-tête : aucune spec ne fixe ces durées.
+- [x] 3.2 `retention.service.ts` — `runOnce(now = new Date())` pur, `try/catch` par table, retourne `{ deletedByTable, errored }`. `where` par table conforme au plan ; `clientPortalOtp` simplifié à `{ expiresAt: { lt: … } }` ; `assistedSession` sur `{ revokedAt: { not: null, lt: … } }` uniquement.
+- [x] 3.3 `retention.metrics.ts` — `trust_api_retention_rows_deleted_total{table}` (`makeCounterProvider` dans `RetentionModule`), incrémenté seulement si `count > 0`.
+- [x] 3.4 `retention.processor.ts` — `@Processor(RETENTION_QUEUE)` mince (log du résumé).
+- [x] 3.5 `retention.module.ts` — `registerQueue` + `onModuleInit` (`RETENTION_ENABLED=false` → warn+return ; sinon `upsertJobScheduler("retention-daily", { every })` en `try/catch` non-bloquant).
+- [x] 3.6 `app.module.ts` — `RetentionModule` importé.
+- [x] 3.7 `.github/workflows/ci.yml` — `RETENTION_ENABLED: "false"` dans le job `build`.
+- [x] 3.8 `docker-compose.yml` (service `trust-api` : `REDIS_URL` + `RETENTION_ENABLED` + `depends_on: redis`) ; `apps/trust-api/.env.example` (`REDIS_URL`, `RETENTION_ENABLED`).
+- [x] 3.9 `app.module.spec.ts` — `RETENTION_ENABLED: "false"` ajouté au `TEST_ENV` ; smoke vert.
+- [x] 3.10 `docs/runbooks/retention.md` — tables, délais + justifications (dont `assisted_session`), activation, déclenchement manuel, observabilité, rollback.
+- **Tests** : `retention.service.spec.ts` (7), `retention.module.spec.ts` (3), `queue.config.spec.ts` (3) → verts. Suite trust-api **1226 passed / 3 skipped**, couverture 92.9/94.2/82.6/92.9 (> seuils). money-api 112, db 4, audit-ci OK. tsc + eslint clean (0 nouveau warning).
 
 ### Groupe 4 — clôture
 - [ ] Tâche 4.1 : `pnpm --filter @facture-gn/db db:generate && build` (aucun changement de schéma Prisma → client inchangé, mais la migration doit être visible de `db:migrate:deploy`).
