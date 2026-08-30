@@ -106,6 +106,25 @@ BEGIN
 END $$;
 ```
 
+## Étape 5 — Durcir `invoice_event` (défense en profondeur, J1)
+
+Indépendant de la RLS, mais lié au même rôle `facture_app`. La migration
+`20260830120000_invoice_event_append_only` pose déjà un **trigger actif** qui
+refuse tout `UPDATE`/`DELETE` sur `invoice_event`, y compris pour le propriétaire
+— cette étape n'ajoute qu'une seconde barrière au niveau des privilèges, à
+exécuter en même temps que la bascule sur `facture_app` (étape 3) :
+
+```sql
+REVOKE UPDATE, DELETE ON "invoice_event" FROM facture_app;
+```
+
+`facture_app` conserve `SELECT` et `INSERT` (l'application n'ajoute que des
+événements). Le trigger reste la garde principale ; le `REVOKE` la double au cas
+où le trigger serait désactivé par erreur (`ALTER TABLE … DISABLE TRIGGER`).
+
+Rollback : `GRANT UPDATE, DELETE ON "invoice_event" TO facture_app;` — sans effet
+tant que le trigger est en place.
+
 ## Rollback
 
 - Étape 4 → 3 : `ALTER TABLE %I NO FORCE ROW LEVEL SECURITY`.
