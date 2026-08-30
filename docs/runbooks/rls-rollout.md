@@ -106,6 +106,55 @@ BEGIN
 END $$;
 ```
 
+## Étape 5 — Durcir `invoice_event` (défense en profondeur, J1)
+
+Indépendant de la RLS, mais lié au même rôle `facture_app`. La migration
+`20260830120000_invoice_event_append_only` pose un **trigger actif** qui refuse
+tout `UPDATE`/`DELETE` DML direct sur `invoice_event`, pour tous les rôles. Le
+trigger ne couvre PAS `TRUNCATE` ni la désactivation par un rôle disposant du
+DDL — d'où cette étape, à exécuter en même temps que la bascule sur `facture_app`
+(étape 3) :
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON "invoice_event" FROM facture_app;
+```
+
+`facture_app` ne conserve que `SELECT` et `INSERT` (l'application n'ajoute que
+des événements). Règles permanentes :
+
+- **Ne jamais `GRANT ALL` sur `invoice_event`** (ré-accorderait UPDATE/DELETE/TRUNCATE).
+- `TRUNCATE "invoice" CASCADE` ou `TRUNCATE "organization" CASCADE` détruisent
+  `invoice_event` en cascade **sans déclencher le trigger** — interdits hors
+  reset d'un environnement de test.
+- Vérifier `REVOKE CREATE ON SCHEMA public FROM PUBLIC` sur le cluster de prod
+  (défaut PG15+ ; un cluster initialisé sur PG ≤ 14 laisserait `facture_app`
+  remplacer `reject_invoice_event_mutation()` par un no-op).
+
+Rollback : `GRANT UPDATE, DELETE ON "invoice_event" TO facture_app;` — sans effet
+tant que le trigger est en place.
+
+### Correction exceptionnelle du journal (« bris de glace »)
+
+Le trigger rend `invoice_event` définitivement immuable. Une corruption réelle
+(déploiement bugué ayant écrit des événements avec un mauvais `invoice_id` /
+`amount` / `metadata`) n'a qu'une remédiation, **exceptionnelle et supervisée** :
+
+1. Autorisation explicite d'un responsable (Squad Trust + conformité) — tracée
+   hors SI.
+2. Migration one-off dédiée, dans une **transaction unique** :
+   ```sql
+   ALTER TABLE "invoice_event" DISABLE TRIGGER invoice_event_append_only;
+   -- corrections ciblées (UPDATE/DELETE strictement bornés par id)
+   ALTER TABLE "invoice_event" ENABLE TRIGGER invoice_event_append_only;
+   ```
+3. Émettre dans la foulée un `invoice_event` (ou une entrée de journal
+   d'exploitation) constatant l'opération : qui, quand, quelles lignes, pourquoi.
+4. Vérifier `ENABLE TRIGGER` effectif avant de clore la transaction.
+
+Alerting : router vers Grafana/Loki une alerte sur toute erreur Postgres
+`restrict_violation` visant `invoice_event` (taux normal ≈ 0 — une tentative
+signale un bug ou un probing).
+
 ## Rollback
 
 - Étape 4 → 3 : `ALTER TABLE %I NO FORCE ROW LEVEL SECURITY`.
