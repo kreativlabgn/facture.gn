@@ -1002,6 +1002,11 @@ model Invoice {
   hash         String?
   previousHash String? @map("previous_hash")
   signature    Bytes?
+  // E1 (ADR-115) — tranche Merkle horaire à laquelle le hash de cette facture
+  // est rattaché. Assignée UNE seule fois par MerkleAnchorSealService, jamais
+  // réécrite. La preuve d'inclusion est reconstruite à la volée par /verify.
+  anchorBatchId String?            @map("anchor_batch_id")
+  anchorBatch   MerkleAnchorBatch? @relation(fields: [anchorBatchId], references: [id])
   // A3 — null = signée avec l'ancienne clé globale légataire (toutes les
   // factures émises avant cette story, jamais retouchées, jamais re-vérifiées
   // différemment). Non-null = signée avec la clé racine propre à l'organisation
@@ -1025,7 +1030,41 @@ model Invoice {
   refunds       Refund[]
 
   @@unique([organizationId, number])
+  // E1 — reconstruction de la preuve d'inclusion (feuilles d'une tranche).
+  @@index([anchorBatchId])
   @@map("invoice")
+}
+
+// E1 (ADR-115 provisoire) — registre HORAIRE des racines de Merkle, CHAÎNÉ
+// (previousRoot). Chaque tranche est un engagement compact sur les hashes de
+// factures d'une fenêtre temporelle, destiné à être ancré hors du contrôle de
+// facture.gn (seam AnchorSink : Noop par défaut, futurs sinks Bitcoin RPC /
+// IPFS). Colonnes d'identité (hourStart, merkleRoot, previousRoot, leafCount,
+// createdAt) IMMUABLES en base (trigger merkle_anchor_batch_identity_immutable) ;
+// les colonnes anchor* sont write-once-later par le flush. DELETE interdit.
+// Table CROSS-ORGANISATION → hors RLS (comme payment_webhook).
+model MerkleAnchorBatch {
+  id           String             @id @default(uuid())
+  hourStart    DateTime           @unique @map("hour_start")
+  merkleRoot   String             @map("merkle_root")
+  previousRoot String             @map("previous_root")
+  leafCount    Int                @map("leaf_count")
+  anchorStatus MerkleAnchorStatus @default(pending) @map("anchor_status")
+  anchorProof  String?            @map("anchor_proof")
+  anchorRef    String?            @map("anchor_ref")
+  anchoredAt   DateTime?          @map("anchored_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  invoices Invoice[]
+
+  @@index([anchorStatus])
+  @@map("merkle_anchor_batch")
+}
+
+enum MerkleAnchorStatus {
+  pending
+  anchored
+  failed
 }
 
 // I1, ADR-056 — jamais de taux/régime fiscal figé : lines ne contient que des
