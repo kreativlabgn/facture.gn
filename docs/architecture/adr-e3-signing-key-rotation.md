@@ -24,10 +24,17 @@ sans mécanisme actif. Seule issue en cas de suspicion : la **révocation**
 - `rotate(organizationId)` (transaction) : retire **inconditionnellement** la clé
   courante (`retired_at IS NULL`), révoquée ou non — poser `retired_at` n'efface
   pas `revoked_at` (état forensique `(retired_at, revoked_at)` préservé) — puis
-  provisionne une nouvelle active. Garantit qu'il reste **au plus une** ligne
-  `retired_at IS NULL` par organisation (les lectures « clé courante » de
-  `revoke()` / `getKeyStatus()` sont donc déterministes). Course concurrente →
-  violation d'unicité partielle → `409`.
+  provisionne une nouvelle active. **Au plus une** ligne `retired_at IS NULL` par
+  organisation — garanti par l'index partiel (qui ne couvre que
+  `retired_at IS NULL AND revoked_at IS NULL`) **plus** la discipline des call
+  sites : tout chemin d'insertion sauf le premier retire d'abord (`rotate`), ou
+  opère sur une organisation fraîche en transaction (création d'org, script
+  backfill filtré). Les lectures « clé courante » (`certifyForOrganization` /
+  `revoke` / `getKeyStatus`) utilisent toutes le même prédicat
+  `retired_at IS NULL` + `ORDER BY created_at DESC` (filet). Course concurrente →
+  violation d'unicité partielle → `409`. **À re-vérifier** lors de l'ajout de
+  `revokeKey(orgId, keyId)` (F5) et de l'auto-rotation : aucun ne doit insérer
+  une clé sans retirer la sortante.
 - **Retrait ≠ révocation.** Une clé retirée (non révoquée) reste parfaitement
   valide pour les factures signées pendant qu'elle était active. `verifyWithKey()`
   suit `Invoice.signingKeyId` (la clé exacte), jamais « la clé courante » :

@@ -15,13 +15,16 @@ import {
 const ROTATION_INTERVAL_DAYS = 365;
 
 export interface SigningKeyStatus {
+  /** none = aucune clé courante ; active = clé courante utilisable ;
+   *  revoked = clé courante révoquée mais pas encore remplacée (roter). */
+  state: "none" | "active" | "revoked";
   active: boolean;
-  publicKey?: string;
-  createdAt?: Date;
-  ageInDays?: number;
-  rotationDue?: boolean;
-  revokedAt?: Date | null;
-  retiredKeyCount?: number;
+  publicKey: string | null;
+  createdAt: Date | null;
+  ageInDays: number | null;
+  rotationDue: boolean;
+  revokedAt: Date | null;
+  retiredKeyCount: number;
 }
 
 /** Métadonnées publiques d'une clé — jamais encryptedPrivateKey. */
@@ -171,9 +174,6 @@ export class OrganizationSigningKeyService {
   }
 
   // E3 — état de la clé courante pour l'UI (indicateur "rotation due").
-  // active = il y a une clé courante ET elle n'est pas révoquée. Une clé
-  // courante révoquée (transitoire, entre revoke et rotate) → active: false
-  // avec revokedAt renseigné (l'UI doit inciter à roter).
   async getKeyStatus(organizationId: string): Promise<SigningKeyStatus> {
     const [current, retiredKeyCount] = await Promise.all([
       this.prisma.organizationSigningKey.findFirst({
@@ -184,19 +184,29 @@ export class OrganizationSigningKeyService {
     ]);
 
     if (!current) {
-      return { active: false, retiredKeyCount };
-    }
-    if (current.revokedAt) {
-      return { active: false, revokedAt: current.revokedAt, publicKey: current.publicKey, retiredKeyCount };
+      return {
+        state: "none",
+        active: false,
+        publicKey: null,
+        createdAt: null,
+        ageInDays: null,
+        rotationDue: false,
+        revokedAt: null,
+        retiredKeyCount,
+      };
     }
 
     const ageInDays = Math.floor((Date.now() - current.createdAt.getTime()) / (24 * 3600_000));
+    const revoked = current.revokedAt !== null;
     return {
-      active: true,
+      state: revoked ? "revoked" : "active",
+      active: !revoked,
       publicKey: current.publicKey,
       createdAt: current.createdAt,
       ageInDays,
-      rotationDue: ageInDays >= ROTATION_INTERVAL_DAYS,
+      // Une clé courante révoquée DOIT être remplacée → rotationDue vrai quel que
+      // soit son âge, pour que l'UI pilote son CTA dessus.
+      rotationDue: revoked || ageInDays >= ROTATION_INTERVAL_DAYS,
       revokedAt: current.revokedAt,
       retiredKeyCount,
     };

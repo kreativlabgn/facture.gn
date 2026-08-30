@@ -391,7 +391,12 @@ describe("OrganizationSigningKeyService", () => {
       });
       const service = new OrganizationSigningKeyService(prisma as any);
 
-      expect(await service.getKeyStatus("org-1")).toMatchObject({ active: false, revokedAt });
+      expect(await service.getKeyStatus("org-1")).toMatchObject({
+        state: "revoked",
+        active: false,
+        revokedAt,
+        rotationDue: true, // R2 — l'UI doit inciter à roter quel que soit l'âge
+      });
     });
   });
 });

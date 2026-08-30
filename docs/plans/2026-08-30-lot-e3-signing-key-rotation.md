@@ -119,9 +119,16 @@ Code **CHANGES** (1 bug conf. 88), sécurité **CHANGES** (F1, F2), domaine **CH
 - Tests ajoutés : `retire inconditionnellement même une clé révoquée` ; `revoke → rotate → revoke` (la 2e révocation cible la nouvelle clé) ; `getKeyStatus` clé courante révoquée.
 - **Runbook + ADR-114** : consigne impérative « RÉVOQUER D'ABORD, roter ensuite ».
 
-### Fast-follow (avant agrément PDP)
+### Re-revues (sécurité + domaine) → APPROUVÉ / COHÉRENT
+F1 + F2 confirmés résolus, zéro régression. Derniers points LOW appliqués :
+- `SigningKeyStatus` : champ discriminant `state: "none" | "active" | "revoked"`, tous les champs non-optionnels (contrat HTTP cohérent, plus de `revokedAt` `undefined` vs `null`).
+- `getKeyStatus()` branche révoquée : `rotationDue: true` quel que soit l'âge (R2 — l'UI pilote son CTA dessus).
+- `@Throttle` aussi sur `POST /signing-key/revoke`.
+- ADR-114 : wording « garanti par l'index partiel **+** discipline des call sites », note de re-vérification pour F5 / auto-rotation.
+
+### Fast-follow (**engagés avant GA / agrément PDP** — la re-revue sécu insiste : ne doivent pas glisser)
 - **F3** — journal d'audit append-only des `rotate` / `revoke` de la clé racine (acteur, org, keyId, ts) + alerting.
-- **F5** — `revokeKey(orgId, keyId)` : révoquer une clé **retirée** (ferme le footgun « roter avant révoquer »).
-- Auto-rotation 365 j (pattern BullMQ opt-in, revue sécu dédiée).
+- **F5** — `revokeKey(orgId, keyId)` : révoquer une clé **retirée** (ferme le footgun « roter avant révoquer » ; `revoke()` renvoyant 200 sur la mauvaise clé après un rotate-first est un piège silencieux pour l'opérateur).
+- Auto-rotation 365 j (pattern BullMQ opt-in, revue sécu dédiée). En construisant F5 ou l'auto-rotation : **ne jamais insérer une clé sans retirer la sortante** (invariant applicatif, cf. ADR-114).
 
 Suite trust-api **1263 passed / 3 skipped**, couv. > seuils. money-api 112, db, audit-ci OK. tsc + eslint clean.

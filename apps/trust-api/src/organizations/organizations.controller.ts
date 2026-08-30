@@ -180,6 +180,7 @@ export class OrganizationsController {
   // A4, ADR-025 — self-service owner/admin, jamais un workflow d'approbation
   // (une clé compromise doit pouvoir être révoquée immédiatement).
   @Post(":id/signing-key/revoke")
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Roles("owner", "admin")
   @OrganizationIdSource("organization")
   revokeSigningKey(@Param("id") organizationId: string) {
