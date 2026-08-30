@@ -59,7 +59,26 @@
 - [x] 3.8 `docker-compose.yml` (service `trust-api` : `REDIS_URL` + `RETENTION_ENABLED` + `depends_on: redis`) ; `apps/trust-api/.env.example` (`REDIS_URL`, `RETENTION_ENABLED`).
 - [x] 3.9 `app.module.spec.ts` — `RETENTION_ENABLED: "false"` ajouté au `TEST_ENV` ; smoke vert.
 - [x] 3.10 `docs/runbooks/retention.md` — tables, délais + justifications (dont `assisted_session`), activation, déclenchement manuel, observabilité, rollback.
-- **Tests** : `retention.service.spec.ts` (7), `retention.module.spec.ts` (3), `queue.config.spec.ts` (3) → verts. Suite trust-api **1226 passed / 3 skipped**, couverture 92.9/94.2/82.6/92.9 (> seuils). money-api 112, db 4, audit-ci OK. tsc + eslint clean (0 nouveau warning).
+- **Tests** : `retention.service.spec.ts` (8), `retention.module.spec.ts` (3), `retention.processor.spec.ts` (3), `queue.config.spec.ts` (3). Suite trust-api **1229 passed / 3 skipped**, couverture 93.0/94.0/82.8/93.0 (> seuils). money-api 112, db, audit-ci OK.
+
+### Revues J3 (3 sous-agents) + correctifs appliqués
+Code **APPROUVÉ** ; résilience et sécurité **CHANGES**. Correctifs sur la branche avant merge :
+- **F-H1 (bloquant, sécurité)** — `assisted_session` **retirée du périmètre de purge**. `consentRecordedAt` = preuve de consentement L/2016/037 pour des factures conservées 10 ans, ligne déjà conservée « pour la traçabilité » (Security Audit #8). Aligné sur `invoice_event` WORM. Archivage/anonymisation à échéance → J2.
+- **C1 (critique, résilience)** — `RetentionProcessor.process()` : `throw` si toutes les tables échouent (job BullMQ `failed`), `logger.warn` si échec partiel. `RetentionSummary.ruleCount` ajouté.
+- **E1 / M3-obs** — compteur `trust_api_retention_errors_total{table}` ; `deleted.inc` incrémente désormais même à 0 (série créée → alerte « plateau à 0 » branchable).
+- **E2** — gauge `trust_api_retention_scheduler_armed` (0/1) : détecte « job jamais armé » après Redis KO au boot.
+- **M1 / F-L2** — logs d'erreur : objet erreur + stack passés à pino, `error.code` capturé (plus d'interpolation de `.message`).
+- **M2** — `defaultJobOptions: { removeOnComplete: 50, removeOnFail: 200 }` sur la file.
+- **M3 / F-L1** — `RETENTION_ENABLED` passe en **opt-in** (`=== "true"`, normalisé trim/lowercase) — divergence assumée vs `RECONCILIATION_ENABLED` (DELETE irréversible).
+- **F-M1 (perf)** — `@@index([expiresAt])` sur `ussd_session` / `client_portal_otp` / `revoked_token`, `@@index([acceptedAt, expiresAt])` sur `pending_member_invite` + migration `20260830130000_add_retention_indexes`.
+- **Reco code** — `retention.processor.spec.ts` ajouté (parité `reconciliation`, couvre `process()`).
+- **Docs** — `retention.md` réécrit (checklist d'activation prod, observabilité, opt-in) ; caveat F-SAFE-3 dans `rls-rollout.md`.
+
+### Fast-follow (avant activation prod — `RETENTION_ENABLED="true"`)
+- **F-M2** — Redis `rediss://` (TLS) + ACL dédié (file partagée avec money-api).
+- **F-M3** — journal d'audit durable des purges (table `retention_run` `{table, count, cutoff, jobId, ranAt}`) — opposable en cas de litige (L/2021/024).
+- **F-M1 (suite)** — suppression par lots (`DELETE … LIMIT n`) si le volume grimpe ; surveiller le 1er passage (backlog initial).
+- Rétention `payment_webhook` / `payment_provider_attempt` (money-api).
 
 ### Groupe 4 — clôture
 - [ ] Tâche 4.1 : `pnpm --filter @facture-gn/db db:generate && build` (aucun changement de schéma Prisma → client inchangé, mais la migration doit être visible de `db:migrate:deploy`).

@@ -312,6 +312,8 @@ model RevokedToken {
   revokedAt DateTime @default(now()) @map("revoked_at")
   expiresAt DateTime @map("expires_at")
 
+  // J3 — index du prédicat de purge (RetentionService).
+  @@index([expiresAt])
   @@map("revoked_token")
 }
 
@@ -476,6 +478,8 @@ model ClientPortalOtp {
   createdAt  DateTime  @default(now()) @map("created_at")
 
   @@index([msisdn])
+  // J3 — index du prédicat de purge (RetentionService).
+  @@index([expiresAt])
   @@map("client_portal_otp")
 }
 
@@ -693,6 +697,8 @@ model PendingMemberInvite {
   resolvedUser  User?                 @relation("PendingMemberInviteResolvedUser", fields: [resolvedUserId], references: [id])
 
   @@index([msisdn])
+  // J3 — index du prédicat de purge (RetentionService : acceptedAt IS NULL + expiresAt).
+  @@index([acceptedAt, expiresAt])
   @@map("pending_member_invite")
 }
 
@@ -1545,5 +1551,7 @@ model UssdSession {
   createdAt      DateTime @default(now()) @map("created_at")
   expiresAt      DateTime @map("expires_at")
 
+  // J3 — index du prédicat de purge (RetentionService).
+  @@index([expiresAt])
   @@map("ussd_session")
 }
