@@ -10,6 +10,8 @@ function createFakeSigningKeyService() {
   return {
     provisionRootKey: vi.fn().mockResolvedValue({ id: "signing-key-1", publicKey: "pubkey-hex" }),
     revoke: vi.fn().mockResolvedValue({ id: "signing-key-1", revokedAt: new Date() }),
+    rotate: vi.fn().mockResolvedValue({ id: "signing-key-2", publicKey: "pubkey-hex-2" }),
+    getKeyStatus: vi.fn().mockResolvedValue({ active: true, rotationDue: false }),
   };
 }
 
@@ -947,5 +949,25 @@ describe("OrganizationsService.revokeSigningKey (A4, ADR-025)", () => {
 
     expect(signingKeyService.revoke).toHaveBeenCalledWith("org-1");
     expect(result.revokedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("OrganizationsService — rotation de clé (E3, ADR-114)", () => {
+  it("rotateSigningKey délègue à OrganizationSigningKeyService.rotate()", async () => {
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService({} as any, signingKeyService as any, createFakePendingMemberInviteService() as any);
+
+    const result = await service.rotateSigningKey("org-1");
+
+    expect(signingKeyService.rotate).toHaveBeenCalledWith("org-1");
+    expect(result.id).toBe("signing-key-2");
+  });
+
+  it("getSigningKeyStatus délègue à OrganizationSigningKeyService.getKeyStatus()", async () => {
+    const signingKeyService = createFakeSigningKeyService();
+    const service = new OrganizationsService({} as any, signingKeyService as any, createFakePendingMemberInviteService() as any);
+
+    expect(await service.getSigningKeyStatus("org-1")).toMatchObject({ active: true });
+    expect(signingKeyService.getKeyStatus).toHaveBeenCalledWith("org-1");
   });
 });

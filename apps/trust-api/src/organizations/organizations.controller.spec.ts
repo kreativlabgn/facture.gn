@@ -101,6 +101,36 @@ describe("OrganizationsController — POST /organizations/:id/signing-key/revoke
   });
 });
 
+describe("OrganizationsController — rotation de clé (E3, ADR-114)", () => {
+  const pendingStub = { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() };
+
+  it("POST /signing-key/rotate : owner/admin, idSource \"organization\", délègue", async () => {
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, OrganizationsController.prototype.rotateSigningKey)).toEqual(["owner", "admin"]);
+    expect(reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.rotateSigningKey)).toBe("organization");
+
+    const service = { rotateSigningKey: vi.fn().mockResolvedValue({ id: "key-2", publicKey: "pub2" }) };
+    const controller = new OrganizationsController(service as any, pendingStub as any);
+
+    const result = await controller.rotateSigningKey("org-1");
+
+    expect(service.rotateSigningKey).toHaveBeenCalledWith("org-1");
+    expect(result).not.toHaveProperty("encryptedPrivateKey");
+  });
+
+  it("GET /signing-key : owner/admin, idSource \"organization\", délègue", async () => {
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, OrganizationsController.prototype.getSigningKeyStatus)).toEqual(["owner", "admin"]);
+    expect(reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.getSigningKeyStatus)).toBe("organization");
+
+    const service = { getSigningKeyStatus: vi.fn().mockResolvedValue({ active: true, rotationDue: false }) };
+    const controller = new OrganizationsController(service as any, pendingStub as any);
+
+    expect(await controller.getSigningKeyStatus("org-1")).toMatchObject({ active: true });
+    expect(service.getSigningKeyStatus).toHaveBeenCalledWith("org-1");
+  });
+});
+
 // F10, revue post-fix #6 — les 3 nouvelles routes pending-invites n'avaient
 // aucun test de délégation (seul le service PendingMemberInviteService était
 // testé isolément).

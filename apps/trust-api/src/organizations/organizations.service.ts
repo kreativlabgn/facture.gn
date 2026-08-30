@@ -449,6 +449,17 @@ export class OrganizationsService {
     return this.signingKeyService.revoke(organizationId);
   }
 
+  // E3, ADR-114 — rotation self-service owner/admin (DAT §Crypto "rotation 365j").
+  // Délégation : OrganizationSigningKeyService porte toute la logique (retrait
+  // atomique de l'active + provision d'une neuve, garde de course).
+  async rotateSigningKey(organizationId: string) {
+    return this.signingKeyService.rotate(organizationId);
+  }
+
+  async getSigningKeyStatus(organizationId: string) {
+    return this.signingKeyService.getKeyStatus(organizationId);
+  }
+
   // Security Audit 2026-08-23, finding #8 — self-service owner/admin, même posture
   // que revokeSigningKey() ci-dessus (une capacité compromise doit pouvoir être
   // coupée immédiatement, jamais un workflow d'approbation). updateMany+where

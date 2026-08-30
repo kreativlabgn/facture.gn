@@ -98,3 +98,12 @@ Le schéma passe à **N clés par organisation dans le temps**, au plus une acti
 3. Groupe 3 (endpoint) — dépend du 2.
 4. Groupe 4 — ADR + runbook + clôture.
 Puis : **E1 (ancrage Merkle, OpenTimestamps)** dans un lot séparé (PLAN + `dev-architect`).
+
+---
+
+## ✅ LIVRÉ (avant revue)
+- **G1** : `schema.prisma` (`retiredAt`, `@@index`, `signingKeys[]`), migration `20260830140000_signing_key_rotation` (`DROP INDEX` unique + `ADD COLUMN` + index simple + **index unique partiel** `one_active_per_org`), backfill script (`signingKeys: { none: {} }`).
+- **G2** : `organization-signing-key.service.ts` — `certifyForOrganization`/`revoke` sur `findFirst({ retiredAt: null })` ; nouveaux `rotate()` (transaction, retrait atomique + provision, catch P2002 → 409) et `getKeyStatus()` (`rotationDue` = âge > 365 j, `retiredKeyCount`). `verifyWithKey` inchangé. `keyValidAtIssuance` ne lit que `revokedAt`.
+- **G3** : `POST /organizations/:id/signing-key/rotate` + `GET /organizations/:id/signing-key` (owner/admin, `@OrganizationIdSource("organization")`), délégation `organizations.service`.
+- **G4** : `docs/architecture/adr-e3-signing-key-rotation.md` (ADR-114 provisoire), `docs/runbooks/signing-key-rotation.md`.
+- **Tests** : `organization-signing-key.service.spec` (15, dont course concurrente P2002, retrait ≠ révocation, no-`encryptedPrivateKey`), `organizations.controller.spec` (+4), `organizations.service.spec` (+2). Suite trust-api **1260 passed / 3 skipped**, couv. 92.9/93.9/83.2/92.9 (> seuils). money-api 112, db, audit-ci OK. tsc + eslint clean (0 nouveau warning).

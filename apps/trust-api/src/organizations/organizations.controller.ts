@@ -185,6 +185,23 @@ export class OrganizationsController {
     return this.organizationsService.revokeSigningKey(organizationId);
   }
 
+  // E3, ADR-114 — rotation self-service (DAT §Crypto "rotation 365j"). Même
+  // trio owner/admin, même posture que revokeSigningKey. Réponse : métadonnées
+  // publiques de la nouvelle clé, jamais encryptedPrivateKey.
+  @Post(":id/signing-key/rotate")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  rotateSigningKey(@Param("id") organizationId: string) {
+    return this.organizationsService.rotateSigningKey(organizationId);
+  }
+
+  @Get(":id/signing-key")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  getSigningKeyStatus(@Param("id") organizationId: string) {
+    return this.organizationsService.getSigningKeyStatus(organizationId);
+  }
+
   // Security Audit 2026-08-23, finding #8 — même trio owner/admin et même posture
   // self-service que revokeSigningKey() ci-dessus.
   @Post(":id/assisted-sessions/:agentUserId/revoke")

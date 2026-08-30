@@ -22,7 +22,7 @@ async function main() {
   const prisma = new PrismaClient();
   try {
     const organizationsWithoutKey = await prisma.organization.findMany({
-      where: { signingKey: null },
+      where: { signingKeys: { none: {} } },
       select: { id: true, name: true },
     });
 
