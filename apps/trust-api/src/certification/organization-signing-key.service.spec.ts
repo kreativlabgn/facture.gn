@@ -205,7 +205,7 @@ describe("OrganizationSigningKeyService", () => {
       expect((rotated as any).encryptedPrivateKey).toBeUndefined();
     });
 
-    it("ne retire pas une clé active déjà révoquée mais provisionne quand même une nouvelle active", async () => {
+    it("retire INCONDITIONNELLEMENT la clé courante, même déjà révoquée (pas de 2e ligne retiredAt: null)", async () => {
       const prisma = createFakePrisma();
       const service = new OrganizationSigningKeyService(prisma as any);
       prisma.organizationSigningKey.findFirst.mockResolvedValue({
@@ -217,8 +217,52 @@ describe("OrganizationSigningKeyService", () => {
 
       await service.rotate("org-1");
 
-      expect(prisma.organizationSigningKey.update).not.toHaveBeenCalled();
+      expect(prisma.organizationSigningKey.update).toHaveBeenCalledWith({
+        where: { id: "key-revoked" },
+        data: { retiredAt: expect.any(Date) },
+      });
       expect(prisma.organizationSigningKey.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("après revoke → rotate → revoke : la 2e révocation cible la NOUVELLE clé, pas l'ancienne", async () => {
+      // Faux Prisma stateful : une seule ligne "courante" (retiredAt: null) à la fois.
+      const rows: any[] = [{ id: "A", organizationId: "org-1", createdAt: new Date(1), retiredAt: null, revokedAt: null }];
+      const prisma: any = {
+        organizationSigningKey: {
+          findFirst: vi.fn(({ where }: any) =>
+            Promise.resolve(
+              rows
+                .filter((r) => r.organizationId === where.organizationId && (where.retiredAt === null ? r.retiredAt === null : true))
+                .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null,
+            ),
+          ),
+          count: vi.fn(() => Promise.resolve(rows.filter((r) => r.retiredAt !== null).length)),
+          update: vi.fn(({ where, data }: any) => {
+            const row = rows.find((r) => r.id === where.id);
+            Object.assign(row, data);
+            return Promise.resolve(row);
+          }),
+          create: vi.fn(({ data }: any) => {
+            const row = { id: `K${rows.length}`, createdAt: new Date(rows.length + 10), retiredAt: null, revokedAt: null, ...data };
+            rows.push(row);
+            return Promise.resolve(row);
+          }),
+        },
+      };
+      prisma.$transaction = (cb: any) => cb(prisma);
+      const service = new OrganizationSigningKeyService(prisma as any);
+
+      const r1 = await service.revoke("org-1");
+      expect(r1.id).toBe("A");
+
+      await service.rotate("org-1"); // A retirée, nouvelle clé K1 active
+      const rowA = rows.find((r) => r.id === "A");
+      expect(rowA.retiredAt).not.toBeNull();
+
+      const r2 = await service.revoke("org-1");
+      expect(r2.id).not.toBe("A"); // la nouvelle clé, pas l'ancienne révoquée
+      expect(rows.filter((r) => r.retiredAt === null && r.revokedAt !== null)).toHaveLength(1);
+      expect(rows.filter((r) => r.retiredAt === null && r.revokedAt === null)).toHaveLength(0);
     });
 
     it("course : deux rotate() concurrents → P2002 sur l'index partiel → ConflictException", async () => {
@@ -239,10 +283,20 @@ describe("OrganizationSigningKeyService", () => {
   });
 
   describe("revoke (A4, ADR-025)", () => {
-    it("pose revokedAt sur la clé ACTIVE, ciblée par id", async () => {
+    it("pose revokedAt sur la clé courante (ciblée par id) et ne renvoie que des métadonnées publiques", async () => {
       const prisma = createFakePrisma({
         signingKey: {
-          findFirst: vi.fn().mockResolvedValue({ id: "key-1", organizationId: "org-1", retiredAt: null, revokedAt: null }),
+          findFirst: vi.fn().mockResolvedValue({
+            id: "key-1",
+            organizationId: "org-1",
+            publicKey: "pub",
+            encryptedPrivateKey: "SECRET-CIPHERTEXT",
+            retiredAt: null,
+            revokedAt: null,
+          }),
+          update: vi.fn(({ where, data }: any) =>
+            Promise.resolve({ id: where.id, publicKey: "pub", encryptedPrivateKey: "SECRET-CIPHERTEXT", ...data }),
+          ),
         },
       });
       const service = new OrganizationSigningKeyService(prisma as any);
@@ -254,6 +308,7 @@ describe("OrganizationSigningKeyService", () => {
         data: { revokedAt: expect.any(Date) },
       });
       expect(result.revokedAt).not.toBeNull();
+      expect((result as any).encryptedPrivateKey).toBeUndefined();
     });
 
     it("NotFoundException si l'organisation n'a aucune clé active", async () => {
@@ -290,6 +345,7 @@ describe("OrganizationSigningKeyService", () => {
         id: "key-1",
         organizationId: "org-1",
         publicKey: "pub",
+        encryptedPrivateKey: "SECRET",
         createdAt: new Date(),
         retiredAt: null,
         revokedAt: null,
@@ -304,7 +360,7 @@ describe("OrganizationSigningKeyService", () => {
         id: "key-1",
         organizationId: "org-1",
         publicKey: "pub",
-        createdAt: new Date(Date.now() - 366 * 24 * 3600_000),
+        createdAt: new Date(Date.now() - 365 * 24 * 3600_000 - 1),
         retiredAt: null,
         revokedAt: null,
       });
@@ -312,11 +368,30 @@ describe("OrganizationSigningKeyService", () => {
       expect(old).toMatchObject({ active: true, rotationDue: true });
     });
 
-    it("active=false si l'organisation n'a aucune clé active", async () => {
+    it("active=false si l'organisation n'a aucune clé courante", async () => {
       const prisma = createFakePrisma({ signingKey: { findFirst: vi.fn().mockResolvedValue(null) } });
       const service = new OrganizationSigningKeyService(prisma as any);
 
       expect(await service.getKeyStatus("org-1")).toMatchObject({ active: false });
+    });
+
+    it("active=false + revokedAt renseigné si la clé courante est révoquée (transitoire, avant rotation)", async () => {
+      const revokedAt = new Date("2026-08-15T00:00:00.000Z");
+      const prisma = createFakePrisma({
+        signingKey: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "key-1",
+            organizationId: "org-1",
+            publicKey: "pub",
+            createdAt: new Date(),
+            retiredAt: null,
+            revokedAt,
+          }),
+        },
+      });
+      const service = new OrganizationSigningKeyService(prisma as any);
+
+      expect(await service.getKeyStatus("org-1")).toMatchObject({ active: false, revokedAt });
     });
   });
 });

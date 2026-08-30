@@ -106,4 +106,22 @@ Puis : **E1 (ancrage Merkle, OpenTimestamps)** dans un lot séparé (PLAN + `dev
 - **G2** : `organization-signing-key.service.ts` — `certifyForOrganization`/`revoke` sur `findFirst({ retiredAt: null })` ; nouveaux `rotate()` (transaction, retrait atomique + provision, catch P2002 → 409) et `getKeyStatus()` (`rotationDue` = âge > 365 j, `retiredKeyCount`). `verifyWithKey` inchangé. `keyValidAtIssuance` ne lit que `revokedAt`.
 - **G3** : `POST /organizations/:id/signing-key/rotate` + `GET /organizations/:id/signing-key` (owner/admin, `@OrganizationIdSource("organization")`), délégation `organizations.service`.
 - **G4** : `docs/architecture/adr-e3-signing-key-rotation.md` (ADR-114 provisoire), `docs/runbooks/signing-key-rotation.md`.
-- **Tests** : `organization-signing-key.service.spec` (15, dont course concurrente P2002, retrait ≠ révocation, no-`encryptedPrivateKey`), `organizations.controller.spec` (+4), `organizations.service.spec` (+2). Suite trust-api **1260 passed / 3 skipped**, couv. 92.9/93.9/83.2/92.9 (> seuils). money-api 112, db, audit-ci OK. tsc + eslint clean (0 nouveau warning).
+- **Tests** : `organization-signing-key.service.spec`, `organizations.{controller,service}.spec`.
+
+### Revues (3 sous-agents) → CHANGES → correctifs appliqués
+Code **CHANGES** (1 bug conf. 88), sécurité **CHANGES** (F1, F2), domaine **CHANGES** ([6/10]) — **tous convergent sur le même défaut**. Correctifs :
+- **Prédicat « clé courante » déterministe** — `rotate()` retire la clé sortante **inconditionnellement** (`if (current)`), garantissant ≤ 1 ligne `retiredAt: null` par org. `revoke()` / `getKeyStatus()` gagnent `orderBy: { createdAt: "desc" }` (filet). Fini l'état à 2 lignes après « révoquer puis roter » où `revoke()` pouvait no-op en silence sur une clé compromise.
+- **F1** — `revoke()` retourne `publicView(key)` (métadonnées publiques) sur les deux chemins — **plus jamais `encryptedPrivateKey` dans la réponse HTTP**.
+- `getKeyStatus()` : clé courante révoquée → `{ active: false, revokedAt }` (l'UI incite à roter).
+- `rotationDue` : `>= 365` (au lieu de `> 365`).
+- **F4** — `@Throttle({ limit: 3, ttl: 60_000 })` sur `POST /signing-key/rotate`.
+- Commentaire périmé `organizations.service.ts` (`@unique` → index partiel).
+- Tests ajoutés : `retire inconditionnellement même une clé révoquée` ; `revoke → rotate → revoke` (la 2e révocation cible la nouvelle clé) ; `getKeyStatus` clé courante révoquée.
+- **Runbook + ADR-114** : consigne impérative « RÉVOQUER D'ABORD, roter ensuite ».
+
+### Fast-follow (avant agrément PDP)
+- **F3** — journal d'audit append-only des `rotate` / `revoke` de la clé racine (acteur, org, keyId, ts) + alerting.
+- **F5** — `revokeKey(orgId, keyId)` : révoquer une clé **retirée** (ferme le footgun « roter avant révoquer »).
+- Auto-rotation 365 j (pattern BullMQ opt-in, revue sécu dédiée).
+
+Suite trust-api **1263 passed / 3 skipped**, couv. > seuils. money-api 112, db, audit-ci OK. tsc + eslint clean.

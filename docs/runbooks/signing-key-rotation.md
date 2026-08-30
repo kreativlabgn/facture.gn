@@ -19,9 +19,14 @@ rotationDue, revokedAt, retiredKeyCount }`. `rotationDue = true` quand
   alors plus de clé active — `certifyForOrganization()` lève
   `409 "aucune clé de signature active — une rotation est requise"`. Roter pour
   rétablir l'émission.
-- Suspicion de compromission du backup / du `CERTIFICATION_MASTER_KEY` : révoquer
-  **puis** roter (la révocation marque les factures signées après compromission
-  comme `keyValidAtIssuance = false` ; la rotation rétablit l'émission).
+- Suspicion de compromission du backup / du `CERTIFICATION_MASTER_KEY` :
+  **RÉVOQUER D'ABORD, roter ensuite**. Ordre impératif : `revoke()` ne cible que
+  la clé courante (`retired_at IS NULL`). Si on rote avant de révoquer, l'ancienne
+  clé compromise devient `retired_at != null` et **plus aucun chemin ne peut la
+  révoquer** (F5, ADR-114) — une forge rétro-datée signée avec elle passerait la
+  vérification. La révocation marque `keyValidAtIssuance = false` pour toute
+  facture signée après l'instant de révocation ; la rotation qui suit rétablit
+  l'émission.
 
 ## Auto-rotation 365 j — NON activée
 

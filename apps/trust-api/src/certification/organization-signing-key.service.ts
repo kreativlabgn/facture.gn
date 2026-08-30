@@ -67,18 +67,21 @@ export class OrganizationSigningKeyService {
     });
   }
 
-  // E3 — rotation de la clé racine : retire l'active, en provisionne une neuve.
-  // Transaction : le retrait et la création sont atomiques. Course concurrente
-  // → P2002 sur l'index partiel "une seule active" → ConflictException.
+  // E3 — rotation de la clé racine : retire la clé courante (retiredAt: null),
+  // en provisionne une neuve. Transaction : retrait + création atomiques.
+  // Le retrait est INCONDITIONNEL — une clé qu'on remplace est retirée, qu'elle
+  // soit révoquée ou non ; poser retiredAt n'efface pas revokedAt (état
+  // forensique (retiredAt, revokedAt) préservé). Garantit qu'il reste au plus
+  // UNE ligne retiredAt: null par organisation → revoke()/getKeyStatus() sont
+  // déterministes. Course concurrente → P2002 sur l'index partiel → 409.
   async rotate(organizationId: string): Promise<ReturnType<typeof publicView>> {
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const current = await tx.organizationSigningKey.findFirst({
           where: { organizationId, retiredAt: null },
+          orderBy: { createdAt: "desc" },
         });
-        // Une clé active déjà révoquée n'est pas "retirée" (revokedAt reste la
-        // trace forensique) — on provisionne simplement une nouvelle active.
-        if (current && !current.revokedAt) {
+        if (current) {
           await tx.organizationSigningKey.update({
             where: { id: current.id },
             data: { retiredAt: new Date() },
@@ -88,6 +91,11 @@ export class OrganizationSigningKeyService {
       });
       return publicView(created);
     } catch (error) {
+      // P2002 ici ne peut venir que de l'index partiel "une seule active" :
+      // la PK est un uuid, publicKey/encryptedPrivateKey ne sont pas uniques,
+      // et rotate() n'écrit que dans cette table. Pas le helper
+      // isUniqueConstraintViolation (il exige meta.target en tableau, non fourni
+      // par Prisma pour un index partiel nommé hors schéma).
       if ((error as { code?: string }).code === "P2002") {
         throw new ConflictException(
           `Une rotation de la clé de signature de l'organisation ${organizationId} est déjà en cours`,
@@ -103,6 +111,7 @@ export class OrganizationSigningKeyService {
     tx?: Prisma.TransactionClient,
   ): Promise<CertificationResult & { signingKeyId: string }> {
     const client = tx ?? this.prisma;
+    // rotate() garantit ≤ 1 ligne retiredAt: null par org ; orderBy = filet.
     const key = await client.organizationSigningKey.findFirst({
       where: { organizationId, retiredAt: null },
       orderBy: { createdAt: "desc" },
@@ -124,25 +133,29 @@ export class OrganizationSigningKeyService {
     return { ...service.certify(payload), signingKeyId: key.id };
   }
 
-  // A4, ADR-025 — self-service owner/admin. Révoque la clé ACTIVE (cas courant :
-  // "ma clé courante a fuité"). Idempotent : ne réécrit jamais revokedAt.
-  async revoke(organizationId: string) {
+  // A4, ADR-025 — self-service owner/admin. Révoque la clé COURANTE (retiredAt: null,
+  // déterministe car rotate() retire toujours la sortante). Cas courant : "ma
+  // clé courante a fuité". Idempotent : ne réécrit jamais revokedAt.
+  // Métadonnées publiques uniquement — jamais encryptedPrivateKey dans la réponse.
+  async revoke(organizationId: string): Promise<ReturnType<typeof publicView>> {
     const key = await this.prisma.organizationSigningKey.findFirst({
       where: { organizationId, retiredAt: null },
+      orderBy: { createdAt: "desc" },
     });
     if (!key) {
       throw new NotFoundException(
-        `L'organisation ${organizationId} n'a aucune clé de signature active à révoquer`,
+        `L'organisation ${organizationId} n'a aucune clé de signature courante à révoquer`,
       );
     }
     if (key.revokedAt) {
-      return key;
+      return publicView(key);
     }
 
-    return this.prisma.organizationSigningKey.update({
+    const updated = await this.prisma.organizationSigningKey.update({
       where: { id: key.id },
       data: { revokedAt: new Date() },
     });
+    return publicView(updated);
   }
 
   // A4, ADR-025 — revokedAt inclus dans le résultat (jamais un second lookup) :
@@ -157,25 +170,34 @@ export class OrganizationSigningKeyService {
     return { ...service.certify(payload), revokedAt: key.revokedAt };
   }
 
-  // E3 — état de la clé active pour l'UI (indicateur "rotation due").
+  // E3 — état de la clé courante pour l'UI (indicateur "rotation due").
+  // active = il y a une clé courante ET elle n'est pas révoquée. Une clé
+  // courante révoquée (transitoire, entre revoke et rotate) → active: false
+  // avec revokedAt renseigné (l'UI doit inciter à roter).
   async getKeyStatus(organizationId: string): Promise<SigningKeyStatus> {
-    const [active, retiredKeyCount] = await Promise.all([
-      this.prisma.organizationSigningKey.findFirst({ where: { organizationId, retiredAt: null } }),
+    const [current, retiredKeyCount] = await Promise.all([
+      this.prisma.organizationSigningKey.findFirst({
+        where: { organizationId, retiredAt: null },
+        orderBy: { createdAt: "desc" },
+      }),
       this.prisma.organizationSigningKey.count({ where: { organizationId, retiredAt: { not: null } } }),
     ]);
 
-    if (!active) {
+    if (!current) {
       return { active: false, retiredKeyCount };
     }
+    if (current.revokedAt) {
+      return { active: false, revokedAt: current.revokedAt, publicKey: current.publicKey, retiredKeyCount };
+    }
 
-    const ageInDays = Math.floor((Date.now() - active.createdAt.getTime()) / (24 * 3600_000));
+    const ageInDays = Math.floor((Date.now() - current.createdAt.getTime()) / (24 * 3600_000));
     return {
       active: true,
-      publicKey: active.publicKey,
-      createdAt: active.createdAt,
+      publicKey: current.publicKey,
+      createdAt: current.createdAt,
       ageInDays,
-      rotationDue: ageInDays > ROTATION_INTERVAL_DAYS,
-      revokedAt: active.revokedAt,
+      rotationDue: ageInDays >= ROTATION_INTERVAL_DAYS,
+      revokedAt: current.revokedAt,
       retiredKeyCount,
     };
   }

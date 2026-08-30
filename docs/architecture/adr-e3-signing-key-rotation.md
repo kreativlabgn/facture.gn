@@ -21,9 +21,13 @@ sans mécanisme actif. Seule issue en cas de suspicion : la **révocation**
   `retired_at IS NULL AND revoked_at IS NULL`. L'invariant « une seule active »
   est encodé en base par un **index unique partiel**
   `organization_signing_key_one_active_per_org` — jamais uniquement en applicatif.
-- `rotate(organizationId)` (transaction) : retire la clé active (`retired_at = now()`)
-  et provisionne une nouvelle active. Course concurrente → violation d'unicité
-  partielle → `409`.
+- `rotate(organizationId)` (transaction) : retire **inconditionnellement** la clé
+  courante (`retired_at IS NULL`), révoquée ou non — poser `retired_at` n'efface
+  pas `revoked_at` (état forensique `(retired_at, revoked_at)` préservé) — puis
+  provisionne une nouvelle active. Garantit qu'il reste **au plus une** ligne
+  `retired_at IS NULL` par organisation (les lectures « clé courante » de
+  `revoke()` / `getKeyStatus()` sont donc déterministes). Course concurrente →
+  violation d'unicité partielle → `409`.
 - **Retrait ≠ révocation.** Une clé retirée (non révoquée) reste parfaitement
   valide pour les factures signées pendant qu'elle était active. `verifyWithKey()`
   suit `Invoice.signingKeyId` (la clé exacte), jamais « la clé courante » :
@@ -51,7 +55,16 @@ expose l'âge de la clé active et un indicateur `rotationDue` (âge > 365 j).
 - **Enum `SigningKeyStatus`** : deux timestamps nullables (`retired_at`,
   `revoked_at`) + l'index partiel expriment l'invariant sans états illégaux
   représentables.
-- **Révocation d'une clé retirée** (forensique) : méthode dédiée différée.
+- **Révocation d'une clé retirée par id** (`revokeKey(orgId, keyId)`) : différée
+  en fast-follow. Conséquence à connaître (**F5**) : si un opérateur **rote avant
+  de révoquer** une clé compromise, cette clé passe `retired_at != null` et
+  devient non-révocable — une forge rétro-datée signée avec elle resterait
+  `keyValidAtIssuance = true` (nécessite quand même la compromission de la clé
+  privée + de `CERTIFICATION_MASTER_KEY`). **Consigne : révoquer AVANT de roter**
+  (voir runbook).
+- **Journal d'audit des opérations `rotate` / `revoke`** (**F3**) : différé —
+  à livrer **avant l'agrément PDP**. Événement append-only `{ acteur, org,
+  action, keyId, ts }` + alerting.
 - **Certificat de délégation par canal** (ADR-026) : orthogonal — concerne les
   sous-clés par canal, pas la rotation de la racine.
 

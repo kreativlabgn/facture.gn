@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
@@ -188,7 +189,10 @@ export class OrganizationsController {
   // E3, ADR-114 — rotation self-service (DAT §Crypto "rotation 365j"). Même
   // trio owner/admin, même posture que revokeSigningKey. Réponse : métadonnées
   // publiques de la nouvelle clé, jamais encryptedPrivateKey.
+  // Throttle serré : opération lourde (génération de clé + transaction) et une
+  // rotation en boucle accumulerait des lignes retirées sans intérêt.
   @Post(":id/signing-key/rotate")
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Roles("owner", "admin")
   @OrganizationIdSource("organization")
   rotateSigningKey(@Param("id") organizationId: string) {
