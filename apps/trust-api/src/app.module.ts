@@ -33,6 +33,8 @@ import { RecurringTemplatesModule } from "./recurring-templates/recurring-templa
 import { CommissionBypassModule } from "./commission-bypass/commission-bypass.module";
 import { ClientPortalModule } from "./client-portal/client-portal.module";
 import { FiscalPeriodsModule } from "./fiscal-periods/fiscal-periods.module";
+import { QueueModule } from "./queue/queue.module";
+import { RetentionModule } from "./retention/retention.module";
 import { PendingMemberInvitesModule } from "./pending-member-invites/pending-member-invites.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
@@ -52,6 +54,8 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     // existants (PIN USSD : PIN_MAX_ATTEMPTS/PIN_LOCKOUT_MS), jamais un remplacement.
     ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    // Lot J3 — brique BullMQ (@Global) : connexion Redis lazyConnect partagée.
+    QueueModule,
     PendingMemberInvitesModule,
     AuthModule,
     CertificationModule,
@@ -82,6 +86,8 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     CommissionBypassModule,
     ClientPortalModule,
     FiscalPeriodsModule,
+    // Lot J3 — purge périodique des tables opérationnelles éphémères.
+    RetentionModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même

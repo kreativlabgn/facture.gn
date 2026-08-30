@@ -172,3 +172,11 @@ signale un bug ou un probing).
   regrouper plusieurs lectures dans un `$transaction` interactif unique.
 - `payment_webhook` et les tables scoped-practice ne sont pas couvertes — voir
   ADR-111 phase 2.
+- **Interaction avec la rétention (J3)** : `RetentionService` purge `ussd_session`,
+  `client_portal_otp`, `pending_member_invite` via le `PrismaClient` NON scopé →
+  `current_setting('app.current_org_id', true)` renvoie `NULL` → la clause
+  `IS NULL OR …` des politiques laisse la purge s'exécuter cross-org (voulu, job
+  système). **Si la phase 2 durcit les politiques en retirant l'échappatoire
+  `IS NULL OR`**, la purge serait silencieusement neutralisée (`deleteMany`
+  count 0, aucune erreur) : prévoir alors un rôle/bypass dédié pour le job de
+  rétention, et surveiller `trust_api_retention_rows_deleted_total`.

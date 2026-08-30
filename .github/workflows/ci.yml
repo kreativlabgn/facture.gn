@@ -40,8 +40,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/facture_gn_dev?schema=public
       REDIS_URL: redis://localhost:6379
-      # Le smoke DI compile sans Redis (lazyConnect) ; le worker ne s'arme pas en CI.
+      # Le smoke DI compile sans Redis (lazyConnect) ; les workers/jobs ne s'arment
+      # pas en CI (reconciliation = opt-out "false" ; retention = opt-in, "false"
+      # ≠ "true" donc non armé — explicite quand même).
       RECONCILIATION_ENABLED: "false"
+      RETENTION_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
 
