@@ -81,7 +81,7 @@ export class RetentionModule implements OnModuleInit {
       this.logger.log(`Job de rétention actif (toutes les ${RETENTION_INTERVAL_MS / 3_600_000} h)`);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      const code = (error as { code?: string }).code;
+      const code = (err as { code?: string }).code;
       this.logger.error(
         `Échec de l'armement du job de rétention${code ? ` [${code}]` : ""} — trust-api démarre quand même, le job ne tournera pas`,
         err.stack ?? err.message,

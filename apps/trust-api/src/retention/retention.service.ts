@@ -57,7 +57,7 @@ export class RetentionService {
         summary.errored.push(rule.table);
         this.errors.inc({ table: rule.table });
         const err = error instanceof Error ? error : new Error(String(error));
-        const code = (error as { code?: string }).code;
+        const code = (err as { code?: string }).code;
         this.logger.error(
           `Purge ${rule.table} échouée${code ? ` [${code}]` : ""}`,
           err.stack ?? err.message,

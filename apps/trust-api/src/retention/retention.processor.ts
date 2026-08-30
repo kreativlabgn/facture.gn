@@ -21,7 +21,7 @@ export class RetentionProcessor extends WorkerHost {
     const summary = await this.retentionService.runOnce();
     const message = `Purge de rétention : ${JSON.stringify(summary)}`;
 
-    if (summary.errored.length === summary.ruleCount) {
+    if (summary.ruleCount > 0 && summary.errored.length === summary.ruleCount) {
       // Aucune table purgée : panne globale (DB down). Le job doit être marqué
       // "failed" côté BullMQ, pas "completed".
       throw new Error(`Purge de rétention : toutes les tables ont échoué (${summary.errored.join(", ")})`);
