@@ -3,24 +3,26 @@ import { describe, expect, it, vi } from "vitest";
 import { buildMerkleRoot } from "./merkle";
 import { MerkleAnchorSealService } from "./merkle-anchor-seal.service";
 
-const NOW = new Date("2026-08-30T14:30:00.000Z"); // heure courante = 14h → borne 14:00, tranche 13:00
+const NOW = new Date("2026-08-30T14:30:00.000Z"); // heure courante 14h → borne (asOf) = 14:00
 const H = (n: number) => n.toString(16).padStart(2, "0").repeat(32);
 
 function build(
   overrides: {
-    invoices?: { id: string; hash: string }[];
+    invoices?: { id: string; hash: string; issuedAt: Date }[];
     lastBatchRoot?: string | null;
     createImpl?: (args: any) => Promise<any>;
   } = {},
 ) {
   const invoices = overrides.invoices ?? [
-    { id: "inv-b", hash: H(2) },
-    { id: "inv-a", hash: H(1) },
-    { id: "inv-c", hash: H(3) },
+    { id: "inv-b", hash: H(2), issuedAt: new Date("2026-08-30T13:10:00.000Z") },
+    { id: "inv-a", hash: H(1), issuedAt: new Date("2026-08-30T11:00:00.000Z") },
+    { id: "inv-c", hash: H(3), issuedAt: new Date("2026-08-30T13:50:00.000Z") },
   ];
   const prisma: any = {
     invoice: {
-      findMany: vi.fn().mockResolvedValue([...invoices].sort((a, b) => a.hash.localeCompare(b.hash))),
+      findMany: vi.fn().mockResolvedValue(
+        [...invoices].sort((a, b) => (a.hash === b.hash ? a.id.localeCompare(b.id) : a.hash.localeCompare(b.hash))),
+      ),
       updateMany: vi.fn().mockResolvedValue({ count: invoices.length }),
     },
     merkleAnchorBatch: {
@@ -29,7 +31,7 @@ function build(
       ),
       create:
         overrides.createImpl ??
-        vi.fn(({ data }: any) => Promise.resolve({ id: "batch-1", hourStart: data.hourStart, ...data })),
+        vi.fn(({ data }: any) => Promise.resolve({ id: "batch-1", asOf: data.asOf, ...data })),
     },
   };
   prisma.$transaction = vi.fn((cb: any) => cb(prisma));
@@ -40,26 +42,26 @@ function build(
 }
 
 describe("MerkleAnchorSealService.sealDue", () => {
-  it("scelle une tranche : racine = buildMerkleRoot des hashes triés, hourStart = heure précédente", async () => {
+  it("scelle une tranche : racine = buildMerkleRoot des hashes triés, asOf = borne heure courante, coverageFrom = min(issuedAt)", async () => {
     const { service, prisma } = build();
 
     const summary = await service.sealDue(NOW);
 
-    expect(summary.batchCreated).toBe(true);
-    expect(summary.leafCount).toBe(3);
+    expect(summary).toMatchObject({ batchCreated: true, leafCount: 3, capped: false });
     const createArgs = prisma.merkleAnchorBatch.create.mock.calls[0][0].data;
-    expect(createArgs.hourStart.toISOString()).toBe("2026-08-30T13:00:00.000Z");
+    expect(createArgs.asOf.toISOString()).toBe("2026-08-30T14:00:00.000Z");
+    expect(createArgs.coverageFrom.toISOString()).toBe("2026-08-30T11:00:00.000Z"); // le retardataire
     expect(createArgs.merkleRoot).toBe(buildMerkleRoot([H(1), H(2), H(3)]));
     expect(createArgs.previousRoot).toBe("GENESIS");
     expect(prisma.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { hash: { not: null }, anchorBatchId: null, issuedAt: { lt: new Date("2026-08-30T14:00:00.000Z") } },
-        orderBy: { hash: "asc" },
+        orderBy: [{ hash: "asc" }, { id: "asc" }],
       }),
     );
   });
 
-  it("chaîne previousRoot sur la dernière tranche", async () => {
+  it("chaîne previousRoot sur la dernière tranche (lu DANS la transaction)", async () => {
     const { service, prisma } = build({ lastBatchRoot: "abc123" });
     await service.sealDue(NOW);
     expect(prisma.merkleAnchorBatch.create.mock.calls[0][0].data.previousRoot).toBe("abc123");
@@ -85,7 +87,7 @@ describe("MerkleAnchorSealService.sealDue", () => {
     expect(sealed.inc).not.toHaveBeenCalled();
   });
 
-  it("course : create échoue avec P2002 (hour_start) → skipped: already-sealed, pas de rejet", async () => {
+  it("course : create échoue avec P2002 (as_of) → skipped: already-sealed, pas de rejet", async () => {
     const { service } = build({
       createImpl: vi.fn().mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" })),
     });

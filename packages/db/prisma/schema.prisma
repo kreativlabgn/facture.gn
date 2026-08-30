@@ -1002,11 +1002,14 @@ model Invoice {
   hash         String?
   previousHash String? @map("previous_hash")
   signature    Bytes?
-  // E1 (ADR-115) — tranche Merkle horaire à laquelle le hash de cette facture
-  // est rattaché. Assignée UNE seule fois par MerkleAnchorSealService, jamais
-  // réécrite. La preuve d'inclusion est reconstruite à la volée par /verify.
+  // E1 (ADR-115) — tranche Merkle à laquelle le hash de cette facture est
+  // rattaché. Assignée UNE seule fois par MerkleAnchorSealService ; un trigger
+  // (invoice_anchor_batch_id_write_once) rejette toute ré-assignation d'une
+  // valeur non nulle. onDelete: Restrict (une tranche ne se supprime jamais —
+  // trigger — ; Restrict est plus honnête que SetNull). La preuve d'inclusion
+  // est reconstruite à la volée par /verify.
   anchorBatchId String?            @map("anchor_batch_id")
-  anchorBatch   MerkleAnchorBatch? @relation(fields: [anchorBatchId], references: [id])
+  anchorBatch   MerkleAnchorBatch? @relation(fields: [anchorBatchId], references: [id], onDelete: Restrict)
   // A3 — null = signée avec l'ancienne clé globale légataire (toutes les
   // factures émises avant cette story, jamais retouchées, jamais re-vérifiées
   // différemment). Non-null = signée avec la clé racine propre à l'organisation
@@ -1035,17 +1038,27 @@ model Invoice {
   @@map("invoice")
 }
 
-// E1 (ADR-115 provisoire) — registre HORAIRE des racines de Merkle, CHAÎNÉ
-// (previousRoot). Chaque tranche est un engagement compact sur les hashes de
-// factures d'une fenêtre temporelle, destiné à être ancré hors du contrôle de
-// facture.gn (seam AnchorSink : Noop par défaut, futurs sinks Bitcoin RPC /
-// IPFS). Colonnes d'identité (hourStart, merkleRoot, previousRoot, leafCount,
+// E1 (ADR-115 provisoire) — registre des racines de Merkle des factures, CHAÎNÉ
+// (previousRoot). Chaque tranche est un engagement compact sur les hashes des
+// factures certifiées non encore rattachées à l'instant du scellement, destiné
+// à être ancré hors du contrôle de facture.gn (seam AnchorSink : Noop par
+// défaut, futurs sinks Bitcoin RPC / IPFS).
+//
+// Colonnes d'identité (asOf, coverageFrom, merkleRoot, previousRoot, leafCount,
 // createdAt) IMMUABLES en base (trigger merkle_anchor_batch_identity_immutable) ;
-// les colonnes anchor* sont write-once-later par le flush. DELETE interdit.
-// Table CROSS-ORGANISATION → hors RLS (comme payment_webhook).
+// UPDATE des seules colonnes anchor* / anchoredAt / anchorAttempts autorisé
+// (write-once-later par le flush) ; DELETE et TRUNCATE interdits.
+// CHECK anchor_status_consistency : (anchored ⟺ anchoredAt renseigné) ET
+// (proof/ref ensemble) ET (proof ⟹ anchored). Table CROSS-ORGANISATION → hors
+// RLS (comme payment_webhook).
 model MerkleAnchorBatch {
   id           String             @id @default(uuid())
-  hourStart    DateTime           @unique @map("hour_start")
+  // Borne haute EXCLUSIVE réelle de la tranche : toute facture issuedAt < asOf
+  // non encore rattachée y est incluse. Une tranche peut couvrir plusieurs
+  // heures (retardataires, downtime). asOf @unique — un scellement par borne.
+  asOf         DateTime           @unique @map("as_of")
+  // Min(issuedAt) des factures de la tranche : la période réellement engagée.
+  coverageFrom DateTime           @map("coverage_from")
   merkleRoot   String             @map("merkle_root")
   previousRoot String             @map("previous_root")
   leafCount    Int                @map("leaf_count")
@@ -1053,6 +1066,9 @@ model MerkleAnchorBatch {
   anchorProof  String?            @map("anchor_proof")
   anchorRef    String?            @map("anchor_ref")
   anchoredAt   DateTime?          @map("anchored_at")
+  // Nombre d'appels au seam pour cette tranche (par le flush). Alerter sur
+  // pending + attempts élevé plutôt qu'un seuil temporel flou.
+  anchorAttempts Int              @default(0) @map("anchor_attempts")
   createdAt    DateTime           @default(now()) @map("created_at")
 
   invoices Invoice[]

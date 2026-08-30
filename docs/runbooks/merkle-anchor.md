@@ -26,21 +26,36 @@ qu'un `AnchorSink` réel est branché.
 `sealDue()` — **un run = au plus une tranche**. Couvre toutes les factures
 `hash != null`, `anchor_batch_id: null`, `issued_at < début de l'heure courante`
 (les retardataires d'heures antérieures sont inclus naturellement).
-`hour_start` = début de l'heure précédente (borne « as-of »). Feuilles triées par
-`hash` ASC (ordre déterministe, reproductible par un tiers). `Invoice.anchor_batch_id`
-assigné **une seule fois** (garde `anchor_batch_id: null` dans l'`updateMany`).
-Downtime long → une grosse tranche multi-heures (assumé).
+`as_of` = début de l'heure courante (borne haute **exclusive** réelle de la
+tranche). `coverage_from` = `min(issued_at)` des factures incluses = la période
+réellement engagée (peut remonter avant l'heure précédente si un retardataire est
+scellé). Feuilles triées par `(hash ASC, id ASC)` — ordre **total** déterministe,
+reproductible par un tiers (le tri par `hash` seul n'est pas total en cas
+d'égalité). Plafond `MAX_LEAVES_PER_BATCH = 20 000` : un backlog après long
+downtime se résorbe sur plusieurs runs (`capped: true` dans le résumé).
+`Invoice.anchor_batch_id` assigné **une seule fois** (garde `anchor_batch_id: null`
+dans l'`updateMany` + trigger `invoice_anchor_batch_id_write_once`).
 
-Idempotence : rejouer une heure ne double rien (`hour_start` unique + catch
+`previous_root` est lu **dans la transaction** de création (`findFirst` sur
+`as_of DESC`) : ferme la fenêtre où deux runs concurrents liraient le même
+prédécesseur.
+
+Idempotence : rejouer une heure ne double rien (`as_of` unique + catch
 `P2002` → `skipped: "already-sealed"`).
 
 ## Flush (`merkle-anchor-flush`)
 
-Passe les tranches `pending` (les 20 plus anciennes) au `sink.anchor(root, id)` :
-- `receipt` → `anchor_status = anchored` + `anchor_proof` / `anchor_ref` / `anchored_at`.
-- `null` (Noop, ou sink en cours) → reste `pending`.
+Passe les tranches `pending` (les 20 plus anciennes, `as_of ASC`) au
+`sink.anchor(root, id)` :
+- `receipt` → `anchor_status = anchored` + `anchor_proof` / `anchor_ref` /
+  `anchored_at` + `anchor_attempts += 1`.
+- `null` (Noop, ou sink en cours) → reste `pending`, `anchor_attempts += 1`.
 - exception → compteur `trust_api_merkle_flush_errors_total{sink}`, la tranche
-  reste `pending`, la suivante est traitée.
+  reste `pending` (**pas** d'incrément d'`anchor_attempts`), la suivante est traitée.
+
+En fin de passage, `anchor_attempts` élevé + `anchor_status = pending` persistant
+= sink jamais branché ou durablement KO → piste d'alerte (voir Observabilité). Le
+`pending_total` recalculé alimente la gauge `trust_api_merkle_pending_batches`.
 
 **`failed` n'est JAMAIS posé automatiquement.** Le réserver à une décision
 manuelle (ex. racine irrécupérable) : `UPDATE merkle_anchor_batch SET anchor_status = 'failed' WHERE id = …`
@@ -54,7 +69,7 @@ Créer une classe implémentant `AnchorSink` (`anchor(rootHex, batchId): Promise
 optionnel désigné par env (`MERKLE_ANCHOR_SINK`). Options :
 - **Bitcoin RPC** (client maintenu) : soumettre `SHA-256(root)` dans un `OP_RETURN`,
   `null` jusqu'à N confirmations, puis `{ proof: <merkle-path-bloc>, ref: <txid>, anchoredAt: <blocktime> }`.
-- **IPFS + Cloudflare** (DAT, « pinning 10 ans ») : publier `{ root, hourStart, previousRoot, signature }`,
+- **IPFS + Cloudflare** (DAT, « pinning 10 ans ») : publier `{ root, asOf, coverageFrom, previousRoot, signature }`,
   `{ proof: <CID+chemin>, ref: <CID>, anchoredAt: now }` — séparation de confiance
   plus faible que Bitcoin, à coupler à un support immédiat.
 - OpenTimestamps si un client JS maintenu apparaît.
@@ -74,9 +89,14 @@ Depuis la réponse `GET /verify/:id`, champ `anchor` :
 1. `leaf = SHA-256(0x00 ‖ hex_to_bytes(invoice.hash))` — doit égaler `anchor.leafHash`.
 2. `current = leaf` ; pour chaque `{ siblingHex, side }` de `anchor.inclusionProof` :
    `current = side === "left" ? SHA-256(0x01 ‖ sibling ‖ current) : SHA-256(0x01 ‖ current ‖ sibling)`.
-3. `current` doit égaler `anchor.merkleRoot`.
-4. (quand `anchor.externalAnchor.status === "anchored"`) vérifier `anchor_proof`
-   contre le support externe désigné par `anchor.externalAnchor.ref`.
+3. `current` doit égaler `anchor.merkleRoot`. (`anchor.integrityConsistent` doit
+   être `true` : sinon un jeu de feuilles a divergé en base depuis le scellement —
+   la preuve n'est pas reconstruite, `inclusionProof` est `[]`.)
+4. (quand `anchor.externalAnchor.status === "anchored"`) vérifier
+   `anchor.externalAnchor.proof` contre le support externe désigné par
+   `anchor.externalAnchor.ref`. **`status = "anchored"` seul n'est pas une preuve**
+   — c'est facture.gn qui l'écrit ; la confiance vient de la vérification de
+   `proof` contre le support, pas du statut.
 
 ## RLS
 

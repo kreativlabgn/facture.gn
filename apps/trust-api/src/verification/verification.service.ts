@@ -7,6 +7,7 @@ import type { CertificationResult, CertificationService } from "../certification
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import {
   buildInclusionProof,
+  buildMerkleRoot,
   leafHash,
   type InclusionStep,
 } from "../certification/merkle-anchor/merkle";
@@ -31,22 +32,33 @@ export interface PublicInvoiceVerification {
   // (signingKeyId null), qui n'a pas de registre de révocation dans ce repo.
   keyValidAtIssuance: boolean;
   // E1 (ADR-115) — preuve d'inclusion Merkle. null tant que la facture n'a pas
-  // été scellée dans une tranche horaire (job merkle-anchor-seal). Un
-  // vérificateur reconstruit `leafHash → …inclusionProof… → merkleRoot`, puis
-  // (quand externalAnchor.status === "anchored") vérifie `anchorProof` contre
+  // été scellée dans une tranche (job merkle-anchor-seal). Un vérificateur
+  // reconstruit `leafHash → …inclusionProof… → merkleRoot`, puis (quand
+  // externalAnchor.status === "anchored") vérifie `externalAnchor.proof` contre
   // le support externe (Bitcoin / IPFS).
   anchor: AnchorProof | null;
 }
 
 export interface AnchorProof {
   batchId: string;
-  hourStart: string;
+  /** Borne haute exclusive réelle de la tranche. */
+  asOf: string;
+  /** Min(issuedAt) des factures de la tranche — période réellement engagée. */
+  coverageFrom: string;
   merkleRoot: string;
   previousRoot: string;
+  leafCount: number;
   leafHash: string;
   inclusionProof: InclusionStep[];
+  // true ssi la racine reconstruite depuis les feuilles VIVANTES de la tranche
+  // (+ leafCount) recolle avec `merkleRoot` immuable. false = le jeu de feuilles
+  // a divergé (facture-sœur altérée/supprimée) — signal d'inaltérabilité, pas
+  // une facture non ancrée.
+  integrityConsistent: boolean;
   externalAnchor: {
     status: MerkleAnchorStatus;
+    /** Preuve opaque (base64) opposable contre le support externe. null tant que non ancré. */
+    proof: string | null;
     ref: string | null;
     anchoredAt: string | null;
   };
@@ -117,30 +129,50 @@ export class VerificationService {
     // OU révoquée APRÈS issuedAt.
     const keyValidAtIssuance = revokedAt === null || invoice.issuedAt < revokedAt;
 
-    // E1 — preuve d'inclusion reconstruite à la volée depuis les feuilles de la
-    // tranche (invoice.hash des factures rattachées, triées ASC — même ordre
-    // déterministe que le scellement).
+    // E1 — preuve d'inclusion reconstruite à la volée depuis les feuilles
+    // VIVANTES de la tranche (invoice.hash, ordre total déterministe — le même
+    // que le scellement). La racine reconstruite ET le compte de feuilles sont
+    // repliés contre les valeurs immuables : un écart = jeu de feuilles divergé
+    // (facture-sœur altérée / supprimée), signalé par integrityConsistent.
     let anchor: AnchorProof | null = null;
-    if (invoice.anchorBatch) {
+    const batch = invoice.anchorBatch;
+    if (batch) {
       const leaves = await this.prisma.invoice.findMany({
         where: { anchorBatchId: invoice.anchorBatchId },
         select: { hash: true },
-        orderBy: { hash: "asc" },
+        orderBy: [{ hash: "asc" }, { id: "asc" }],
       });
       const leafHashes = leaves
         .map((l) => l.hash)
         .filter((h): h is string => h !== null);
+
+      let integrityConsistent = false;
+      let inclusionProof: InclusionStep[] = [];
+      try {
+        integrityConsistent =
+          leafHashes.length === batch.leafCount && buildMerkleRoot(leafHashes) === batch.merkleRoot;
+        if (integrityConsistent) {
+          inclusionProof = buildInclusionProof(leafHashes, invoice.hash);
+        }
+      } catch {
+        integrityConsistent = false;
+      }
+
       anchor = {
-        batchId: invoice.anchorBatch.id,
-        hourStart: invoice.anchorBatch.hourStart.toISOString(),
-        merkleRoot: invoice.anchorBatch.merkleRoot,
-        previousRoot: invoice.anchorBatch.previousRoot,
+        batchId: batch.id,
+        asOf: batch.asOf.toISOString(),
+        coverageFrom: batch.coverageFrom.toISOString(),
+        merkleRoot: batch.merkleRoot,
+        previousRoot: batch.previousRoot,
+        leafCount: batch.leafCount,
         leafHash: leafHash(invoice.hash),
-        inclusionProof: buildInclusionProof(leafHashes, invoice.hash),
+        inclusionProof,
+        integrityConsistent,
         externalAnchor: {
-          status: invoice.anchorBatch.anchorStatus,
-          ref: invoice.anchorBatch.anchorRef,
-          anchoredAt: invoice.anchorBatch.anchoredAt?.toISOString() ?? null,
+          status: batch.anchorStatus,
+          proof: batch.anchorProof,
+          ref: batch.anchorRef,
+          anchoredAt: batch.anchoredAt?.toISOString() ?? null,
         },
       };
     }

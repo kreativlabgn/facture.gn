@@ -25,15 +25,25 @@ externe. L'ancre externe réelle est différée.**
   (séparation de domaine anti-second-preimage), découpage à la plus grande
   puissance de 2 `< n` (impair jamais dupliqué). Ordre des feuilles :
   `invoice.hash` ASC (déterministe, reproductible par un tiers).
-- **`MerkleAnchorBatch`** : registre horaire. `hourStart` unique, `merkleRoot`,
-  `previousRoot` (chaînage, `"GENESIS"` au départ), `leafCount`. Colonnes
-  d'identité **immuables en base** (trigger, pattern J1) ; `DELETE` interdit.
+- **`MerkleAnchorBatch`** : registre horaire. `asOf` unique (borne haute
+  **exclusive** réelle de la tranche), `coverageFrom` (`min(issuedAt)` des
+  factures incluses = période réellement engagée), `merkleRoot`, `previousRoot`
+  (chaînage, `"GENESIS"` au départ), `leafCount`, `anchorAttempts`. Colonnes
+  d'identité **immuables en base** (trigger, pattern J1) ; `DELETE` **et
+  `TRUNCATE`** interdits (triggers ROW + STATEMENT). `CHECK` de cohérence :
+  `anchored ⟺ anchoredAt renseigné`, `proof`/`ref` ensemble, `proof ⟹ anchored`
+  — les états incohérents sont irreprésentables, pas seulement évités par le call
+  site. FK `Invoice.anchorBatch` en `onDelete: Restrict`.
 - **Job `merkle-anchor-seal`** (BullMQ, horaire, **opt-in `MERKLE_ANCHOR_ENABLED`**,
   non-bloquant au boot — pattern rétention J3) : `sealDue()` scelle **une**
   tranche par run, couvrant toutes les factures `hash != null`, `anchorBatchId:
   null`, `issuedAt < début_heure_courante` (les retardataires sont inclus
-  naturellement). `hourStart` = début de l'heure précédente (borne « as-of »).
-  `Invoice.anchorBatchId` assigné une seule fois.
+  naturellement). `asOf` = début de l'heure courante ; `coverageFrom` remonte au
+  plus vieux `issuedAt` réellement scellé. Feuilles triées par `(hash ASC, id
+  ASC)` — ordre **total** déterministe. Plafond `MAX_LEAVES_PER_BATCH = 20 000`
+  (borne la mémoire du job ET la reconstruction de preuve sur `/verify`).
+  `previousRoot` lu **dans la transaction** de création. `Invoice.anchorBatchId`
+  assigné une seule fois (garde + trigger `invoice_anchor_batch_id_write_once`).
 - **Seam `AnchorSink`** : `interface { anchor(rootHex, batchId): Promise<AnchorReceipt | null> }`.
   `NoopAnchorSink` par défaut (retourne `null` → la tranche reste `pending`).
   Un sink réel (Bitcoin RPC maintenu, ou IPFS+Cloudflare per DAT) = provider
@@ -43,8 +53,40 @@ externe. L'ancre externe réelle est différée.**
   `receipt` → `anchored` + `anchorProof`/`anchorRef`/`anchoredAt`. `failed`
   jamais posé automatiquement (le sink peut être transitoirement KO).
 - **`GET /verify/:id`** gagne un champ `anchor` : la **preuve d'inclusion**
-  (chemin feuille→racine, calculée à la volée) + `previousRoot` + l'état de
-  l'ancre externe. `null` si la facture n'est pas encore ancrée.
+  (chemin feuille→racine, calculée à la volée) + `previousRoot` + `integrityConsistent`
+  + l'état de l'ancre externe (`externalAnchor.{status,proof,ref,anchoredAt}`).
+  `null` si la facture n'est pas encore ancrée. `integrityConsistent = false` = le
+  jeu de feuilles vivantes de la tranche a divergé du `merkleRoot` immuable
+  (facture-sœur altérée/supprimée) — signal d'inaltérabilité, distinct d'une
+  facture non ancrée ; `inclusionProof` reste `[]` dans ce cas.
+
+## Confidentialité (aucune donnée métier exposée)
+
+Une feuille = `SHA-256(0x00 ‖ invoice.hash)` où `invoice.hash` est **déjà** un
+digest. La racine, `previousRoot`, la preuve d'inclusion et `leafHash` sont des
+hashes — **aucun montant, NIF, numéro ou identité** ne transite par le registre
+ni par le champ `anchor` de `/verify`. `leafCount` et `asOf`/`coverageFrom`
+révèlent seulement un volume horaire agrégé, cross-organisation (déjà public via
+le compteur d'émission). Un `AnchorSink` réel ne publie que `SHA-256(root)` — un
+tiers ne peut rien reconstruire sans les factures elles-mêmes.
+
+## `previousRoot` — chaînage inerte tant qu'aucun sink n'est branché
+
+`previousRoot` lie chaque tranche à la précédente, mais tant que le seam retourne
+`null`, **aucune racine n'est publiée hors de la base** : un attaquant qui
+contrôle la base peut réécrire tout le registre (colonnes immuables par trigger
+seulement — `SECURITY INVOKER`, contournable par le superutilisateur PG). Le
+chaînage ne devient opposable qu'à partir de la **première racine ancrée**
+(toutes les tranches antérieures deviennent alors vérifiables par transitivité,
+et OpenTimestamps peut horodater des digests rétroactivement). C'est un choix
+assumé : poser le mécanisme maintenant, activer la garantie à l'exploitation.
+
+## `externalAnchor.status` n'est pas une preuve
+
+`status = "anchored"` est écrit **par facture.gn**. Un vérificateur ne doit
+jamais s'y fier seul : la confiance vient de la vérification de
+`externalAnchor.proof` contre le support externe (`externalAnchor.ref`), pas du
+statut. Tant que ce n'est pas fait, `/verify` reste « facture.gn l'affirme ».
 
 ## Écarté
 
@@ -55,8 +97,8 @@ externe. L'ancre externe réelle est différée.**
   horaire couvre ~1400 factures en 32 octets.
 - **Ethereum / smart contract** : gas + wallet + surveillance, disproportionné.
 - **Feuilles dupliquées sur la tranche (`leafHashes String[]`)** : ~65 Mo/mois,
-  redondant. `Invoice.anchorBatchId` + `ORDER BY hash` est normalisé et tout
-  aussi vérifiable.
+  redondant. `Invoice.anchorBatchId` + `ORDER BY (hash, id)` est normalisé et
+  tout aussi vérifiable.
 - **`sealHour(H)` itératif + balayage retardataires séparé** : `sealDue()` (une
   tranche par run) est plus simple et gère les retardataires sans cas spécial.
 

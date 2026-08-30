@@ -11,6 +11,11 @@ export const FLUSH_INTERVAL_MS = 30 * 60_000;
 /** Nombre de tranches `pending` traitées par passage de flush. */
 export const FLUSH_BATCH_LIMIT = 20;
 
+/** Plafond de feuilles par tranche. Borne la mémoire du job de scellement ET la
+ *  reconstruction de preuve sur /verify (public). Un backlog (long downtime) se
+ *  résorbe sur plusieurs runs successifs. ~1400/h en régime établi. */
+export const MAX_LEAVES_PER_BATCH = 20_000;
+
 /** `previousRoot` de la toute première tranche. */
 export const GENESIS_ROOT = "GENESIS";
 

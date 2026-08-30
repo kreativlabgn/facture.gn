@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
 
 // Arbre de Merkle RFC 6962 (Certificate Transparency), pur — aucun I/O.
 //
@@ -33,11 +33,11 @@ export interface InclusionStep {
 }
 
 export function leafHash(dataHex: string): string {
-  return bytesToHex(sha256(concat(LEAF_PREFIX, assertHash(dataHex))));
+  return bytesToHex(sha256(concatBytes(LEAF_PREFIX, assertHash(dataHex))));
 }
 
 export function nodeHash(leftHex: string, rightHex: string): string {
-  return bytesToHex(sha256(concat(NODE_PREFIX, assertHash(leftHex), assertHash(rightHex))));
+  return bytesToHex(sha256(concatBytes(NODE_PREFIX, assertHash(leftHex), assertHash(rightHex))));
 }
 
 /** Racine de Merkle des feuilles brutes (`invoice.hash`), dans l'ordre reçu. */
@@ -71,17 +71,6 @@ export function verifyInclusionProof(targetHex: string, proof: InclusionStep[], 
 }
 
 // ── interne ────────────────────────────────────────────────────────────────
-
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const p of parts) {
-    out.set(p, offset);
-    offset += p.length;
-  }
-  return out;
-}
 
 /** Plus grande puissance de 2 strictement < n (n ≥ 2). */
 function splitPoint(n: number): number {
