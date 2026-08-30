@@ -14,7 +14,7 @@ function createFakePrisma(overrides: { organization?: any; requesterMembership?:
       update: vi.fn().mockResolvedValue({}),
     },
     userPhone: {
-      findFirst: vi.fn().mockResolvedValue({ msisdn: PHONE }),
+      findFirst: vi.fn().mockResolvedValue({ msisdn: PHONE, user: { preferredLanguage: "fr" } }),
     },
     organizationMember: {
       findFirst: vi.fn().mockResolvedValue(

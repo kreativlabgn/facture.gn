@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { NotificationChannel } from "@facture-gn/db";
+import { type Locale, t } from "../i18n";
 import type { NotificationProvider } from "./notification-provider.interface";
 import { SMS_PROVIDER, WHATSAPP_PROVIDER } from "./notifications.tokens";
 import { resolveNotificationProviders } from "./notification-dispatch";
@@ -22,13 +23,20 @@ export class PaymentLinkNotificationService {
   // que PaymentLinkClient.tryGenerate() (Parcours Fanta : cash et lien ne
   // s'excluent jamais l'un l'autre). Ne lève jamais, quel que soit le résultat
   // des providers.
-  async notify(customer: NotifiableCustomer, paymentLinkUrl: string, totalGnf: bigint): Promise<void> {
+  async notify(
+    customer: NotifiableCustomer,
+    paymentLinkUrl: string,
+    totalGnf: bigint,
+    locale: Locale = "fr",
+  ): Promise<void> {
     if (!customer.phone) {
       return;
     }
 
-    const amountGnf = totalGnf / 100n;
-    const message = `Votre facture de ${amountGnf.toLocaleString("fr-FR")} GNF est prête : ${paymentLinkUrl}`;
+    const message = t("notification.paymentLinkReady", locale, {
+      amountGnf: (totalGnf / 100n).toLocaleString("fr-FR"),
+      url: paymentLinkUrl,
+    });
 
     const providers = resolveNotificationProviders(customer.notificationChannel, this.smsProvider, this.whatsappProvider);
 

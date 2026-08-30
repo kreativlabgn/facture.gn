@@ -45,6 +45,26 @@ describe("PaymentReminderService (I2)", () => {
     );
   });
 
+  const EXPECTED_FR = `Rappel : votre facture ${INVOICE_NUMBER} de ${AMOUNT_DUE_GNF.toLocaleString("fr-FR")} GNF reste impayée. Merci de régulariser rapidement.`;
+
+  it("rend le message FR exact (garde de non-régression de wording)", async () => {
+    const sms = createFakeProvider();
+    const service = new PaymentReminderService(sms as any, createFakeProvider() as any);
+
+    await service.send({ ...CUSTOMER_BASE, notificationChannel: "sms" }, INVOICE_NUMBER, AMOUNT_DUE_GNF, "fr");
+
+    expect(sms.send).toHaveBeenCalledWith(CUSTOMER_BASE.phone, EXPECTED_FR);
+  });
+
+  it("retombe sur le message FR quand pular n'est pas encore traduit", async () => {
+    const sms = createFakeProvider();
+    const service = new PaymentReminderService(sms as any, createFakeProvider() as any);
+
+    await service.send({ ...CUSTOMER_BASE, notificationChannel: "sms" }, INVOICE_NUMBER, AMOUNT_DUE_GNF, "pular");
+
+    expect(sms.send).toHaveBeenCalledWith(CUSTOMER_BASE.phone, EXPECTED_FR);
+  });
+
   it("ne lève jamais si le provider échoue — meilleur effort", async () => {
     const sms = { send: vi.fn().mockRejectedValue(new Error("réseau indisponible")) };
     const service = new PaymentReminderService(sms as any, createFakeProvider() as any);

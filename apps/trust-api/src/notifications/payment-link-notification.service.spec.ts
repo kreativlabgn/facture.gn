@@ -53,6 +53,26 @@ describe("PaymentLinkNotificationService", () => {
     expect(sms.send).toHaveBeenCalledWith(CUSTOMER_BASE.phone, expect.stringContaining(PAYMENT_LINK_URL));
   });
 
+  const EXPECTED_FR = `Votre facture de ${(TOTAL_GNF / 100n).toLocaleString("fr-FR")} GNF est prête : ${PAYMENT_LINK_URL}`;
+
+  it("rend le message FR exact (garde de non-régression de wording)", async () => {
+    const sms = createFakeProvider();
+    const service = new PaymentLinkNotificationService(sms as any, createFakeProvider() as any);
+
+    await service.notify({ ...CUSTOMER_BASE, notificationChannel: "sms" }, PAYMENT_LINK_URL, TOTAL_GNF, "fr");
+
+    expect(sms.send).toHaveBeenCalledWith(CUSTOMER_BASE.phone, EXPECTED_FR);
+  });
+
+  it("retombe sur le message FR quand la locale demandée (pular) n'a pas encore de traduction", async () => {
+    const sms = createFakeProvider();
+    const service = new PaymentLinkNotificationService(sms as any, createFakeProvider() as any);
+
+    await service.notify({ ...CUSTOMER_BASE, notificationChannel: "sms" }, PAYMENT_LINK_URL, TOTAL_GNF, "pular");
+
+    expect(sms.send).toHaveBeenCalledWith(CUSTOMER_BASE.phone, EXPECTED_FR);
+  });
+
   it("ne lève jamais si le provider échoue — meilleur effort, jamais couplé à l'émission", async () => {
     const sms = { send: vi.fn().mockRejectedValue(new Error("réseau indisponible")) };
     const service = new PaymentLinkNotificationService(sms as any, createFakeProvider() as any);

@@ -6,6 +6,11 @@ import { resolveTaxRateBps } from "../invoices/tax-regime";
 // est dérivé de resolveTaxRateBps() (seule source de vérité, C4 / ADR-033), pour
 // qu'une facture et sa mention ne puissent pas afficher deux taux différents.
 //
+// RESTE EN FRANÇAIS quelle que soit l'Organization.preferredLanguage — la facture
+// est un document légal (langue officielle OHADA / Guinée). Le lot i18n
+// (apps/trust-api/src/i18n, ADR-051 : voix > traduction texte) ne traduit que le
+// texte SMS/WhatsApp sortant, jamais le PDF ni les menus USSD.
+//
 // Le libellé exact des sanctions de retard n'est pas fixé par les specs
 // (Backlog / DAT / CdC / ADR) — formulation OHADA générique volontairement sans
 // taux chiffré ni référence d'article (le CGI guinéen n'est pas modélisé dans ce

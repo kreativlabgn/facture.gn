@@ -1151,6 +1151,36 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       { phone: "+224622334455", notificationChannel: "sms" },
       resolvedLink.paymentLinkUrl,
       result.totalTtc,
+      "fr",
+    );
+  });
+
+  it("passe la langue de l'organisation émettrice à PaymentLinkNotificationService (i18n)", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
+      organization: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue({ id: "org-1", nif: "GN12345678", commercialTier: "freemium", preferredLanguage: "pular" }),
+      },
+    });
+    (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    const notificationService = createNotificationService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient(resolvedLink) as any,
+      notificationService as any,
+    );
+
+    await service.issue("inv-1");
+
+    expect(notificationService.notify).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "pular",
     );
   });
 
@@ -2228,6 +2258,7 @@ const OVERDUE_INVOICE_BASE = {
   amountDue: 150_000n,
   customerId: "cust-1",
   customer: { id: "cust-1", phone: "+224622334455", notificationChannel: "sms" },
+  organization: { preferredLanguage: "fr" },
 };
 
 describe("InvoicesService — rappel de paiement après échéance (I2)", () => {
@@ -2249,7 +2280,28 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       { phone: "+224622334455", notificationChannel: "sms" },
       "FG-2026-000001",
       1_500n,
+      "fr",
     );
+  });
+
+  it("passe la langue de l'organisation émettrice au rappel (i18n)", async () => {
+    const prisma = createFakePrismaForSendReminder({
+      ...OVERDUE_INVOICE_BASE,
+      organization: { preferredLanguage: "pular" },
+    });
+    const reminderService = createFakePaymentReminderService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      reminderService as any,
+    );
+
+    await service.sendReminder("inv-1", "user-djenabou");
+
+    expect(reminderService.send).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "pular");
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: { invoiceId: "inv-1", type: "payment_reminder_sent", actorId: "user-djenabou" },
     });

@@ -1,9 +1,10 @@
 import { randomInt } from "node:crypto";
-import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { Inject, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { PASSWORD_SERVICE } from "../auth/auth.tokens";
 import type { PasswordService } from "../auth/password.service";
+import { type Locale, resolveLocale, t } from "../i18n";
 import type { NotificationProvider } from "../notifications/notification-provider.interface";
 import { SMS_PROVIDER } from "../notifications/notifications.tokens";
 
@@ -32,6 +33,8 @@ function generateOtpCode(): string {
 // l'OTP lui-même.
 @Injectable()
 export class ClientPortalOtpService {
+  private readonly logger = new Logger(ClientPortalOtpService.name);
+
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
@@ -57,7 +60,28 @@ export class ClientPortalOtpService {
       data: { msisdn, codeHash, expiresAt: new Date(Date.now() + OTP_TTL_MS) },
     });
 
-    await this.smsProvider.send(msisdn, `Votre code facture.gn : ${code} (valable 5 minutes).`);
+    await this.smsProvider.send(msisdn, t("notification.clientPortalOtp", await this.resolveLocale(msisdn), { code }));
+  }
+
+  // Le portail client est cross-organisation (un même numéro peut être client de
+  // plusieurs PME) : pas de langue d'organisation unique. On n'utilise une langue
+  // que si toutes les organisations rattachées à ce numéro s'accordent ; sinon
+  // `fr`. Jamais bloquant — un échec de lecture retombe sur `fr`.
+  private async resolveLocale(msisdn: string): Promise<Locale> {
+    try {
+      const customers = await this.prisma.customer.findMany({
+        where: { phone: msisdn },
+        select: { organization: { select: { preferredLanguage: true } } },
+        // Échantillon borné : au-delà de ~10 orgs pour un même numéro, la
+        // probabilité d'un consensus de langue est nulle → `fr` de toute façon.
+        take: 10,
+      });
+      const locales = new Set(customers.map((c) => resolveLocale(c.organization.preferredLanguage)));
+      return locales.size === 1 ? [...locales][0] : "fr";
+    } catch (error) {
+      this.logger.debug(`Résolution de langue OTP échouée pour ${msisdn}, fallback fr : ${(error as Error).message}`);
+      return "fr";
+    }
   }
 
   // Valide ET consomme atomiquement le code fourni pour ce numéro. Ne renvoie

@@ -3,6 +3,7 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { MandatesService } from "../mandates/mandates.service";
 import { OrganizationsService } from "../organizations/organizations.service";
+import { resolveLocale, t } from "../i18n";
 import { SMS_PROVIDER } from "../notifications/notifications.tokens";
 import type { NotificationProvider } from "../notifications/notification-provider.interface";
 import { UssdAuthService } from "./ussd-auth.service";
@@ -37,9 +38,15 @@ export class UssdAccountService {
       data: { paymentsFrozenUntil: new Date(Date.now() + FREEZE_WINDOW_MS) },
     });
 
-    const phone = await this.prisma.userPhone.findFirst({ where: { userId } });
+    const phone = await this.prisma.userPhone.findFirst({
+      where: { userId },
+      select: { msisdn: true, user: { select: { preferredLanguage: true } } },
+    });
     if (phone) {
-      await this.smsProvider.send(phone.msisdn, "Votre PIN facture.gn a été changé. Si ce n'est pas vous, contactez le support.");
+      await this.smsProvider.send(
+        phone.msisdn,
+        t("notification.pinChanged", resolveLocale(phone.user.preferredLanguage), {}),
+      );
     }
   }
 

@@ -3,6 +3,7 @@ import type { OrganizationRole, PracticeMemberRole, Prisma, PrismaClient } from 
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { assertPracticeAdmin } from "../common/rbac/practice-access";
 import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
+import { type Locale, resolveLocale, t } from "../i18n";
 import type { NotificationProvider } from "../notifications/notification-provider.interface";
 import { SMS_PROVIDER } from "../notifications/notifications.tokens";
 import type { InviteOrganizationPendingDto } from "./dto/invite-organization-pending.dto";
@@ -120,7 +121,7 @@ export class PendingMemberInviteService {
       throw error;
     }
 
-    await this.notifyInvitee(dto.msisdn, organization.name);
+    await this.notifyInvitee(dto.msisdn, organization.name, resolveLocale(organization.preferredLanguage));
 
     return { id: invite.id };
   }
@@ -293,12 +294,9 @@ export class PendingMemberInviteService {
   // Best-effort — même garantie que PaymentReminderService.send()/
   // PaymentLinkNotificationService.notify() : ne lève jamais, la création de
   // l'invitation reste considérée réussie même si l'envoi effectif échoue.
-  private async notifyInvitee(msisdn: string, inviterName: string): Promise<void> {
+  private async notifyInvitee(msisdn: string, orgName: string, locale: Locale = "fr"): Promise<void> {
     try {
-      await this.smsProvider.send(
-        msisdn,
-        `${inviterName} vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.`,
-      );
+      await this.smsProvider.send(msisdn, t("notification.memberInvite", locale, { orgName }));
     } catch {
       // best-effort, jamais couplé à la réussite de la création de l'invitation.
     }
