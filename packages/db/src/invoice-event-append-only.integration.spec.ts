@@ -41,11 +41,13 @@ const RUN = Boolean(process.env.DATABASE_URL);
 
     afterAll(async () => {
       if (!RUN) return;
-      // TRUNCATE ne déclenche pas les triggers de niveau ligne → le nettoyage
-      // reste possible malgré la garde append-only.
-      await prisma.$executeRawUnsafe(
-        'TRUNCATE "invoice_event", "invoice", "organization" RESTART IDENTITY CASCADE',
-      );
+      // La garde append-only bloque `DELETE FROM invoice_event` → on vide cette
+      // table par TRUNCATE (les triggers de niveau ligne ne s'y déclenchent pas ;
+      // aucune table ne référence invoice_event, donc pas de CASCADE). Le reste
+      // du nettoyage suit le pattern scopé de rls.integration.spec.ts.
+      await prisma.$executeRawUnsafe('TRUNCATE "invoice_event"');
+      await prisma.invoice.deleteMany({ where: { id: invoiceId } });
+      await prisma.organization.deleteMany({ where: { id: organizationId } });
       await prisma.$disconnect();
     });
 
