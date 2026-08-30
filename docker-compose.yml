@@ -49,6 +49,8 @@ services:
       REDIS_URL: redis://redis:6379
       # Lot J3 — job de rétention en opt-in ("true" pour armer). Voir docs/runbooks/retention.md.
       RETENTION_ENABLED: "false"
+      # Lot E1 — registre Merkle en opt-in ("true" pour armer).
+      MERKLE_ANCHOR_ENABLED: "false"
       PORT: 3000
     ports: ["3000:3000"]
     depends_on:

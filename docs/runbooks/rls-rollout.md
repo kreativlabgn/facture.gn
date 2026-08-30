@@ -170,6 +170,9 @@ signale un bug ou un probing).
 - Chaque opération scopée = une transaction. Surcoût mesurable ; à surveiller sur
   les endpoints à fort volume (`GET /invoices`). Alternative si besoin :
   regrouper plusieurs lectures dans un `$transaction` interactif unique.
+- `merkle_anchor_batch` (E1) est **cross-organisation** par conception (une
+  tranche couvre N orgs) → **jamais** de politique RLS dessus, comme
+  `payment_webhook`. Le job de scellement lit les factures de toutes les orgs.
 - `payment_webhook` et les tables scoped-practice ne sont pas couvertes — voir
   ADR-111 phase 2.
 - **Interaction avec la rétention (J3)** : `RetentionService` purge `ussd_session`,

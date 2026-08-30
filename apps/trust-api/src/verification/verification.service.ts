@@ -1,10 +1,17 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PrismaClient } from "@facture-gn/db";
+import type { MerkleAnchorStatus, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CERTIFICATION_SERVICE } from "../certification/certification.module";
 import { resolveNifForCertification } from "../certification/certification.service";
 import type { CertificationResult, CertificationService } from "../certification/certification.service";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
+import {
+  buildInclusionProof,
+  buildMerkleRoot,
+  leafHash,
+  type InclusionStep,
+} from "../certification/merkle-anchor/merkle";
+import { MAX_LEAVES_PER_BATCH } from "../certification/merkle-anchor/merkle-anchor.constants";
 
 export interface PublicInvoiceVerification {
   certificationId: string;
@@ -25,6 +32,37 @@ export interface PublicInvoiceVerification {
   // à l'horloge courante. Toujours true pour la clé légataire globale
   // (signingKeyId null), qui n'a pas de registre de révocation dans ce repo.
   keyValidAtIssuance: boolean;
+  // E1 (ADR-115) — preuve d'inclusion Merkle. null tant que la facture n'a pas
+  // été scellée dans une tranche (job merkle-anchor-seal). Un vérificateur
+  // reconstruit `leafHash → …inclusionProof… → merkleRoot`, puis (quand
+  // externalAnchor.status === "anchored") vérifie `externalAnchor.proof` contre
+  // le support externe (Bitcoin / IPFS).
+  anchor: AnchorProof | null;
+}
+
+export interface AnchorProof {
+  batchId: string;
+  /** Borne haute exclusive réelle de la tranche. */
+  asOf: string;
+  /** Min(issuedAt) des factures de la tranche — période réellement engagée. */
+  coverageFrom: string;
+  merkleRoot: string;
+  previousRoot: string;
+  leafCount: number;
+  leafHash: string;
+  inclusionProof: InclusionStep[];
+  // true ssi la racine reconstruite depuis les feuilles VIVANTES de la tranche
+  // (+ leafCount) recolle avec `merkleRoot` immuable. false = le jeu de feuilles
+  // a divergé (facture-sœur altérée/supprimée) — signal d'inaltérabilité, pas
+  // une facture non ancrée.
+  integrityConsistent: boolean;
+  externalAnchor: {
+    status: MerkleAnchorStatus;
+    /** Preuve opaque (base64) opposable contre le support externe. null tant que non ancré. */
+    proof: string | null;
+    ref: string | null;
+    anchoredAt: string | null;
+  };
 }
 
 @Injectable()
@@ -44,7 +82,7 @@ export class VerificationService {
   async verifyByCertificationId(certificationId: string): Promise<PublicInvoiceVerification> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { certificationId },
-      include: { organization: true },
+      include: { organization: true, anchorBatch: true },
     });
 
     if (!invoice || !invoice.number || !invoice.hash || !invoice.signature || !invoice.issuedAt) {
@@ -92,6 +130,59 @@ export class VerificationService {
     // OU révoquée APRÈS issuedAt.
     const keyValidAtIssuance = revokedAt === null || invoice.issuedAt < revokedAt;
 
+    // E1 — preuve d'inclusion reconstruite à la volée depuis les feuilles
+    // VIVANTES de la tranche (invoice.hash, ordre total déterministe — le même
+    // que le scellement). La racine reconstruite ET le compte de feuilles sont
+    // repliés contre les valeurs immuables : un écart = jeu de feuilles divergé
+    // (facture-sœur altérée / supprimée), signalé par integrityConsistent.
+    let anchor: AnchorProof | null = null;
+    const batch = invoice.anchorBatch;
+    if (batch) {
+      const leaves = await this.prisma.invoice.findMany({
+        where: { anchorBatchId: invoice.anchorBatchId },
+        select: { hash: true },
+        orderBy: [{ hash: "asc" }, { id: "asc" }],
+        // Défense en profondeur : la borne réelle est le plafond au scellement
+        // (une tranche ne dépasse jamais MAX_LEAVES_PER_BATCH). Ce `take` garde
+        // l'endpoint public borné même si le plafond de scellement est relevé
+        // un jour sans revenir ici.
+        take: MAX_LEAVES_PER_BATCH,
+      });
+      const leafHashes = leaves
+        .map((l) => l.hash)
+        .filter((h): h is string => h !== null);
+
+      let integrityConsistent = false;
+      let inclusionProof: InclusionStep[] = [];
+      try {
+        integrityConsistent =
+          leafHashes.length === batch.leafCount && buildMerkleRoot(leafHashes) === batch.merkleRoot;
+        if (integrityConsistent) {
+          inclusionProof = buildInclusionProof(leafHashes, invoice.hash);
+        }
+      } catch {
+        integrityConsistent = false;
+      }
+
+      anchor = {
+        batchId: batch.id,
+        asOf: batch.asOf.toISOString(),
+        coverageFrom: batch.coverageFrom.toISOString(),
+        merkleRoot: batch.merkleRoot,
+        previousRoot: batch.previousRoot,
+        leafCount: batch.leafCount,
+        leafHash: leafHash(invoice.hash),
+        inclusionProof,
+        integrityConsistent,
+        externalAnchor: {
+          status: batch.anchorStatus,
+          proof: batch.anchorProof,
+          ref: batch.anchorRef,
+          anchoredAt: batch.anchoredAt?.toISOString() ?? null,
+        },
+      };
+    }
+
     return {
       certificationId,
       number: invoice.number,
@@ -104,6 +195,7 @@ export class VerificationService {
       validatedByAdministration: invoice.validatedByAdministration,
       integrityValid,
       keyValidAtIssuance,
+      anchor,
     };
   }
 }

@@ -26,6 +26,7 @@ describe("AppModule — graphe de dépendances", () => {
     // Lot J3 — le job de rétention ne s'arme pas pendant le smoke (onModuleInit
     // n'est de toute façon pas appelé par .compile(), ceinture + bretelles).
     RETENTION_ENABLED: "false",
+    MERKLE_ANCHOR_ENABLED: "false",
   };
   const saved = new Map<string, string | undefined>();
 

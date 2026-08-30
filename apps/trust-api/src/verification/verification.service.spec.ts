@@ -15,10 +15,11 @@ function createFakeSigningKeyService(certification: StubEd25519CertificationServ
   };
 }
 
-function createFakePrisma(invoice: any) {
+function createFakePrisma(invoice: any, batchLeaves: { hash: string }[] = []) {
   return {
     invoice: {
       findUnique: vi.fn().mockResolvedValue(invoice),
+      findMany: vi.fn().mockResolvedValue(batchLeaves),
     },
   };
 }
@@ -51,6 +52,8 @@ function issueGenuineInvoice(certification: StubEd25519CertificationService, org
     hash: result.hash,
     signature: Buffer.from(result.signature, "hex"),
     organization: { name: "Boutique Aissatou", nif: organizationNif },
+    anchorBatchId: null as string | null,
+    anchorBatch: null as Record<string, unknown> | null,
   };
 }
 
@@ -262,5 +265,106 @@ describe("VerificationService — keyValidAtIssuance (A4, ADR-025)", () => {
     const result = await service.verifyByCertificationId(invoice.certificationId);
 
     expect(result.keyValidAtIssuance).toBe(false);
+  });
+
+  describe("preuve d'inclusion Merkle (E1, ADR-115)", () => {
+    it("anchor: null tant que la facture n'est pas scellée dans une tranche", async () => {
+      const certification = new StubEd25519CertificationService();
+      const invoice = issueGenuineInvoice(certification);
+      const prisma = createFakePrisma(invoice);
+      const service = new VerificationService(prisma as any, certification, {} as any);
+
+      const result = await service.verifyByCertificationId(invoice.certificationId);
+
+      expect(result.anchor).toBeNull();
+      expect(prisma.invoice.findMany).not.toHaveBeenCalled();
+    });
+
+    it("facture scellée : la preuve d'inclusion reconstruit la racine de la tranche", async () => {
+      const { buildInclusionProof, buildMerkleRoot, verifyInclusionProof } = await import(
+        "../certification/merkle-anchor/merkle"
+      );
+      const certification = new StubEd25519CertificationService();
+      const invoice = issueGenuineInvoice(certification);
+      // tranche = notre facture + 2 autres hashes
+      const other1 = "aa".repeat(32);
+      const other2 = "bb".repeat(32);
+      const leaves = [{ hash: invoice.hash }, { hash: other1 }, { hash: other2 }].sort((a, b) =>
+        a.hash.localeCompare(b.hash),
+      );
+      const merkleRoot = buildMerkleRoot(leaves.map((l) => l.hash));
+
+      invoice.anchorBatchId = "batch-1";
+      invoice.anchorBatch = {
+        id: "batch-1",
+        asOf: new Date("2026-08-08T10:00:00.000Z"),
+        coverageFrom: new Date("2026-08-08T08:15:00.000Z"),
+        merkleRoot,
+        previousRoot: "GENESIS",
+        leafCount: leaves.length,
+        anchorStatus: "pending",
+        anchorProof: null,
+        anchorRef: null,
+        anchoredAt: null,
+      };
+      const prisma = createFakePrisma(invoice, leaves);
+      const service = new VerificationService(prisma as any, certification, {} as any);
+
+      const result = await service.verifyByCertificationId(invoice.certificationId);
+
+      expect(result.anchor).not.toBeNull();
+      expect(result.anchor!.merkleRoot).toBe(merkleRoot);
+      expect(result.anchor!.previousRoot).toBe("GENESIS");
+      expect(result.anchor!.asOf).toBe("2026-08-08T10:00:00.000Z");
+      expect(result.anchor!.coverageFrom).toBe("2026-08-08T08:15:00.000Z");
+      expect(result.anchor!.leafCount).toBe(3);
+      // la racine reconstruite depuis les feuilles vivantes recolle avec merkleRoot immuable
+      expect(result.anchor!.integrityConsistent).toBe(true);
+      expect(result.anchor!.externalAnchor.status).toBe("pending");
+      expect(result.anchor!.externalAnchor.proof).toBeNull();
+      // round-trip : la preuve exposée reconstruit bien la racine
+      expect(
+        verifyInclusionProof(invoice.hash, result.anchor!.inclusionProof, result.anchor!.merkleRoot),
+      ).toBe(true);
+      // cohérence avec un calcul indépendant
+      expect(result.anchor!.inclusionProof).toEqual(
+        buildInclusionProof(leaves.map((l) => l.hash), invoice.hash),
+      );
+    });
+
+    it("integrityConsistent = false quand une facture-sœur de la tranche a divergé (feuille altérée)", async () => {
+      const { buildMerkleRoot } = await import("../certification/merkle-anchor/merkle");
+      const certification = new StubEd25519CertificationService();
+      const invoice = issueGenuineInvoice(certification);
+      const other1 = "aa".repeat(32);
+      const other2 = "bb".repeat(32);
+      const sealedLeaves = [invoice.hash, other1, other2].sort((a, b) => a.localeCompare(b));
+      const merkleRoot = buildMerkleRoot(sealedLeaves);
+
+      invoice.anchorBatchId = "batch-1";
+      invoice.anchorBatch = {
+        id: "batch-1",
+        asOf: new Date("2026-08-08T10:00:00.000Z"),
+        coverageFrom: new Date("2026-08-08T08:15:00.000Z"),
+        merkleRoot,
+        previousRoot: "GENESIS",
+        leafCount: 3,
+        anchorStatus: "pending",
+        anchorProof: null,
+        anchorRef: null,
+        anchoredAt: null,
+      };
+      // une feuille-sœur a changé en base depuis le scellement
+      const tamperedLeaves = [{ hash: invoice.hash }, { hash: "cc".repeat(32) }, { hash: other2 }].sort((a, b) =>
+        a.hash.localeCompare(b.hash),
+      );
+      const prisma = createFakePrisma(invoice, tamperedLeaves);
+      const service = new VerificationService(prisma as any, certification, {} as any);
+
+      const result = await service.verifyByCertificationId(invoice.certificationId);
+
+      expect(result.anchor!.integrityConsistent).toBe(false);
+      expect(result.anchor!.inclusionProof).toEqual([]);
+    });
   });
 });
