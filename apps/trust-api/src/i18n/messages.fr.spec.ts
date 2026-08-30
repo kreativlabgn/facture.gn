@@ -31,8 +31,8 @@ describe("messages.fr — wording figé", () => {
   });
 
   it("invitation membre", () => {
-    expect(fr["notification.memberInvite"]({ inviterName: "Aïssatou Barry" })).toBe(
-      "Aïssatou Barry vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.",
+    expect(fr["notification.memberInvite"]({ orgName: "Boutique Aïssatou" })).toBe(
+      "Boutique Aïssatou vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.",
     );
   });
 });

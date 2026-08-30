@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { Inject, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { PASSWORD_SERVICE } from "../auth/auth.tokens";
@@ -33,6 +33,8 @@ function generateOtpCode(): string {
 // l'OTP lui-même.
 @Injectable()
 export class ClientPortalOtpService {
+  private readonly logger = new Logger(ClientPortalOtpService.name);
+
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
@@ -70,11 +72,14 @@ export class ClientPortalOtpService {
       const customers = await this.prisma.customer.findMany({
         where: { phone: msisdn },
         select: { organization: { select: { preferredLanguage: true } } },
+        // Échantillon borné : au-delà de ~10 orgs pour un même numéro, la
+        // probabilité d'un consensus de langue est nulle → `fr` de toute façon.
         take: 10,
       });
       const locales = new Set(customers.map((c) => resolveLocale(c.organization.preferredLanguage)));
       return locales.size === 1 ? [...locales][0] : "fr";
-    } catch {
+    } catch (error) {
+      this.logger.debug(`Résolution de langue OTP échouée pour ${msisdn}, fallback fr : ${(error as Error).message}`);
       return "fr";
     }
   }

@@ -37,7 +37,18 @@ Nouveau `apps/trust-api/src/i18n/` — **fonctions pures, pas de module NestJS**
 - [ ] 1.5 `apps/trust-api/src/i18n/translate.ts` — `t<K extends MessageKey>(key: K, locale: Locale, params: MessagesParams[K]): string`.
 - [ ] 1.6 `apps/trust-api/src/i18n/index.ts` — ré-exports.
 
-> **✅ GROUPE 1 + GROUPE 2 LIVRÉS.** `apps/trust-api/src/i18n/` (locale, messages, translate) + 5 services câblés + call-sites. Tests : i18n (12) + garde de wording par service. Suite trust-api **1247 passed / 3 skipped**, couverture 92.8/94.0/82.9/92.8 (> seuils). money-api 112, db, audit-ci OK. tsc + eslint clean (0 nouveau warning). `pular` = stub vide → fallback fr runtime partout.
+> **✅ GROUPE 1 + GROUPE 2 LIVRÉS.** `apps/trust-api/src/i18n/` (locale, messages, translate) + 5 services câblés + call-sites. Suite trust-api **1249 passed / 3 skipped**, couverture 92.8/93.9/82.9/92.8 (> seuils). money-api 112, db, audit-ci OK. tsc + eslint clean (0 nouveau warning). `pular` = stub vide → fallback fr runtime partout.
+>
+> **Revues code + sécurité (sous-agents) → APPROUVÉ, 0 bloquant.** Correctifs appliqués :
+> - `t()` : `CATALOGS[locale] ?? fr` (durcissement défensif si locale hors typage).
+> - clé `notification.memberInvite` : param `inviterName` → `orgName` (c'est un nom d'organisation, pas de personne).
+> - `SUPPORTED_LOCALES` (export mort) retiré.
+> - `client-portal-otp.service` : `Logger` ajouté, `logger.debug` sur le catch de résolution de langue ; commentaire sur `take: 10`.
+> - Tests call-site avec org `pular` ajoutés (`invoices.service` : `notify` + `sendReminder`).
+>
+> **Backlog (dettes PRÉ-EXISTANTES mises en lumière, hors périmètre)** :
+> - **M1 smishing** : `organization.name` (contrôlé par un owner/admin) interpolé sans filtrage de caractères de contrôle en tête d'un SMS émis par le sender de confiance facture.gn, vers un `msisdn` librement choisi. Sanitiser `organization.name` (retrait `\n`/`\r`/contrôles) avant tout usage en notification.
+> - **F-LOG** : `SmsStubProvider.send()` logue le corps complet du SMS (dont le code OTP) en INFO. Le provider SMS réel Guinée ET le stub ne doivent jamais logger le body — a fortiori pour `clientPortalOtp`.
 
 ### Groupe 2 — câblage des 5 services (dépend du Groupe 1)
 - [ ] 2.1 `payment-link-notification.service.ts` — `notify(customer, url, totalGnf, locale: Locale = "fr")` → `t("notification.paymentLinkReady", locale, { amountGnf, url })`. Call-site `invoices.service.ts` (bloc notify après émission) : `resolveLocale(organization.preferredLanguage)` (`organization` déjà en scope, `transactionResult`).

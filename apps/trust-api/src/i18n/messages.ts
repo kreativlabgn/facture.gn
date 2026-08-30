@@ -8,7 +8,8 @@ export interface MessagesParams {
   "notification.paymentReminder": { invoiceNumber: string; amountGnf: string };
   "notification.clientPortalOtp": { code: string };
   "notification.pinChanged": Record<string, never>;
-  "notification.memberInvite": { inviterName: string };
+  // orgName : le nom de l'organisation (ou du cabinet) qui invite, pas d'une personne.
+  "notification.memberInvite": { orgName: string };
 }
 
 export type MessageKey = keyof MessagesParams;

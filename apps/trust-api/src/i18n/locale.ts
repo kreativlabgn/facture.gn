@@ -9,8 +9,6 @@ import type { PreferredLanguage } from "@facture-gn/db";
 // `malinke`/`soussou` retombent sur `fr` tant qu'aucun catalogue n'existe.
 export type Locale = "fr" | "pular";
 
-export const SUPPORTED_LOCALES: readonly Locale[] = ["fr", "pular"] as const;
-
 export function resolveLocale(preferred: PreferredLanguage | null | undefined): Locale {
   return preferred === "pular" ? "pular" : "fr";
 }

@@ -12,6 +12,6 @@ export const fr: MessageCatalog = {
   "notification.clientPortalOtp": ({ code }) => `Votre code facture.gn : ${code} (valable 5 minutes).`,
   "notification.pinChanged": () =>
     "Votre PIN facture.gn a été changé. Si ce n'est pas vous, contactez le support.",
-  "notification.memberInvite": ({ inviterName }) =>
-    `${inviterName} vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.`,
+  "notification.memberInvite": ({ orgName }) =>
+    `${orgName} vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.`,
 };

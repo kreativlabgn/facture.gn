@@ -16,8 +16,8 @@ describe("t (traduction)", () => {
     expect(t("notification.pinChanged", "fr", {})).toBe(
       "Votre PIN facture.gn a été changé. Si ce n'est pas vous, contactez le support.",
     );
-    expect(t("notification.memberInvite", "fr", { inviterName: "Aïssatou Barry" })).toBe(
-      "Aïssatou Barry vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.",
+    expect(t("notification.memberInvite", "fr", { orgName: "Boutique Aïssatou" })).toBe(
+      "Boutique Aïssatou vous invite à rejoindre facture.gn. Inscrivez-vous sur facture.gn pour accéder à votre espace.",
     );
   });
 

@@ -294,9 +294,9 @@ export class PendingMemberInviteService {
   // Best-effort — même garantie que PaymentReminderService.send()/
   // PaymentLinkNotificationService.notify() : ne lève jamais, la création de
   // l'invitation reste considérée réussie même si l'envoi effectif échoue.
-  private async notifyInvitee(msisdn: string, inviterName: string, locale: Locale = "fr"): Promise<void> {
+  private async notifyInvitee(msisdn: string, orgName: string, locale: Locale = "fr"): Promise<void> {
     try {
-      await this.smsProvider.send(msisdn, t("notification.memberInvite", locale, { inviterName }));
+      await this.smsProvider.send(msisdn, t("notification.memberInvite", locale, { orgName }));
     } catch {
       // best-effort, jamais couplé à la réussite de la création de l'invitation.
     }
