@@ -844,6 +844,14 @@ model Customer {
   // désormais la visibilité du client dans listReceivedInvoices()/validateLiquidation().
   isPublicEntityConfirmed Boolean @default(false) @map("is_public_entity_confirmed")
 
+  // J2, ADR-116 — horodatage d'une demande d'anonymisation honorée (L/2016/037).
+  // La ligne est CONSERVÉE (intégrité des factures — Invoice.customerId), seuls
+  // ses champs PII sont effacés (tombstone). Une ligne anonymisée est GELÉE : le
+  // dédoublonnage par téléphone l'ignore, merge()/flagPublicEntity()/
+  // proposeCreditLimit() la refusent. Anonymisation partielle (factures sous
+  // conservation OHADA) : name/nif conservés, contact effacé.
+  anonymizedAt DateTime? @map("anonymized_at")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   organization        Organization               @relation(fields: [organizationId], references: [id])
