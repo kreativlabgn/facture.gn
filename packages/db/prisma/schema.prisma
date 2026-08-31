@@ -1620,3 +1620,42 @@ model UssdSession {
   @@index([expiresAt])
   @@map("ussd_session")
 }
+
+// J2, ADR-116 — registre des demandes de droits des personnes (L/2016/037).
+// Preuve de responsabilité (accountability) opposable au régulateur PDP : toute
+// opération d'accès OU d'anonymisation écrit une ligne ici.
+// APPEND-ONLY en base (trigger data_rights_request_append_only, copie du pattern
+// invoice_event / J1) : UPDATE et DELETE rejetés (restrict_violation).
+// subjectPhoneHash = SHA-256 du msisdn normalisé — JAMAIS le numéro en clair.
+// organizationId nullable : le chemin ops plateforme traite des demandes
+// transverses (viaOps = true, requestedByUserId = null) → table CROSS-ORG, hors
+// RLS (comme merkle_anchor_batch / payment_webhook, cf. rls-rollout.md).
+model DataRightsRequest {
+  id                 String                    @id @default(uuid())
+  kind               DataRightsRequestKind
+  outcome            DataRightsRequestOutcome
+  subjectPhoneHash   String                    @map("subject_phone_hash")
+  // null = déclenché par l'ops plateforme (clé interne), pas un utilisateur.
+  requestedByUserId  String?                   @map("requested_by_user_id")
+  viaOps             Boolean                   @default(false) @map("via_ops")
+  // null = demande transverse (toutes organisations) via le chemin ops.
+  organizationId     String?                   @map("organization_id")
+  affectedCustomerIds String[]                 @map("affected_customer_ids")
+  note               String?
+  createdAt          DateTime                  @default(now()) @map("created_at")
+
+  @@index([subjectPhoneHash])
+  @@map("data_rights_request")
+}
+
+enum DataRightsRequestKind {
+  access
+  anonymization
+}
+
+enum DataRightsRequestOutcome {
+  completed
+  partial
+  refused_legal_retention
+  failed
+}
