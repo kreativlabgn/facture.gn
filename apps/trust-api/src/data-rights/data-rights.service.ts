@@ -7,6 +7,7 @@ import { CUSTOMER_NAME_TOMBSTONE, isRetainedInvoice, retentionExpiryOf } from ".
 import {
   hashMsisdn,
   normalizeMsisdn,
+  type SubjectAccountRecord,
   type SubjectDataExport,
   type SubjectCustomerRecord,
 } from "./subject-data";
@@ -130,7 +131,7 @@ export class DataRightsService {
     // seulement sur un numéro VÉRIFIÉ (verifiedAt) — même exigence d'identité que
     // le portail client (ADR-087/096). `select` explicite : passwordHash/pinHash
     // ne sont jamais chargés en mémoire.
-    let account = null;
+    let account: SubjectAccountRecord | null = null;
     if (viaOps) {
       const userPhone = await this.prisma.userPhone.findFirst({
         where: { msisdn: canonical, verifiedAt: { not: null } },
@@ -317,12 +318,14 @@ export class DataRightsService {
     customer: { id: string; anonymizedAt: Date | null; invoices: RetentionInvoiceRow[] },
   ): Promise<AnonymizationApplied> {
     if (customer.anonymizedAt) {
-      // No-op idempotent. `completed` reflète « la personne est anonymisée »,
-      // pas l'issue exacte du 1ᵉʳ passage (voir la ligne de registre d'origine).
+      // No-op idempotent — l'`outcome` reflète l'état réel du sujet (partiel si
+      // des factures sous conservation OHADA gardent name/nif), pas juste
+      // « traité ». Les factures sont déjà chargées, aucun coût.
+      const stillPartial = customer.invoices.some(isRetainedInvoice);
       return {
-        outcome: "completed",
+        outcome: stillPartial ? "partial" : "completed",
         note: `déjà anonymisé le ${customer.anonymizedAt.toISOString()} — rejeu no-op`,
-        retentionExpiry: null,
+        retentionExpiry: stillPartial ? retentionExpiryOf(customer.invoices) : null,
       };
     }
 

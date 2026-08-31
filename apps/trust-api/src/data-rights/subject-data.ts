@@ -43,8 +43,11 @@ export function normalizeMsisdn(raw: string): string {
  * retrouver le numéro depuis le hash exige le secret.
  */
 export function hashMsisdn(rawOrCanonical: string, pepper: string): string {
-  if (!pepper) {
-    throw new Error("hashMsisdn : pepper requis (DATA_RIGHTS_SUBJECT_HASH_PEPPER)");
+  // Même exigence que `format: "hexMin32"` de secrets.ts, revérifiée ici pour
+  // couvrir les environnements hors production (où le secret n'est que
+  // `requiredInProduction`) : jamais de pepper trop court.
+  if (!pepper || pepper.length < 32) {
+    throw new Error("hashMsisdn : pepper DATA_RIGHTS_SUBJECT_HASH_PEPPER requis (≥ 32 caractères)");
   }
   const canonical = normalizeMsisdn(rawOrCanonical);
   return bytesToHex(hmac(sha256, new TextEncoder().encode(pepper), new TextEncoder().encode(canonical)));

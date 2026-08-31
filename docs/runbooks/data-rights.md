@@ -93,23 +93,24 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
 
 ## 4. Lire le registre
 
-Le `subject_phone_hash` = `HMAC-SHA256(pepper, numéro normalisé)` : le calculer
-avec le pepper (jamais versionné) —
+Le `subject_phone_hash` = `HMAC-SHA256(pepper, numéro canonique)`.
+
+**⚠️ Ne jamais coller le pepper (ni le numéro) dans une requête SQL** : il
+fuiterait vers `pg_stat_statements`, `log_statement=all`, `~/.psql_history`.
+Calculer le hash **hors-bande** puis ne coller que le résultat :
+
+```bash
+# numéro CANONIQUE +224XXXXXXXX (voir subject-data.ts::normalizeMsisdn)
+node -e 'const{createHmac}=require("crypto");console.log(createHmac("sha256",process.env.DATA_RIGHTS_SUBJECT_HASH_PEPPER).update(process.argv[1]).digest("hex"))' '+224620001122'
+```
 
 ```sql
--- pgcrypto : hmac(data, key, type)
 SELECT kind, outcome, via_ops, organization_id, affected_customer_ids,
        note, created_at
 FROM data_rights_request
-WHERE subject_phone_hash = encode(
-        hmac('+224620001122', current_setting('app.data_rights_pepper'), 'sha256'),
-        'hex')
+WHERE subject_phone_hash = '<hash calculé ci-dessus>'
 ORDER BY created_at DESC;
 ```
-(Le numéro doit être sous forme **canonique** `+224XXXXXXXX` — voir
-`subject-data.ts::normalizeMsisdn`. Passer le pepper en session :
-`SET app.data_rights_pepper = '<valeur de DATA_RIGHTS_SUBJECT_HASH_PEPPER>';`
-avant la requête, ou l'inliner.)
 
 La table est **append-only** (trigger `data_rights_request_append_only`) :
 `UPDATE` / `DELETE` sont rejetés `restrict_violation`. C'est voulu — c'est la

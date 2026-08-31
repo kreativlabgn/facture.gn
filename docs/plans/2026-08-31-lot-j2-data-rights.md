@@ -1,5 +1,11 @@
 # Plan : Lot J2 — Droits des personnes (Loi L/2016/037/AN)
 
+> **Plan figé** (snapshot de conception). Deux décisions ont évolué en revue et
+> sont portées par `docs/architecture/adr-e2-data-rights.md` (ADR-116), qui fait
+> foi : `subject_phone_hash` = **HMAC keyed** (pas SHA-256 nu) et **nullable** ;
+> l'enum `DataRightsRequestOutcome` n'a **pas** de valeur `refused_legal_retention`
+> (`completed | partial | failed`).
+
 ## Contexte projet
 - **Module** : Platform Context (RBAC & audit) + Trust Context (données `Customer`/`User`). Nouveau sous-module `apps/trust-api/src/data-rights/`.
 - **Persona affecté** : le particulier (client d'une PME, **sans compte facture.gn** le plus souvent) ; l'owner/admin de la PME qui traite la demande pour son client ; un rôle **ops plateforme** (clé interne dédiée) pour les cas transverses multi-organisations.

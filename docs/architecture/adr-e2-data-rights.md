@@ -170,5 +170,10 @@ demande de hausse en attente créée avant l'anonymisation ré-écrirait
     alors une note « échéance indéterminée, à traiter manuellement » ;
   - `via_ops` est dérivé de `organization_id === null` côté service — pas de
     chemin qui produirait `via_ops = false` avec `requested_by_user_id = null`
-    aujourd'hui, mais l'invariant n'est pas contraint en base ;
+    aujourd'hui, mais l'invariant n'est pas contraint en base (un `CHECK` en
+    fast-follow, avec le hash-chaining) ;
+  - `anonymizeSubjectByPhone` lit la liste des `Customer` correspondants **hors
+    transaction** ; un client créé sur ce numéro entre ce `findMany` et la
+    transaction échappe à ce passage (rattrapé par un re-run ops — jamais une
+    fuite). Un verrou « phone global » en tête de transaction le fermerait ;
   - hash-chaining de `data_rights_request` (cf. §Écarté).

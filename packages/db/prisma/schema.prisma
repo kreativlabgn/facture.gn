@@ -1634,7 +1634,8 @@ model UssdSession {
 // opération d'accès OU d'anonymisation écrit une ligne ici.
 // APPEND-ONLY en base (trigger data_rights_request_append_only, copie du pattern
 // invoice_event / J1) : UPDATE et DELETE rejetés (restrict_violation).
-// subjectPhoneHash = SHA-256 du msisdn normalisé — JAMAIS le numéro en clair.
+// subjectPhoneHash = HMAC-SHA256(pepper, msisdn normalisé) — non réversible sans
+// le secret ; jamais le numéro en clair (voir le commentaire du champ).
 // organizationId nullable : le chemin ops plateforme traite des demandes
 // transverses (viaOps = true, requestedByUserId = null) → table CROSS-ORG, hors
 // RLS (comme merkle_anchor_batch / payment_webhook, cf. rls-rollout.md).

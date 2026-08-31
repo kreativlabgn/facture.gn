@@ -242,13 +242,6 @@ export class CustomersService {
       throw new ConflictException("Vous ne pouvez pas résoudre votre propre demande de hausse de limite de crédit");
     }
 
-    // J2, ADR-116 — une demande en attente peut avoir été créée AVANT
-    // l'anonymisation du client : l'approuver ré-écrirait `creditLimit` sur une
-    // ligne gelée, défaisant l'effacement. Refuser (le rejet reste possible).
-    if (decision === "approved") {
-      this.assertNotAnonymized(await this.prisma.customer.findUniqueOrThrow({ where: { id: request.customerId } }));
-    }
-
     const resolvedAt = new Date();
 
     return this.prisma.$transaction(async (tx) => {
@@ -261,6 +254,17 @@ export class CustomersService {
       }
 
       if (decision === "approved") {
+        // J2, ADR-116 — re-lu DANS la transaction : une demande en attente peut
+        // avoir été créée AVANT l'anonymisation du client, et l'anonymisation
+        // peut commiter entre le début de cette transaction et l'update.
+        // L'approuver ré-écrirait `creditLimit` sur une ligne gelée, défaisant
+        // l'effacement. Refuser (le rejet, lui, a déjà été posé ci-dessus).
+        this.assertNotAnonymized(
+          await tx.customer.findUniqueOrThrow({
+            where: { id: request.customerId },
+            select: { id: true, anonymizedAt: true },
+          }),
+        );
         await tx.customer.update({ where: { id: request.customerId }, data: { creditLimit: request.requestedLimit } });
       }
 

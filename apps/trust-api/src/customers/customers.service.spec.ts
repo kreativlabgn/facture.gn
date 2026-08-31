@@ -634,6 +634,11 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
       },
       customer: {
         update: vi.fn().mockResolvedValue({ id: "cust-1", creditLimit: 5_000_000n }),
+        // J2, ADR-116 — resolveCreditLimitRequest re-lit le client DANS la
+        // transaction avant d'approuver (refus si anonymisé).
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          opts.customer ?? { id: "cust-1", anonymizedAt: null },
+        ),
       },
     };
     return {
@@ -647,13 +652,6 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
             requestedLimit: 5_000_000n,
             status: "pending",
           },
-        ),
-      },
-      // J2, ADR-116 — resolveCreditLimitRequest re-lit le client avant d'approuver
-      // (refus si anonymisé).
-      customer: {
-        findUniqueOrThrow: vi.fn().mockResolvedValue(
-          opts.customer ?? { id: "cust-1", organizationId: "org-1", anonymizedAt: null },
         ),
       },
       $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
@@ -715,14 +713,14 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
   });
 
-  it("J2, ADR-116 — refuse d'APPROUVER une demande dont le client a été anonymisé entre-temps", async () => {
+  it("J2, ADR-116 — refuse d'APPROUVER une demande dont le client a été anonymisé (contrôle DANS la transaction, jamais de réécriture de creditLimit)", async () => {
     const prisma = createFakePrismaForResolve({
-      customer: { id: "cust-1", organizationId: "org-1", anonymizedAt: new Date("2026-08-15T00:00:00.000Z") },
+      customer: { id: "cust-1", anonymizedAt: new Date("2026-08-15T00:00:00.000Z") },
     });
     const service = new CustomersService(prisma as any);
 
     await expect(service.resolveCreditLimitRequest("clcr-1", "user-2", "approved")).rejects.toThrow(/anonymisé/i);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
   });
 
   it("J2, ADR-116 — un REJET reste possible même si le client est anonymisé", async () => {
