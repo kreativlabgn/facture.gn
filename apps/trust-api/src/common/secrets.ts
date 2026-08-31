@@ -119,5 +119,7 @@ export const TRUST_API_SECRETS: readonly SecretSpec[] = [
   { name: "DGI_VERIFICATION_INTERNAL_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "déclenche POST /organizations/:id/verify-dgi (B2)" },
   { name: "COMMERCIAL_AGENT_GRANT_INTERNAL_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "octroi M2M du statut agent commercial terrain (B5, ADR-045)" },
   { name: "COMMISSION_BYPASS_REVIEW_INTERNAL_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "outil interne Squad Money — cas de contournement de commission (G3, ADR-091)" },
+  { name: "DATA_RIGHTS_INTERNAL_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "chemin ops plateforme des droits des personnes — accès/anonymisation transverses (J2, ADR-116)" },
+  { name: "DATA_RIGHTS_SUBJECT_HASH_PEPPER", required: false, requiredInProduction: true, format: "hexMin32", purpose: "pepper HMAC du subject_phone_hash du registre data_rights_request — sans lui le hash d'un MSISDN est réversible (J2, ADR-116)" },
   { name: "APIP_WEBHOOK_SECRET", required: false, requiredInProduction: true, format: "hexMin32", purpose: "clé + secret HMAC du webhook partenaire APIP (F11, ADR-082)" },
 ];
