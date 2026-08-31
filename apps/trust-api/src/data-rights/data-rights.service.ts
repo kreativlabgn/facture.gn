@@ -1,14 +1,35 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 
-import type { PrismaClient } from "@facture-gn/db";
+import type { DataRightsRequestOutcome, Prisma, PrismaClient } from "@facture-gn/db";
 
 import { PRISMA_CLIENT } from "../common/prisma.module";
+import { CUSTOMER_NAME_TOMBSTONE, isRetainedInvoice, retentionExpiryOf } from "./anonymization";
 import {
   hashMsisdn,
   normalizeMsisdn,
   type SubjectDataExport,
   type SubjectCustomerRecord,
 } from "./subject-data";
+
+type TxClient = Prisma.TransactionClient;
+
+interface AnonymizationApplied {
+  outcome: Extract<DataRightsRequestOutcome, "completed" | "partial">;
+  note: string | null;
+  retentionExpiry: Date | null;
+}
+
+export interface AnonymizationResult {
+  outcome: DataRightsRequestOutcome;
+  retentionExpiry: Date | null;
+  affectedCustomerIds: string[];
+}
+
+const ANONYMIZED_INVOICE_SELECT = {
+  documentType: true,
+  status: true,
+  issuedAt: true,
+} as const;
 
 // J2, ADR-116 — droit d'accès (export) et droit à l'effacement (anonymisation).
 // Le service fait ses propres requêtes Prisma (aucune dépendance vers
@@ -113,6 +134,174 @@ export class DataRightsService {
       scope: viaOps ? "platform" : "organization",
       customers: customerRecords,
       account,
+    };
+  }
+
+  /**
+   * Anonymise UN client par son id (chemin PME). Une transaction :
+   * verrou consultatif sur la clé de dédoublonnage (`customer:org:phone`, la même
+   * que `CustomersService.create()`), puis effacement des colonnes PII, puis
+   * écriture du registre — le tout atomique.
+   */
+  async anonymizeCustomerById(
+    customerId: string,
+    ctx: { requestedByUserId: string | null; viaOps: boolean },
+  ): Promise<AnonymizationResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findUnique({
+        where: { id: customerId },
+        include: { invoices: { select: ANONYMIZED_INVOICE_SELECT } },
+      });
+      if (!customer) {
+        // Pas de téléphone → pas de subject_phone_hash à écrire. On renvoie
+        // simplement l'échec (l'appelant traduit en 404 si besoin).
+        return { outcome: "failed" as const, retentionExpiry: null, affectedCustomerIds: [] };
+      }
+
+      await this.lockDedupKey(tx, customer.organizationId, customer.phone);
+      const applied = await this.applyAnonymization(tx, customer);
+
+      await tx.dataRightsRequest.create({
+        data: {
+          kind: "anonymization",
+          outcome: applied.outcome,
+          subjectPhoneHash: customer.phone ? hashMsisdn(customer.phone) : "unknown",
+          requestedByUserId: ctx.requestedByUserId,
+          viaOps: ctx.viaOps,
+          organizationId: customer.organizationId,
+          affectedCustomerIds: [customer.id],
+          note: applied.note,
+        },
+      });
+
+      return { outcome: applied.outcome, retentionExpiry: applied.retentionExpiry, affectedCustomerIds: [customer.id] };
+    });
+  }
+
+  /**
+   * Anonymise TOUS les clients d'un numéro (chemin ops plateforme, transverse ou
+   * scopé). Une transaction, un seul enregistrement de registre agrégé.
+   */
+  async anonymizeSubjectByPhone(params: {
+    phone: string;
+    organizationId: string | null;
+    requestedByUserId?: string;
+  }): Promise<AnonymizationResult> {
+    const canonical = this.toCanonical(params.phone);
+    const subjectPhoneHash = hashMsisdn(canonical);
+    const viaOps = params.organizationId === null;
+
+    const matches = await this.prisma.customer.findMany({
+      where: {
+        phone: canonical,
+        ...(params.organizationId ? { organizationId: params.organizationId } : {}),
+      },
+      select: { id: true },
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      const outcomes: AnonymizationApplied["outcome"][] = [];
+      const affectedCustomerIds: string[] = [];
+      let retentionExpiry: Date | null = null;
+
+      for (const { id } of matches) {
+        const customer = await tx.customer.findUnique({
+          where: { id },
+          include: { invoices: { select: ANONYMIZED_INVOICE_SELECT } },
+        });
+        if (!customer) continue;
+        await this.lockDedupKey(tx, customer.organizationId, customer.phone);
+        const applied = await this.applyAnonymization(tx, customer);
+        outcomes.push(applied.outcome);
+        affectedCustomerIds.push(id);
+        if (applied.retentionExpiry && (!retentionExpiry || applied.retentionExpiry > retentionExpiry)) {
+          retentionExpiry = applied.retentionExpiry;
+        }
+      }
+
+      const outcome: DataRightsRequestOutcome =
+        affectedCustomerIds.length === 0
+          ? "failed"
+          : outcomes.includes("partial")
+            ? "partial"
+            : "completed";
+
+      await tx.dataRightsRequest.create({
+        data: {
+          kind: "anonymization",
+          outcome,
+          subjectPhoneHash,
+          requestedByUserId: params.requestedByUserId ?? null,
+          viaOps,
+          organizationId: params.organizationId,
+          affectedCustomerIds,
+          note: retentionExpiry ? `name/nif conservés jusqu'à ${retentionExpiry.toISOString()}` : null,
+        },
+      });
+
+      return { outcome, retentionExpiry, affectedCustomerIds };
+    });
+  }
+
+  private async lockDedupKey(tx: TxClient, organizationId: string, phone: string | null): Promise<void> {
+    // Même clé que CustomersService.create() / importCustomers() (E3) : sérialise
+    // l'anonymisation contre une (re)création concurrente sur le même téléphone.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${organizationId}:${phone ?? ""}`}))`;
+  }
+
+  private async applyAnonymization(
+    tx: TxClient,
+    customer: {
+      id: string;
+      anonymizedAt: Date | null;
+      invoices: { documentType: string; status: string; issuedAt: Date | null }[];
+    },
+  ): Promise<AnonymizationApplied> {
+    if (customer.anonymizedAt) {
+      return {
+        outcome: "completed",
+        note: `déjà anonymisé le ${customer.anonymizedAt.toISOString()}`,
+        retentionExpiry: null,
+      };
+    }
+
+    const now = new Date();
+    const hasRetainedInvoices = customer.invoices.some(isRetainedInvoice);
+
+    if (!hasRetainedInvoices) {
+      // Anonymisation COMPLÈTE — aucune obligation de conservation.
+      await tx.customer.update({
+        where: { id: customer.id },
+        data: {
+          name: CUSTOMER_NAME_TOMBSTONE,
+          phone: null,
+          nif: null,
+          creditLimit: null,
+          possibleDuplicateOf: null,
+          notificationChannel: "sms",
+          anonymizedAt: now,
+        },
+      });
+      return { outcome: "completed", note: null, retentionExpiry: null };
+    }
+
+    // Anonymisation PARTIELLE — name + nif portés par des factures légales
+    // (OHADA Art. 23), conservés ; tout le reste effacé.
+    const retentionExpiry = retentionExpiryOf(customer.invoices);
+    await tx.customer.update({
+      where: { id: customer.id },
+      data: {
+        phone: null,
+        creditLimit: null,
+        possibleDuplicateOf: null,
+        notificationChannel: "sms",
+        anonymizedAt: now,
+      },
+    });
+    return {
+      outcome: "partial",
+      note: `name/nif conservés jusqu'à ${retentionExpiry?.toISOString() ?? "échéance inconnue"}`,
+      retentionExpiry,
     };
   }
 }

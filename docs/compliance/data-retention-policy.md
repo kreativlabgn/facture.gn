@@ -92,7 +92,7 @@ possible. Aucun `DISABLE TRIGGER` sur `invoice_event`.
 | Droit (L/2016/037) | État après Lot J2 |
 |---|---|
 | **Accès / portabilité** | ✅ `POST /customers/data-rights/export` (PME, scopé) et `POST /internal/data-rights/export` (ops, transverse) — dossier PII structuré en JSON |
-| **Effacement / anonymisation** | ✅ `POST /customers/:id/anonymize` (PME) et `POST /internal/data-rights/anonymize` (ops, par téléphone, transverse) — complète ou partielle (§4) |
+| **Effacement / anonymisation** | ✅ `POST /customers/data-rights/:id/anonymize` (PME) et `POST /internal/data-rights/anonymize` (ops, par téléphone, transverse) — complète ou partielle (§4) |
 | **Rectification** | ⚠️ **Gap** — il n'existe aujourd'hui **aucun endpoint de modification** d'un `Customer` (le contrôleur n'expose que create / import / get / merge / flag / credit-limit). Une rectification passe par une intervention ops directe. À combler dans un lot ultérieur. |
 | **Opposition** | ⚠️ **Partiel** — `customer.notification_channel` permet de choisir le canal mais pas de s'opposer à toute notification. Un opt-out complet (ne plus jamais notifier) n'est pas modélisé. À combler. |
 

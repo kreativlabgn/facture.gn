@@ -22,4 +22,11 @@ export class InternalDataRightsController {
   export(@Body(new ZodValidationPipe(opsSubjectSchema)) dto: OpsSubjectDto) {
     return this.dataRights.exportSubjectData({ phone: dto.phone, organizationId: null });
   }
+
+  @Post("anonymize")
+  @Public()
+  @UseGuards(DataRightsInternalAuthGuard)
+  anonymize(@Body(new ZodValidationPipe(opsSubjectSchema)) dto: OpsSubjectDto) {
+    return this.dataRights.anonymizeSubjectByPhone({ phone: dto.phone, organizationId: null });
+  }
 }

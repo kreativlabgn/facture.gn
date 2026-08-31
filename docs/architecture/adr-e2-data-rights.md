@@ -74,7 +74,7 @@ C'est la preuve de responsabilité (accountability) opposable au régulateur PDP
 
 | Chemin | Endpoint | Auth | Portée |
 |---|---|---|---|
-| PME | `POST /customers/data-rights/export`, `POST /customers/:id/anonymize` | JWT, `@Roles("owner","admin")` | `organization_id` de l'appelant |
+| PME | `POST /customers/data-rights/export`, `POST /customers/data-rights/:id/anonymize` | JWT, `@Roles("owner","admin")` | `organization_id` de l'appelant |
 | Ops plateforme | `POST /internal/data-rights/export`, `POST /internal/data-rights/anonymize` | guard `DATA_RIGHTS_INTERNAL_KEY` (secret dédié, `secrets.ts`) | transverse (toutes organisations) |
 
 Le chemin ops est nécessaire : un particulier peut être client de plusieurs PME,

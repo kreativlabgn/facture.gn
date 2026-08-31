@@ -9,11 +9,11 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
 | Opération | Chemin PME (owner/admin) | Chemin ops plateforme |
 |---|---|---|
 | Accès (export) | `POST /customers/data-rights/export` `{ phone }` | `POST /internal/data-rights/export` `{ phone }` |
-| Anonymisation | `POST /customers/:id/anonymize` | `POST /internal/data-rights/anonymize` `{ phone }` |
+| Anonymisation | `POST /customers/data-rights/:id/anonymize` | `POST /internal/data-rights/anonymize` `{ phone }` |
 
 - Chemin PME : JWT, `@Roles("owner","admin")`, **scopé à l'organisation de
   l'appelant**.
-- Chemin ops : header `x-internal-key: $DATA_RIGHTS_INTERNAL_KEY` (secret dédié,
+- Chemin ops : header `x-internal-api-key: $DATA_RIGHTS_INTERNAL_KEY` (secret dédié,
   `secrets.ts`, `requiredInProduction`), **transverse** (toutes organisations).
 - Chaque appel écrit une ligne **immuable** dans `data_rights_request`
   (`subject_phone_hash` = SHA-256 du numéro normalisé, jamais le numéro en clair).
@@ -29,7 +29,7 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
    inconnue → chemin ops :
    ```
    curl -sS -X POST https://<host>/internal/data-rights/export \
-     -H "x-internal-key: $DATA_RIGHTS_INTERNAL_KEY" \
+     -H "x-internal-api-key: $DATA_RIGHTS_INTERNAL_KEY" \
      -H "content-type: application/json" \
      -d '{"phone":"+224620001122"}'
    ```
@@ -46,11 +46,11 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
 2. Chemin ops (recommandé pour couvrir toutes les PME) :
    ```
    curl -sS -X POST https://<host>/internal/data-rights/anonymize \
-     -H "x-internal-key: $DATA_RIGHTS_INTERNAL_KEY" \
+     -H "x-internal-api-key: $DATA_RIGHTS_INTERNAL_KEY" \
      -H "content-type: application/json" \
      -d '{"phone":"+224620001122"}'
    ```
-   ou chemin PME : `POST /customers/:id/anonymize` (l'owner/admin agit sur un de
+   ou chemin PME : `POST /customers/data-rights/:id/anonymize` (l'owner/admin agit sur un de
    ses clients).
 3. Résultat par `Customer` :
    - **`completed`** — aucune facture sous conservation : `name` → `"Client

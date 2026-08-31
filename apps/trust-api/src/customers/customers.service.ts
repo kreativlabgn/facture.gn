@@ -18,6 +18,14 @@ const MAX_LIST_PAGE_SIZE = 100;
 export class CustomersService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
+  // J2, ADR-116 — une ligne client anonymisée est GELÉE : plus aucune opération
+  // métier (fusion, marquage entité publique, limite de crédit) ne s'y applique.
+  private assertNotAnonymized(customer: { id: string; anonymizedAt: Date | null }): void {
+    if (customer.anonymizedAt) {
+      throw new ConflictException(`Client ${customer.id} anonymisé (L/2016/037) — opération impossible`);
+    }
+  }
+
   // Sélecteur client (émission de facture) + section "liste des clients"
   // (dashboard) — même plafonnement défensif que InvoicesService.findAllByOrganization,
   // aucun endpoint de liste n'existait jusqu'ici (seul findOne() par id).
@@ -66,7 +74,9 @@ export class CustomersService {
 
       const existingMatch = dto.phone
         ? await tx.customer.findFirst({
-            where: { organizationId: dto.organizationId, phone: dto.phone },
+            // J2, ADR-116 — une ligne anonymisée est GELÉE : jamais un candidat
+            // de dédoublonnage, jamais une cible de possibleDuplicateOf.
+            where: { organizationId: dto.organizationId, phone: dto.phone, anonymizedAt: null },
           })
         : null;
 
@@ -118,6 +128,7 @@ export class CustomersService {
     if (!publicBuyerAccount) {
       throw new NotFoundException(`Compte acheteur public ${publicBuyerAccountId} introuvable`);
     }
+    this.assertNotAnonymized(await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } }));
 
     // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed toujours
     // remis à false ici, même en cas de re-pointage vers un autre compte : la
@@ -160,6 +171,8 @@ export class CustomersService {
     if (!duplicate || duplicate.organizationId !== canonical.organizationId) {
       throw new ConflictException(`Client ${duplicateCustomerId} introuvable pour cette organisation`);
     }
+    this.assertNotAnonymized(canonical);
+    this.assertNotAnonymized(duplicate);
 
     // H1, Grille §2 — "gestion client avancée" (merge doublons + credit_limit)
     // dépend structurellement du rôle approver (ADR-083, Pro+ uniquement).
@@ -188,6 +201,7 @@ export class CustomersService {
   // déclenche la mise en attente, jamais l'égalité au seuil lui-même.
   async proposeCreditLimit(customerId: string, newLimit: bigint, requestedByUserId: string) {
     const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+    this.assertNotAnonymized(customer);
     const organization = await this.prisma.organization.findUniqueOrThrow({
       where: { id: customer.organizationId },
     });
@@ -277,7 +291,8 @@ export class CustomersService {
     const existingMatches =
       phonesInPayload.size > 0
         ? await this.prisma.customer.findMany({
-            where: { organizationId, phone: { in: [...phonesInPayload] } },
+            // J2, ADR-116 — exclut les lignes anonymisées (gelées) du dédoublonnage.
+            where: { organizationId, phone: { in: [...phonesInPayload] }, anonymizedAt: null },
           })
         : [];
     const phoneToExistingCustomerId = new Map(

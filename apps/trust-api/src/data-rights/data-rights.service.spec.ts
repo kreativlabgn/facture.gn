@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { CUSTOMER_NAME_TOMBSTONE } from "./anonymization";
 import { DataRightsService } from "./data-rights.service";
 import { hashMsisdn } from "./subject-data";
 
@@ -170,5 +171,167 @@ describe("DataRightsService.exportSubjectData", () => {
     );
     expect(prisma.customer.findMany).not.toHaveBeenCalled();
     expect(prisma.dataRightsRequest.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── Anonymisation ──────────────────────────────────────────────────────────
+
+function anonCustomer(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "cus-1",
+    organizationId: "org-1",
+    name: "Aïssatou Diallo",
+    phone: PHONE,
+    nif: "GN99887766",
+    creditLimit: 500_000n,
+    possibleDuplicateOf: "cus-0",
+    anonymizedAt: null,
+    invoices: [] as { documentType: string; status: string; issuedAt: Date | null }[],
+    ...over,
+  };
+}
+
+function buildAnon(customer: ReturnType<typeof anonCustomer>) {
+  const tx: any = {
+    $queryRaw: vi.fn().mockResolvedValue([{ pg_advisory_xact_lock: "" }]),
+    customer: {
+      findUnique: vi.fn().mockResolvedValue(customer),
+      update: vi.fn((args: any) => Promise.resolve({ ...customer, ...args.data })),
+    },
+    dataRightsRequest: { create: vi.fn((args: any) => Promise.resolve({ id: "drr-1", ...args.data })) },
+  };
+  const prisma: any = {
+    $transaction: vi.fn((cb: any) => cb(tx)),
+    customer: { findMany: vi.fn().mockResolvedValue([customer]) },
+    dataRightsRequest: tx.dataRightsRequest,
+  };
+  const service = new DataRightsService(prisma as never);
+  return { service, prisma, tx };
+}
+
+describe("DataRightsService.anonymizeCustomerById", () => {
+  it("aucune facture conservée → anonymisation COMPLÈTE (name tombstone, phone/nif/creditLimit/dup nuls)", async () => {
+    const { service, tx } = buildAnon(anonCustomer({ invoices: [{ documentType: "invoice", status: "draft", issuedAt: new Date() }] }));
+
+    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+
+    expect(result.outcome).toBe("completed");
+    expect(tx.customer.update).toHaveBeenCalledWith({
+      where: { id: "cus-1" },
+      data: expect.objectContaining({
+        name: CUSTOMER_NAME_TOMBSTONE,
+        phone: null,
+        nif: null,
+        creditLimit: null,
+        possibleDuplicateOf: null,
+        notificationChannel: "sms",
+        anonymizedAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it("≥1 facture issued → anonymisation PARTIELLE (name + nif conservés, contact effacé, échéance dans note)", async () => {
+    const { service, tx } = buildAnon(
+      anonCustomer({
+        invoices: [{ documentType: "invoice", status: "issued", issuedAt: new Date("2027-01-05T09:00:00.000Z") }],
+      }),
+    );
+
+    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+
+    expect(result.outcome).toBe("partial");
+    const updateData = tx.customer.update.mock.calls[0][0].data;
+    expect(updateData).not.toHaveProperty("name");
+    expect(updateData).not.toHaveProperty("nif");
+    expect(updateData).toMatchObject({ phone: null, creditLimit: null, possibleDuplicateOf: null, anonymizedAt: expect.any(Date) });
+    const drr = tx.dataRightsRequest.create.mock.calls[0][0].data;
+    expect(drr).toMatchObject({ kind: "anonymization", outcome: "partial" });
+    expect(drr.note).toContain("2037-01-05");
+  });
+
+  it("client déjà anonymisé → no-op idempotent, aucune 2e écriture de PII", async () => {
+    const { service, tx } = buildAnon(anonCustomer({ anonymizedAt: new Date("2026-08-01T00:00:00.000Z") }));
+
+    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+
+    expect(result.outcome).toBe("completed");
+    expect(tx.customer.update).not.toHaveBeenCalled();
+    expect(tx.dataRightsRequest.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ kind: "anonymization", note: expect.stringMatching(/déjà anonymisé/i) }),
+    });
+  });
+
+  it("prend le verrou consultatif sur la clé customer:org:phone avant de lire les factures", async () => {
+    const { service, tx } = buildAnon(anonCustomer());
+
+    await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    const lockCallOrder = tx.$queryRaw.mock.invocationCallOrder[0];
+    const updateCallOrder = tx.customer.update.mock.invocationCallOrder[0];
+    expect(lockCallOrder).toBeLessThan(updateCallOrder);
+  });
+
+  it("client introuvable → outcome failed, pas de rejet brut", async () => {
+    const { service, tx } = buildAnon(anonCustomer());
+    tx.customer.findUnique.mockResolvedValue(null);
+
+    const result = await service.anonymizeCustomerById("cus-404", { requestedByUserId: "usr-1", viaOps: false });
+
+    expect(result.outcome).toBe("failed");
+  });
+
+  it("registre : affectedCustomerIds contient l'id anonymisé + hash du téléphone", async () => {
+    const { service, tx } = buildAnon(anonCustomer());
+
+    await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+
+    expect(tx.dataRightsRequest.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        affectedCustomerIds: ["cus-1"],
+        subjectPhoneHash: HASH,
+        organizationId: "org-1",
+        viaOps: false,
+      }),
+    });
+  });
+});
+
+describe("DataRightsService.anonymizeSubjectByPhone (chemin ops, transverse)", () => {
+  it("anonymise tous les clients du numéro et agrège en UN seul registre (partial si au moins un partiel)", async () => {
+    const c1 = anonCustomer({ id: "cus-a", organizationId: "org-a", invoices: [] });
+    const c2 = anonCustomer({
+      id: "cus-b",
+      organizationId: "org-b",
+      invoices: [{ documentType: "invoice", status: "paid", issuedAt: new Date("2026-06-01T00:00:00.000Z") }],
+    });
+    const tx: any = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      customer: {
+        findUnique: vi.fn((args: any) => Promise.resolve(args.where.id === "cus-a" ? c1 : c2)),
+        update: vi.fn((args: any) => Promise.resolve({ ...args.data })),
+      },
+      dataRightsRequest: { create: vi.fn((args: any) => Promise.resolve({ id: "drr", ...args.data })) },
+    };
+    const prisma: any = {
+      $transaction: vi.fn((cb: any) => cb(tx)),
+      customer: { findMany: vi.fn().mockResolvedValue([c1, c2]) },
+    };
+    const service = new DataRightsService(prisma as never);
+
+    const result = await service.anonymizeSubjectByPhone({ phone: PHONE, organizationId: null });
+
+    expect(result.outcome).toBe("partial");
+    expect(result.affectedCustomerIds.sort()).toEqual(["cus-a", "cus-b"]);
+    expect(tx.dataRightsRequest.create).toHaveBeenCalledTimes(1);
+    expect(tx.dataRightsRequest.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "anonymization",
+        outcome: "partial",
+        affectedCustomerIds: expect.arrayContaining(["cus-a", "cus-b"]),
+        viaOps: true,
+        organizationId: null,
+      }),
+    });
   });
 });

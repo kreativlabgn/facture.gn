@@ -139,7 +139,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
     } as any);
 
     expect(prisma.customer.findFirst).toHaveBeenCalledWith({
-      where: { organizationId: "org-1", phone: "+224622334455" },
+      where: { organizationId: "org-1", phone: "+224622334455", anonymizedAt: null },
     });
     expect(prisma.customer.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ possibleDuplicateOf: "cust-existant" }),
@@ -480,7 +480,11 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
         findUnique: vi.fn().mockResolvedValue({ id: "pba-1", name: "Ministère des Finances" }),
         ...overrides.publicBuyerAccount,
       },
-      customer: { update: vi.fn() }, // jamais appelé directement — uniquement via tx, voir assertions ci-dessous
+      customer: {
+        update: vi.fn(), // jamais appelé directement — uniquement via tx, voir assertions ci-dessous
+        // J2, ADR-116 — flagPublicEntity() pré-lit le client pour refuser une ligne anonymisée.
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: null }),
+      },
       $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
       __tx: tx,
     };
@@ -830,5 +834,101 @@ describe("findAllByOrganization", () => {
     await service.findAllByOrganization("org-1", { take: 500 });
 
     expect(prisma.customer.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+  });
+});
+
+describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
+  it("le dédoublonnage unitaire ignore les lignes anonymisées (anonymizedAt: null dans le where)", async () => {
+    const prisma: any = {
+      $transaction: vi.fn((cb: any) => cb(prisma)),
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      customer: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cust-new", ...data })),
+      },
+    };
+    const service = new CustomersService(prisma as any);
+
+    await service.create({ organizationId: "org-1", name: "Aïcha", phone: "+224620001122" } as any);
+
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", phone: "+224620001122", anonymizedAt: null },
+    });
+  });
+
+  it("le dédoublonnage à l'import ignore les lignes anonymisées", async () => {
+    const prisma: any = {
+      customer: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cust-x", ...data })),
+      },
+    };
+    const service = new CustomersService(prisma as any);
+
+    await service.importCustomers("org-1", [{ name: "Sory", phone: "+224622334455" }]);
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", phone: { in: ["+224622334455"] }, anonymizedAt: null },
+    });
+  });
+
+  it("merge() refuse un client canonique anonymisé", async () => {
+    const prisma: any = {
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: new Date() }),
+        findUnique: vi.fn().mockResolvedValue({ id: "cust-2", organizationId: "org-1", anonymizedAt: null }),
+      },
+      $transaction: vi.fn(),
+    };
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(/anonymisé/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("merge() refuse un doublon anonymisé", async () => {
+    const prisma: any = {
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: null }),
+        findUnique: vi.fn().mockResolvedValue({ id: "cust-2", organizationId: "org-1", anonymizedAt: new Date() }),
+      },
+      $transaction: vi.fn(),
+    };
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(/anonymisé/i);
+  });
+
+  it("flagPublicEntity() refuse un client anonymisé", async () => {
+    const prisma: any = {
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: new Date() }),
+      },
+      publicBuyerAccount: { findUnique: vi.fn().mockResolvedValue({ id: "pba-1" }) },
+      $transaction: vi.fn(),
+    };
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.flagPublicEntity("cust-1", "pba-1")).rejects.toThrow(/anonymisé/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("proposeCreditLimit() refuse un client anonymisé", async () => {
+    const prisma: any = {
+      customer: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "cust-1",
+          organizationId: "org-1",
+          creditLimit: null,
+          anonymizedAt: new Date(),
+        }),
+      },
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }),
+      },
+    };
+    const service = new CustomersService(prisma as any);
+
+    await expect(service.proposeCreditLimit("cust-1", 2_000_000n, "user-1")).rejects.toThrow(/anonymisé/i);
   });
 });
