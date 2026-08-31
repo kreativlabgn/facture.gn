@@ -183,3 +183,13 @@ signale un bug ou un probing).
   `IS NULL OR`**, la purge serait silencieusement neutralisée (`deleteMany`
   count 0, aucune erreur) : prévoir alors un rôle/bypass dédié pour le job de
   rétention, et surveiller `trust_api_retention_rows_deleted_total`.
+- `data_rights_request` (J2) est **cross-organisation** : le chemin ops plateforme
+  (`POST /internal/data-rights/*`) écrit des lignes `organization_id IS NULL`
+  (demande transverse) → **jamais** de politique RLS dessus, comme
+  `merkle_anchor_batch` / `payment_webhook`. La table est append-only (trigger
+  `data_rights_request_append_only`, pattern J1). L'anonymisation `Customer` de
+  J2, elle, écrit sur `customer` (déjà scopé org) via le `PrismaClient` NON scopé
+  du service `DataRightsService` — même posture que la rétention ci-dessus, et
+  l'étape 5 (`REVOKE UPDATE, DELETE, TRUNCATE … FROM facture_app`) devra **exclure
+  `customer`** de son `UPDATE` (l'anonymisation est un `UPDATE` légitime), ou
+  passer par un rôle dédié.
