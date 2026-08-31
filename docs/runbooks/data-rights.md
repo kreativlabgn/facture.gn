@@ -16,7 +16,8 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
 - Chemin ops : header `x-internal-api-key: $DATA_RIGHTS_INTERNAL_KEY` (secret dédié,
   `secrets.ts`, `requiredInProduction`), **transverse** (toutes organisations).
 - Chaque appel écrit une ligne **immuable** dans `data_rights_request`
-  (`subject_phone_hash` = SHA-256 du numéro normalisé, jamais le numéro en clair).
+  (`subject_phone_hash` = **HMAC-SHA256(`DATA_RIGHTS_SUBJECT_HASH_PEPPER`, numéro
+  normalisé)**, hex — jamais le numéro en clair, non réversible sans le pepper).
 
 ## 1. Demande d'accès
 
@@ -24,9 +25,11 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
    contrôle du numéro). Le service **ne vérifie pas** l'identité : il faut
    s'assurer en amont que le demandeur est bien le titulaire du numéro.
 2. Si la personne est cliente **d'une seule PME connue** → demander à cette PME
-   d'appeler `POST /customers/data-rights/export`.
-3. Si la personne est (ou peut être) cliente **de plusieurs PME**, ou identité
-   inconnue → chemin ops :
+   d'appeler `POST /customers/data-rights/export` (le numéro doit correspondre à
+   ≥ 1 client de son organisation, sinon `404`). Renvoie **uniquement** les
+   `Customer` de cette organisation — jamais le bloc compte `User`.
+3. Si la personne est (ou peut être) cliente **de plusieurs PME**, si elle a un
+   **compte facture.gn**, ou identité inconnue → chemin ops :
    ```
    curl -sS -X POST https://<host>/internal/data-rights/export \
      -H "x-internal-api-key: $DATA_RIGHTS_INTERNAL_KEY" \
@@ -36,8 +39,10 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
 4. Le JSON retourné contient : pour chaque `Customer` correspondant, ses champs +
    la **liste de ses factures en métadonnées** (`number`, `certificationId`,
    `documentType`, `status`, `issuedAt`, `totalTtc`, `disputeStatus` — jamais les
-   lignes de facture, qui appartiennent à la PME) ; le bloc `User`/`UserPhone` si
-   le numéro correspond à un compte (jamais `passwordHash`/`pinHash`).
+   lignes de facture, qui appartiennent à la PME). **Sur le chemin ops
+   uniquement** : le bloc `account` (`User`) si le numéro correspond à un
+   `UserPhone` **vérifié** — nom, langue, liste des numéros ; jamais
+   `passwordHash`/`pinHash`.
 5. Transmettre au demandeur. **Ne jamais logger le corps de la réponse.**
 
 ## 2. Demande d'anonymisation
@@ -68,7 +73,11 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
    ont été effacées. »
 5. Une ligne `customer` anonymisée est **gelée** : le dédoublonnage l'ignore,
    `merge()` / `flagPublicEntity()` / `proposeCreditLimit()` la refusent
-   (`ConflictException`). L'anonymisation est **idempotente** (rejouer = no-op).
+   (`ConflictException`), et l'**approbation** d'une demande de hausse de limite
+   de crédit en attente (`resolveCreditLimitRequest` / `approved`) est refusée
+   (le rejet reste possible). L'anonymisation est **idempotente** (rejouer =
+   no-op) et sérialisée par verrou consultatif contre une (re)création
+   concurrente sur le même téléphone.
 
 ## 3. Cas particuliers
 
@@ -84,14 +93,23 @@ outillées (voir `docs/compliance/data-retention-policy.md` §6).
 
 ## 4. Lire le registre
 
+Le `subject_phone_hash` = `HMAC-SHA256(pepper, numéro normalisé)` : le calculer
+avec le pepper (jamais versionné) —
+
 ```sql
+-- pgcrypto : hmac(data, key, type)
 SELECT kind, outcome, via_ops, organization_id, affected_customer_ids,
        note, created_at
 FROM data_rights_request
-WHERE subject_phone_hash = encode(digest('+224620001122', 'sha256'), 'hex')
+WHERE subject_phone_hash = encode(
+        hmac('+224620001122', current_setting('app.data_rights_pepper'), 'sha256'),
+        'hex')
 ORDER BY created_at DESC;
 ```
-(Le hash exact est celui du **numéro normalisé** — voir `subject-data.ts::normalizeMsisdn`.)
+(Le numéro doit être sous forme **canonique** `+224XXXXXXXX` — voir
+`subject-data.ts::normalizeMsisdn`. Passer le pepper en session :
+`SET app.data_rights_pepper = '<valeur de DATA_RIGHTS_SUBJECT_HASH_PEPPER>';`
+avant la requête, ou l'inliner.)
 
 La table est **append-only** (trigger `data_rights_request_append_only`) :
 `UPDATE` / `DELETE` sont rejetés `restrict_violation`. C'est voulu — c'est la

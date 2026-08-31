@@ -23,6 +23,7 @@ describe("AppModule — graphe de dépendances", () => {
     COMMERCIAL_AGENT_GRANT_INTERNAL_KEY: "a".repeat(64),
     COMMISSION_BYPASS_REVIEW_INTERNAL_KEY: "a".repeat(64),
     DATA_RIGHTS_INTERNAL_KEY: "a".repeat(64),
+    DATA_RIGHTS_SUBJECT_HASH_PEPPER: "a".repeat(64),
     APIP_WEBHOOK_SECRET: "a".repeat(64),
     // Lot J3 — le job de rétention ne s'arme pas pendant le smoke (onModuleInit
     // n'est de toute façon pas appelé par .compile(), ceinture + bretelles).

@@ -15,13 +15,15 @@
 -- transverse) → PAS de politique RLS, comme merkle_anchor_batch / payment_webhook.
 
 CREATE TYPE "DataRightsRequestKind" AS ENUM ('access', 'anonymization');
-CREATE TYPE "DataRightsRequestOutcome" AS ENUM ('completed', 'partial', 'refused_legal_retention', 'failed');
+CREATE TYPE "DataRightsRequestOutcome" AS ENUM ('completed', 'partial', 'failed');
 
 CREATE TABLE "data_rights_request" (
     "id" TEXT NOT NULL,
     "kind" "DataRightsRequestKind" NOT NULL,
     "outcome" "DataRightsRequestOutcome" NOT NULL,
-    "subject_phone_hash" TEXT NOT NULL,
+    -- HMAC-SHA256(pepper, msisdn normalisé), hex. Nullable : no-op idempotent
+    -- sur un client déjà anonymisé (plus de téléphone à hacher).
+    "subject_phone_hash" TEXT,
     "requested_by_user_id" TEXT,
     "via_ops" BOOLEAN NOT NULL DEFAULT false,
     "organization_id" TEXT,

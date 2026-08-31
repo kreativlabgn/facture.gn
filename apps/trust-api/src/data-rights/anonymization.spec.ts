@@ -1,10 +1,12 @@
+import type { $Enums } from "@facture-gn/db";
 import { describe, expect, it } from "vitest";
 
 import { CUSTOMER_NAME_TOMBSTONE, isRetainedInvoice, retentionExpiryOf } from "./anonymization";
 
 describe("isRetainedInvoice — une facture qui déclenche la conservation légale OHADA", () => {
   it("vrai pour une facture réellement émise (issued / partially_paid / paid / voided)", () => {
-    for (const status of ["issued", "partially_paid", "paid", "voided"]) {
+    const statuses: $Enums.InvoiceStatus[] = ["issued", "partially_paid", "paid", "voided"];
+    for (const status of statuses) {
       expect(isRetainedInvoice({ documentType: "invoice", status })).toBe(true);
     }
   });

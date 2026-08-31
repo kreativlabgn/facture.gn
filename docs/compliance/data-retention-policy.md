@@ -34,7 +34,7 @@ tout le reste est effacé immédiatement (**anonymisation partielle**, voir §4)
 | 9 | **Sessions & jetons éphémères** — `ussd_session`, `client_portal_otp`, `revoked_token` | Session USSD / OTP portail client / révocation JWT | Sécurité, exécution du service | 24 h – 7 j (voir `docs/runbooks/retention.md`) | Purgés par le job de rétention (J3) |
 | 10 | **Preuve de consentement** — `assisted_session.consent_recorded_at` | Prouver le consentement à l'émission assistée par agent terrain | Obligation légale L/2016/037 (le consentement se prouve) | **10 ans** (aligné sur les factures produites pendant la session) | Conservé — jamais purgé sur `expires_at` seul (J3, finding F-H1) |
 | 11 | **Invitations en attente** — `pending_member_invite.msisdn` | Inviter un collaborateur / client non inscrit | Exécution du service | 14–30 j (TTL) puis purge (J3) | Purgé |
-| 12 | **Registre des demandes de droits** — `data_rights_request` (`subject_phone_hash`, jamais le n° en clair) | Prouver au régulateur PDP le traitement des demandes | Obligation légale L/2016/037 ; responsabilité (accountability) | **10 ans** ; append-only (trigger) | Conservé |
+| 12 | **Registre des demandes de droits** — `data_rights_request` (`subject_phone_hash` = HMAC keyed, jamais le n° en clair) | Prouver au régulateur PDP le traitement des demandes | Obligation légale L/2016/037 ; responsabilité (accountability) | **10 ans** ; append-only (trigger) | Conservé |
 | 13 | **Comptes acheteur public / DAF** — `public_buyer_account.*`, `public_buyer_account_member` | Portail B2G Niveau 2 | Contrat | Durée de vie du compte | Hors périmètre Lot J2 |
 | 14 | **Cabinets / CGA** — `professional_practice.name/phone/email`, `practice_member` | Relation cabinet comptable | Contrat | Durée de vie de la relation | Hors périmètre Lot J2 |
 
@@ -48,7 +48,7 @@ Les tables suivantes sont **append-only en base** (triggers, Lots J1/E1) et
 | `invoice`, `invoice_line` | Preuve comptable OHADA 10 ans ; recalcul de la certification | `customer_id` (FK, pas de PII inline) ; montants ; références B2G |
 | `invoice_event` | Piste d'audit OHADA / LBC-FT 10 ans | `actor_id` (UUID `User` pseudonyme) ; `metadata` (aujourd'hui : IDs, enums, montants — **aucune PII directe**, à re-vérifier à chaque nouveau writer) |
 | `merkle_anchor_batch` | Engagement cryptographique | **Non** — uniquement des SHA-256 |
-| `data_rights_request` | Registre de responsabilité (accountability) | `subject_phone_hash` (SHA-256, non réversible) ; jamais le numéro en clair |
+| `data_rights_request` | Registre de responsabilité (accountability) | `subject_phone_hash` = **HMAC-SHA256 keyed** (pepper hors base) — non réversible sans le secret ; jamais le numéro en clair ; nullable |
 
 **Conséquence pratique** : anonymiser une personne **ne supprime aucune ligne**
 de ces tables. Ce qui la rend non identifiable, c'est l'effacement / le tombstone

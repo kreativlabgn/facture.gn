@@ -1,3 +1,4 @@
+import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 import { bytesToHex } from "@noble/hashes/utils";
 
@@ -31,10 +32,22 @@ export function normalizeMsisdn(raw: string): string {
   return candidate;
 }
 
-/** SHA-256 hex du numéro normalisé — jamais le numéro en clair dans le registre. */
-export function hashMsisdn(rawOrCanonical: string): string {
+/**
+ * Identifiant de sujet pour le registre `data_rights_request` :
+ * **HMAC-SHA256(pepper, numéro normalisé)** en hex — jamais le numéro en clair.
+ *
+ * Le pepper (`DATA_RIGHTS_SUBJECT_HASH_PEPPER`, hors base) est OBLIGATOIRE : un
+ * SHA-256 nu d'un MSISDN guinéen (`+224` + 8–9 chiffres ≈ 10⁹ valeurs) se
+ * renverse par force brute / table arc-en-ciel en secondes. Avec le pepper,
+ * corréler deux lignes du même sujet reste possible (hash déterministe) mais
+ * retrouver le numéro depuis le hash exige le secret.
+ */
+export function hashMsisdn(rawOrCanonical: string, pepper: string): string {
+  if (!pepper) {
+    throw new Error("hashMsisdn : pepper requis (DATA_RIGHTS_SUBJECT_HASH_PEPPER)");
+  }
   const canonical = normalizeMsisdn(rawOrCanonical);
-  return bytesToHex(sha256(new TextEncoder().encode(canonical)));
+  return bytesToHex(hmac(sha256, new TextEncoder().encode(pepper), new TextEncoder().encode(canonical)));
 }
 
 export interface SubjectInvoiceSummary {

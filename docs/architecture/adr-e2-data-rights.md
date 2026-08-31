@@ -60,15 +60,26 @@ owner/admin PME et ops plateforme.**
 ### 3. Registre `DataRightsRequest` (append-only)
 
 Toute opération (accès **et** anonymisation) écrit une ligne
-`data_rights_request` : `kind`, `outcome`
-(`completed | partial | refused_legal_retention | failed`), `subject_phone_hash`
-(**SHA-256 du msisdn normalisé — jamais le numéro en clair**),
-`requested_by_user_id` (null = ops), `via_ops`, `organization_id` (null =
-transverse), `affected_customer_ids[]`, `note`, `created_at`. Trigger
+`data_rights_request` : `kind`, `outcome` (`completed | partial | failed` —
+`partial` = anonymisation d'un client sous conservation OHADA ; il n'y a **pas**
+de valeur « refus », le droit à l'effacement n'est jamais refusé en bloc, il est
+partiellement honoré), `subject_phone_hash` (**HMAC-SHA256(pepper, msisdn
+normalisé) — jamais le numéro en clair** ; nullable : un no-op idempotent sur un
+client déjà anonymisé n'a plus de téléphone à hacher), `requested_by_user_id`
+(null = ops), `via_ops`, `organization_id` (null = transverse),
+`affected_customer_ids[]`, `note`, `created_at`. Trigger
 `data_rights_request_append_only` (`BEFORE UPDATE OR DELETE FOR EACH ROW`,
 `SECURITY INVOKER`, `SET search_path = ''`, `ERRCODE = 'restrict_violation'`) —
 **copie exacte du pattern J1** (`20260830120000_invoice_event_append_only`).
 C'est la preuve de responsabilité (accountability) opposable au régulateur PDP.
+
+**Pourquoi HMAC keyed et pas SHA-256 nu** : un MSISDN guinéen (`+224` + 8–9
+chiffres ≈ 10⁹ valeurs) se renverse depuis un SHA-256 non salé par force brute /
+table arc-en-ciel en secondes. Le pepper `DATA_RIGHTS_SUBJECT_HASH_PEPPER`
+(`secrets.ts`, **hors base**, `requiredInProduction`) rend le hash non réversible
+sans le secret, tout en gardant la propriété « un même numéro → une même clé »
+(corrélation des demandes d'un même sujet). Le service refuse d'écrire sans
+pepper — jamais de hash faible silencieux.
 
 ### 4. Deux chemins d'accès
 
@@ -81,13 +92,33 @@ Le chemin ops est nécessaire : un particulier peut être client de plusieurs PM
 et sa demande ne peut pas être traitée organisation par organisation. Chaque
 appel ops trace une ligne `data_rights_request` immuable (`via_ops = true`).
 
+**Le bloc compte `User` (`account`) n'est renvoyé QUE sur le chemin ops** — et
+seulement pour un `UserPhone` **vérifié** (`verified_at`, même exigence
+d'identité que le portail client, ADR-087/096). Sur le chemin PME, `account` est
+toujours `null` : le compte utilisateur est hors périmètre J2, et le renvoyer
+ouvrirait une divulgation PII inter-tenant (un owner/admin d'une organisation
+quelconque obtiendrait, avec un numéro arbitraire, l'identité et tous les numéros
+d'un titulaire de compte facture.gn). Le chemin PME **refuse (404)** aussi un
+numéro qui ne correspond à aucun client de l'organisation appelante — jamais un
+oracle d'énumération, jamais de ligne de registre polluante.
+
 ### 5. Concurrence
 
-`anonymizeCustomerById` prend un `pg_advisory_xact_lock(hashtext('customer:' ||
-organization_id || ':' || phone))` — **même clé** que
-`CustomersService.create()` (dédoublonnage, E3) — avant toute lecture. Sérialise
-l'anonymisation contre une création concurrente sur le même téléphone. Le
+`anonymizeCustomerById` (et `anonymizeSubjectByPhone` par client) : dans la
+transaction, lecture minimale (`organization_id` + `phone`) →
+`pg_advisory_xact_lock(hashtext('customer:' || organization_id || ':' || phone))`
+— **même clé** que `CustomersService.create()` (dédoublonnage, E3) → **re-lecture
+du client sous verrou** → décision (`anonymized_at` / rétention) sur cette lecture
+fraîche → effacement → registre. La re-lecture ferme la fenêtre où une
+anonymisation concurrente (ou une création) commiterait entre la 1ʳᵉ lecture et
+le verrou (sinon : 2ᵉ écriture PII + 2ᵉ ligne de registre trompeuse). Le
 dédoublonnage ignore les lignes `anonymized_at != NULL`.
+
+Chemins « gelés » (refusent un `Customer` anonymisé) : `create()` /
+`importCustomers()` (dédoublonnage), `merge()`, `flagPublicEntity()`,
+`proposeCreditLimit()`, **et `resolveCreditLimitRequest()` sur `approved`** (une
+demande de hausse en attente créée avant l'anonymisation ré-écrirait
+`credit_limit` sur une ligne gelée — le rejet reste possible).
 
 ## Écarté
 
@@ -114,7 +145,8 @@ dédoublonnage ignore les lignes `anonymized_at != NULL`.
   du hash de téléphone).
 - Nouveau sous-module `apps/trust-api/src/data-rights/`. Nouvelle colonne
   `customer.anonymized_at`. Nouvelle table `data_rights_request` + 2 enums + 1
-  trigger. Nouveau secret `DATA_RIGHTS_INTERNAL_KEY`.
+  trigger. Deux nouveaux secrets : `DATA_RIGHTS_INTERNAL_KEY` (auth du chemin
+  ops) et `DATA_RIGHTS_SUBJECT_HASH_PEPPER` (pepper HMAC du `subject_phone_hash`).
 - `CustomersService.create()` / `importCustomers()` : le dédoublonnage exclut
   désormais `anonymized_at != NULL`. `merge()` / `flagPublicEntity()` /
   `proposeCreditLimit()` refusent un `Customer` anonymisé.
@@ -129,3 +161,14 @@ dédoublonnage ignore les lignes `anonymized_at != NULL`.
 - Fast-follow avant agrément PDP : endpoint de rectification `Customer` ;
   opt-out complet de notification ; anonymisation `User` ; purge post-échéance
   10 ans.
+- Dette connue (non bloquante) :
+  - un `RecurringInvoiceTemplate` pointant un client anonymisé continue de
+    générer des brouillons attribués à « Client anonymisé » (`phone = null`, donc
+    aucun envoi) — désactiver les templates du client à l'anonymisation ;
+  - `retentionExpiryOf` renvoie `null` si une facture conservée n'a pas de
+    `issued_at` (pathologique — `issue()` le pose toujours) : le service pose
+    alors une note « échéance indéterminée, à traiter manuellement » ;
+  - `via_ops` est dérivé de `organization_id === null` côté service — pas de
+    chemin qui produirait `via_ops = false` avec `requested_by_user_id = null`
+    aujourd'hui, mais l'invariant n'est pas contraint en base ;
+  - hash-chaining de `data_rights_request` (cf. §Écarté).

@@ -29,17 +29,27 @@ describe("normalizeMsisdn", () => {
   });
 });
 
-describe("hashMsisdn", () => {
-  it("produit un SHA-256 hex (64 caractères) déterministe", () => {
-    const h1 = hashMsisdn("+224620001122");
-    const h2 = hashMsisdn("+224620001122");
+describe("hashMsisdn (HMAC keyed)", () => {
+  const PEPPER = "a".repeat(64);
+
+  it("produit un HMAC-SHA256 hex (64 caractères) déterministe pour un pepper donné", () => {
+    const h1 = hashMsisdn("+224620001122", PEPPER);
+    const h2 = hashMsisdn("224 620 00 11 22", PEPPER); // normalisé vers la même forme
     expect(h1).toBe(h2);
     expect(h1).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("ne contient jamais les chiffres du numéro en clair et diffère d'un numéro à l'autre", () => {
-    const h = hashMsisdn("+224620001122");
+    const h = hashMsisdn("+224620001122", PEPPER);
     expect(h).not.toContain("620001122");
-    expect(h).not.toBe(hashMsisdn("+224620001123"));
+    expect(h).not.toBe(hashMsisdn("+224620001123", PEPPER));
+  });
+
+  it("dépend du pepper : le même numéro donne un hash différent sous un autre pepper", () => {
+    expect(hashMsisdn("+224620001122", PEPPER)).not.toBe(hashMsisdn("+224620001122", "b".repeat(64)));
+  });
+
+  it("lève si le pepper est absent (jamais de hash faible silencieux)", () => {
+    expect(() => hashMsisdn("+224620001122", "")).toThrow(/pepper/i);
   });
 });

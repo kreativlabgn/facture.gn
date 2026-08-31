@@ -1,6 +1,6 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
-import type { DataRightsRequestOutcome, Prisma, PrismaClient } from "@facture-gn/db";
+import type { $Enums, DataRightsRequestOutcome, Prisma, PrismaClient } from "@facture-gn/db";
 
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CUSTOMER_NAME_TOMBSTONE, isRetainedInvoice, retentionExpiryOf } from "./anonymization";
@@ -25,11 +25,17 @@ export interface AnonymizationResult {
   affectedCustomerIds: string[];
 }
 
-const ANONYMIZED_INVOICE_SELECT = {
+const RETENTION_INVOICE_SELECT = {
   documentType: true,
   status: true,
   issuedAt: true,
 } as const;
+
+type RetentionInvoiceRow = {
+  documentType: $Enums.InvoiceDocumentType;
+  status: $Enums.InvoiceStatus;
+  issuedAt: Date | null;
+};
 
 // J2, ADR-116 — droit d'accès (export) et droit à l'effacement (anonymisation).
 // Le service fait ses propres requêtes Prisma (aucune dépendance vers
@@ -37,11 +43,17 @@ const ANONYMIZED_INVOICE_SELECT = {
 // `data_rights_request` (registre de responsabilité opposable au régulateur PDP).
 //
 // `organizationId` non nul = chemin PME (RolesGuard a déjà vérifié que l'appelant
-// est owner/admin de cette organisation) → tout est scopé à cette organisation.
-// `organizationId` nul = chemin ops plateforme (clé interne dédiée) → transverse.
+// est owner/admin de cette organisation) → tout est scopé à cette organisation,
+// le bloc compte `User` n'est JAMAIS renvoyé (hors périmètre J2 + fuite
+// inter-tenant). `organizationId` nul = chemin ops plateforme (clé interne
+// dédiée) → transverse, bloc compte inclus.
 @Injectable()
 export class DataRightsService {
-  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
+  private readonly subjectHashPepper: string;
+
+  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {
+    this.subjectHashPepper = process.env.DATA_RIGHTS_SUBJECT_HASH_PEPPER ?? "";
+  }
 
   // normalizeMsisdn est pur (lève un Error nu) — le traduire en 400 propre.
   private toCanonical(phone: string): string {
@@ -52,13 +64,18 @@ export class DataRightsService {
     }
   }
 
+  /** HMAC keyed du numéro — lève si le pepper n'est pas configuré. */
+  private subjectHash(canonical: string): string {
+    return hashMsisdn(canonical, this.subjectHashPepper);
+  }
+
   async exportSubjectData(params: {
     phone: string;
     organizationId: string | null;
     requestedByUserId?: string;
   }): Promise<SubjectDataExport> {
     const canonical = this.toCanonical(params.phone);
-    const subjectPhoneHash = hashMsisdn(canonical);
+    const subjectPhoneHash = this.subjectHash(canonical);
     const viaOps = params.organizationId === null;
 
     const customers = await this.prisma.customer.findMany({
@@ -83,6 +100,12 @@ export class DataRightsService {
       orderBy: { createdAt: "asc" },
     });
 
+    // Chemin PME : refuser un numéro sans aucun client dans l'organisation
+    // (jamais un oracle d'énumération, jamais de ligne de registre polluante).
+    if (!viaOps && customers.length === 0) {
+      throw new NotFoundException("Aucun client de cette organisation ne correspond à ce numéro");
+    }
+
     const customerRecords: SubjectCustomerRecord[] = customers.map((c) => ({
       customerId: c.id,
       organizationId: c.organizationId,
@@ -103,18 +126,34 @@ export class DataRightsService {
       })),
     }));
 
-    const userPhone = await this.prisma.userPhone.findFirst({
-      where: { msisdn: canonical },
-      include: { user: { include: { phones: { select: { msisdn: true } } } } },
-    });
-    const account = userPhone
-      ? {
-          userId: userPhone.user.id,
-          name: userPhone.user.name,
-          preferredLanguage: userPhone.user.preferredLanguage,
-          phones: userPhone.user.phones.map((p) => p.msisdn),
-        }
-      : null;
+    // Bloc compte `User` : chemin OPS uniquement (transverse par nature), et
+    // seulement sur un numéro VÉRIFIÉ (verifiedAt) — même exigence d'identité que
+    // le portail client (ADR-087/096). `select` explicite : passwordHash/pinHash
+    // ne sont jamais chargés en mémoire.
+    let account = null;
+    if (viaOps) {
+      const userPhone = await this.prisma.userPhone.findFirst({
+        where: { msisdn: canonical, verifiedAt: { not: null } },
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              preferredLanguage: true,
+              phones: { select: { msisdn: true } },
+            },
+          },
+        },
+      });
+      account = userPhone
+        ? {
+            userId: userPhone.user.id,
+            name: userPhone.user.name,
+            preferredLanguage: userPhone.user.preferredLanguage,
+            phones: userPhone.user.phones.map((p) => p.msisdn),
+          }
+        : null;
+    }
 
     await this.prisma.dataRightsRequest.create({
       data: {
@@ -138,34 +177,36 @@ export class DataRightsService {
   }
 
   /**
-   * Anonymise UN client par son id (chemin PME). Une transaction :
-   * verrou consultatif sur la clé de dédoublonnage (`customer:org:phone`, la même
-   * que `CustomersService.create()`), puis effacement des colonnes PII, puis
-   * écriture du registre — le tout atomique.
+   * Anonymise UN client par son id (chemin PME). Dans la transaction :
+   * lecture minimale (org + téléphone) pour la clé de verrou → verrou consultatif
+   * (même clé que `CustomersService.create()`, E3) → **re-lecture** du client
+   * sous verrou → effacement des colonnes PII → écriture du registre. La
+   * re-lecture ferme la fenêtre où une anonymisation concurrente (ou une
+   * création) commiterait entre la 1ʳᵉ lecture et le verrou.
    */
   async anonymizeCustomerById(
     customerId: string,
     ctx: { requestedByUserId: string | null; viaOps: boolean },
   ): Promise<AnonymizationResult> {
     return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.findUnique({
+      const stub = await tx.customer.findUnique({
         where: { id: customerId },
-        include: { invoices: { select: ANONYMIZED_INVOICE_SELECT } },
+        select: { organizationId: true, phone: true },
       });
-      if (!customer) {
-        // Pas de téléphone → pas de subject_phone_hash à écrire. On renvoie
-        // simplement l'échec (l'appelant traduit en 404 si besoin).
-        return { outcome: "failed" as const, retentionExpiry: null, affectedCustomerIds: [] };
+      if (!stub) {
+        throw new NotFoundException(`Client ${customerId} introuvable`);
       }
 
-      await this.lockDedupKey(tx, customer.organizationId, customer.phone);
+      await this.lockDedupKey(tx, stub.organizationId, stub.phone);
+      const customer = await this.readCustomerForAnonymization(tx, customerId);
+
       const applied = await this.applyAnonymization(tx, customer);
 
       await tx.dataRightsRequest.create({
         data: {
           kind: "anonymization",
           outcome: applied.outcome,
-          subjectPhoneHash: customer.phone ? hashMsisdn(customer.phone) : "unknown",
+          subjectPhoneHash: customer.phone ? this.subjectHash(customer.phone) : null,
           requestedByUserId: ctx.requestedByUserId,
           viaOps: ctx.viaOps,
           organizationId: customer.organizationId,
@@ -174,13 +215,18 @@ export class DataRightsService {
         },
       });
 
-      return { outcome: applied.outcome, retentionExpiry: applied.retentionExpiry, affectedCustomerIds: [customer.id] };
+      return {
+        outcome: applied.outcome,
+        retentionExpiry: applied.retentionExpiry,
+        affectedCustomerIds: [customer.id],
+      };
     });
   }
 
   /**
    * Anonymise TOUS les clients d'un numéro (chemin ops plateforme, transverse ou
-   * scopé). Une transaction, un seul enregistrement de registre agrégé.
+   * scopé). Une transaction, un seul enregistrement de registre agrégé. Chaque
+   * client est re-lu sous son verrou avant traitement.
    */
   async anonymizeSubjectByPhone(params: {
     phone: string;
@@ -188,7 +234,7 @@ export class DataRightsService {
     requestedByUserId?: string;
   }): Promise<AnonymizationResult> {
     const canonical = this.toCanonical(params.phone);
-    const subjectPhoneHash = hashMsisdn(canonical);
+    const subjectPhoneHash = this.subjectHash(canonical);
     const viaOps = params.organizationId === null;
 
     const matches = await this.prisma.customer.findMany({
@@ -205,12 +251,14 @@ export class DataRightsService {
       let retentionExpiry: Date | null = null;
 
       for (const { id } of matches) {
-        const customer = await tx.customer.findUnique({
+        const stub = await tx.customer.findUnique({
           where: { id },
-          include: { invoices: { select: ANONYMIZED_INVOICE_SELECT } },
+          select: { organizationId: true, phone: true },
         });
-        if (!customer) continue;
-        await this.lockDedupKey(tx, customer.organizationId, customer.phone);
+        if (!stub) continue;
+        await this.lockDedupKey(tx, stub.organizationId, stub.phone ?? canonical);
+        const customer = await this.readCustomerForAnonymization(tx, id);
+
         const applied = await this.applyAnonymization(tx, customer);
         outcomes.push(applied.outcome);
         affectedCustomerIds.push(id);
@@ -220,11 +268,7 @@ export class DataRightsService {
       }
 
       const outcome: DataRightsRequestOutcome =
-        affectedCustomerIds.length === 0
-          ? "failed"
-          : outcomes.includes("partial")
-            ? "partial"
-            : "completed";
+        affectedCustomerIds.length === 0 ? "failed" : outcomes.includes("partial") ? "partial" : "completed";
 
       await tx.dataRightsRequest.create({
         data: {
@@ -243,6 +287,25 @@ export class DataRightsService {
     });
   }
 
+  private async readCustomerForAnonymization(
+    tx: TxClient,
+    customerId: string,
+  ): Promise<{ id: string; organizationId: string; phone: string | null; anonymizedAt: Date | null; invoices: RetentionInvoiceRow[] }> {
+    // Le client a déjà été vu juste avant le verrou (findUnique du stub) — il ne
+    // peut pas disparaître (append-only sur invoice, delete customer = seulement
+    // merge() qui prendrait le même verrou). findUniqueOrThrow par sécurité.
+    return tx.customer.findUniqueOrThrow({
+      where: { id: customerId },
+      select: {
+        id: true,
+        organizationId: true,
+        phone: true,
+        anonymizedAt: true,
+        invoices: { select: RETENTION_INVOICE_SELECT },
+      },
+    });
+  }
+
   private async lockDedupKey(tx: TxClient, organizationId: string, phone: string | null): Promise<void> {
     // Même clé que CustomersService.create() / importCustomers() (E3) : sérialise
     // l'anonymisation contre une (re)création concurrente sur le même téléphone.
@@ -251,16 +314,14 @@ export class DataRightsService {
 
   private async applyAnonymization(
     tx: TxClient,
-    customer: {
-      id: string;
-      anonymizedAt: Date | null;
-      invoices: { documentType: string; status: string; issuedAt: Date | null }[];
-    },
+    customer: { id: string; anonymizedAt: Date | null; invoices: RetentionInvoiceRow[] },
   ): Promise<AnonymizationApplied> {
     if (customer.anonymizedAt) {
+      // No-op idempotent. `completed` reflète « la personne est anonymisée »,
+      // pas l'issue exacte du 1ᵉʳ passage (voir la ligne de registre d'origine).
       return {
         outcome: "completed",
-        note: `déjà anonymisé le ${customer.anonymizedAt.toISOString()}`,
+        note: `déjà anonymisé le ${customer.anonymizedAt.toISOString()} — rejeu no-op`,
         retentionExpiry: null,
       };
     }
@@ -300,7 +361,9 @@ export class DataRightsService {
     });
     return {
       outcome: "partial",
-      note: `name/nif conservés jusqu'à ${retentionExpiry?.toISOString() ?? "échéance inconnue"}`,
+      note: retentionExpiry
+        ? `name/nif conservés jusqu'à ${retentionExpiry.toISOString()}`
+        : "name/nif conservés — échéance de conservation indéterminée (facture sans date d'émission), à traiter manuellement",
       retentionExpiry,
     };
   }

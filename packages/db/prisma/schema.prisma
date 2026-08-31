@@ -1642,7 +1642,10 @@ model DataRightsRequest {
   id                 String                    @id @default(uuid())
   kind               DataRightsRequestKind
   outcome            DataRightsRequestOutcome
-  subjectPhoneHash   String                    @map("subject_phone_hash")
+  // HMAC-SHA256(pepper, msisdn normalisé), hex — JAMAIS le numéro en clair.
+  // Nullable : une anonymisation rejouée sur un client déjà anonymisé n'a plus
+  // de téléphone à hacher (no-op idempotent). Jamais de chaîne sentinelle.
+  subjectPhoneHash   String?                   @map("subject_phone_hash")
   // null = déclenché par l'ops plateforme (clé interne), pas un utilisateur.
   requestedByUserId  String?                   @map("requested_by_user_id")
   viaOps             Boolean                   @default(false) @map("via_ops")
@@ -1664,6 +1667,5 @@ enum DataRightsRequestKind {
 enum DataRightsRequestOutcome {
   completed
   partial
-  refused_legal_retention
   failed
 }

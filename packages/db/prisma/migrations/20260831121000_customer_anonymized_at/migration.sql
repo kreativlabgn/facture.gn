@@ -3,8 +3,10 @@
 -- PII sont effacés (tombstone) au moment de l'anonymisation. anonymized_at
 -- marque la ligne comme GELÉE.
 --
--- Index partiel : audit / exclusion rapide des lignes anonymisées dans le
--- dédoublonnage par téléphone (CustomersService.create / importCustomers).
+-- Index partiel : sert l'AUDIT (« lister les clients anonymisés d'une
+-- organisation, avec leur date »). Le dédoublonnage (CustomersService.create /
+-- importCustomers) filtre `anonymizedAt: null` (le cas fréquent) et s'appuie sur
+-- `customer_phone_idx` existant — il n'utilise pas cet index.
 
 ALTER TABLE "customer" ADD COLUMN "anonymized_at" TIMESTAMP(3);
 
