@@ -285,6 +285,45 @@ describe("BankReconciliationService.confirmMatch", () => {
     expect(row.resolvedByUserId).toBeNull();
   });
 
+  it("reprend un confirm interrompu (matched vers la bonne facture, sans matchedPaymentId)", async () => {
+    const prisma = createFakePrisma({ invoices });
+    const txId = await seedUnmatched(prisma);
+    // état laissé par une étape 3 interrompue
+    Object.assign(prisma.__txById.get(txId), {
+      state: "matched",
+      matchedInvoiceId: "inv-1",
+      matchedPaymentId: null,
+      resolvedByUserId: USER,
+      resolvedAt: new Date(),
+    });
+    const payments = createFakePayments({
+      recordBankTransferPayment: vi.fn(() => Promise.resolve({ id: "pay-existant" })),
+    });
+    const service = new BankReconciliationService(prisma, payments);
+
+    const { transaction } = await service.confirmMatch(ORG, txId, "inv-1", USER);
+
+    expect(transaction.matchedPaymentId).toBe("pay-existant");
+    expect(payments.recordBankTransferPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("matched vers une AUTRE facture → ConflictException, pas de reprise", async () => {
+    const prisma = createFakePrisma({ invoices });
+    const txId = await seedUnmatched(prisma);
+    Object.assign(prisma.__txById.get(txId), {
+      state: "matched",
+      matchedInvoiceId: "inv-autre",
+      matchedPaymentId: null,
+      resolvedByUserId: USER,
+      resolvedAt: new Date(),
+    });
+    const payments = createFakePayments();
+    const service = new BankReconciliationService(prisma, payments);
+
+    await expect(service.confirmMatch(ORG, txId, "inv-1", USER)).rejects.toThrow(ConflictException);
+    expect(payments.recordBankTransferPayment).not.toHaveBeenCalled();
+  });
+
   it("transaction déjà matched → ConflictException, aucun appel à recordBankTransferPayment", async () => {
     const prisma = createFakePrisma({ invoices });
     const txId = await seedUnmatched(prisma);

@@ -177,6 +177,29 @@ export class BankReconciliationService {
       },
     });
     if (claim.count === 0) {
+      // Reprise d'un confirm interrompu entre la création du paiement (étape
+      // suivante) et la pose de matchedPaymentId : la transaction est déjà
+      // `matched` vers CETTE facture mais sans paiement lié.
+      // recordBankTransferPayment est idempotent sur la clé dérivée → on
+      // récupère le paiement existant et on referme, plutôt que de laisser la
+      // transaction bloquée. Tout autre cas (déjà rapprochée ailleurs, ignorée,
+      // introuvable) → 409.
+      if (
+        transaction.state === "matched" &&
+        transaction.matchedInvoiceId === invoiceId &&
+        transaction.matchedPaymentId === null
+      ) {
+        const recovered = await this.paymentsService.recordBankTransferPayment(
+          invoiceId,
+          { amount: transaction.amountCentimes },
+          `bank-reconciliation:${transactionId}`,
+        );
+        const repaired = await this.prisma.bankTransaction.update({
+          where: { id: transactionId },
+          data: { matchedPaymentId: recovered.id },
+        });
+        return { transaction: repaired, payment: recovered };
+      }
       throw new ConflictException(
         `Transaction bancaire ${transactionId} déjà rapprochée ou ignorée`,
       );

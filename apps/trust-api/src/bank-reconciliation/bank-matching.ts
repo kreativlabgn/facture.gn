@@ -79,6 +79,15 @@ function wholeDaysBetween(from: Date, to: Date): number {
   return Math.round((toDay - fromDay) / MS_PER_DAY);
 }
 
+// La facture est-elle émise dans la fenêtre précédant la date de valeur du
+// virement (0 ≤ délai ≤ MATCH_DATE_WINDOW_DAYS) ? Un virement daté AVANT
+// l'émission (délai négatif) n'est jamais un signal.
+function isIssuedWithinWindow(issuedAt: Date | null, valueDate: Date): boolean {
+  if (issuedAt === null) return false;
+  const days = wholeDaysBetween(issuedAt, valueDate);
+  return days >= 0 && days <= MATCH_DATE_WINDOW_DAYS;
+}
+
 /**
  * Classe les factures candidates pour une transaction non rapprochée. Ne renvoie
  * JAMAIS une suggestion sans au moins une raison. Tri : confiance décroissante,
@@ -114,13 +123,7 @@ export function suggestMatches(
       }
     }
 
-    if (
-      invoice.issuedAt !== null &&
-      (() => {
-        const days = wholeDaysBetween(invoice.issuedAt, tx.valueDate);
-        return days >= 0 && days <= MATCH_DATE_WINDOW_DAYS;
-      })()
-    ) {
+    if (isIssuedWithinWindow(invoice.issuedAt, tx.valueDate)) {
       reasons.push("émise dans la fenêtre");
     }
 
