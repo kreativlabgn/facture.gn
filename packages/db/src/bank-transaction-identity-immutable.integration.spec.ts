@@ -99,6 +99,38 @@ const RUN = Boolean(process.env.DATABASE_URL);
       expect(stillThere).not.toBeNull();
     });
 
+    it("refuse un INSERT 'matched' sans matched_invoice_id (CHECK bank_transaction_state_consistency)", async () => {
+      await expect(
+        prisma.$executeRawUnsafe(
+          `INSERT INTO "bank_transaction"
+             (id, organization_id, import_batch_id, value_date, amount_centimes, raw_label,
+              fingerprint, imported_by_user_id, state, resolved_by_user_id, resolved_at)
+           VALUES ($1, $2, $3, DATE '2026-08-22', 1000, 'x', $4, $5, 'matched', $5, now())`,
+          randomUUID(),
+          organizationId,
+          randomUUID(),
+          `fp-mstate-${randomUUID()}`,
+          userId,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("refuse un INSERT 'unmatched' avec un résolveur renseigné (CHECK d'état)", async () => {
+      await expect(
+        prisma.$executeRawUnsafe(
+          `INSERT INTO "bank_transaction"
+             (id, organization_id, import_batch_id, value_date, amount_centimes, raw_label,
+              fingerprint, imported_by_user_id, state, resolved_at)
+           VALUES ($1, $2, $3, DATE '2026-08-23', 1000, 'x', $4, $5, 'unmatched', now())`,
+          randomUUID(),
+          organizationId,
+          randomUUID(),
+          `fp-ustate-${randomUUID()}`,
+          userId,
+        ),
+      ).rejects.toThrow();
+    });
+
     it("refuse un INSERT à montant négatif (CHECK bank_transaction_amount_positive)", async () => {
       await expect(
         prisma.bankTransaction.create({

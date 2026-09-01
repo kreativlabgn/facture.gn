@@ -141,6 +141,20 @@ describe("BankReconciliationService.importTransactions", () => {
     expect(created.importedByUserId).toBe(USER);
   });
 
+  it("une erreur non-P2002 du create remonte, jamais avalée comme un doublon", async () => {
+    const prisma = createFakePrisma();
+    prisma.bankTransaction.create = vi.fn(() => Promise.reject(new Error("connexion DB perdue")));
+    const service = new BankReconciliationService(prisma, createFakePayments());
+
+    await expect(
+      service.importTransactions(
+        ORG,
+        { transactions: [{ valueDate: new Date("2026-08-20"), amountCentimes: 1n, rawLabel: "x" }] },
+        USER,
+      ),
+    ).rejects.toThrow("connexion DB perdue");
+  });
+
   it("ré-importe la même ligne (même empreinte, P2002) → duplicate, aucun doublon", async () => {
     const prisma = createFakePrisma();
     const service = new BankReconciliationService(prisma, createFakePayments());
@@ -208,6 +222,24 @@ describe("BankReconciliationService.listTransactions", () => {
     expect(prisma.invoice.findMany).toHaveBeenCalledTimes(1);
     expect(result).toHaveLength(3);
     expect(result[0].suggestions.length).toBeGreaterThan(0);
+  });
+
+  it("ne suggère QUE des factures payables (issued / partially_paid), jamais draft/paid/voided", async () => {
+    const prisma = createFakePrisma({ invoices: [payableInvoice] });
+    const service = new BankReconciliationService(prisma, createFakePayments());
+    await service.importTransactions(
+      ORG,
+      { transactions: [{ valueDate: new Date("2026-08-10"), amountCentimes: 1_500_000n, rawLabel: "x" }] },
+      USER,
+    );
+
+    await service.listTransactions(ORG, {});
+
+    const where = prisma.invoice.findMany.mock.calls[0][0].where;
+    expect(where.organizationId).toBe(ORG);
+    expect(where.status.in).toEqual(expect.arrayContaining(["issued", "partially_paid"]));
+    expect(where.status.in).not.toContain("draft");
+    expect(where.status.in).not.toContain("paid");
   });
 
   it("aucune suggestion attachée aux transactions non-unmatched", async () => {

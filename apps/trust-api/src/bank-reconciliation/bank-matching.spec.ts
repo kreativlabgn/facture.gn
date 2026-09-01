@@ -112,13 +112,34 @@ describe("suggestMatches", () => {
     expect(result).toEqual([]);
   });
 
-  it("2 factures au même montant exact → 2 probable, triées par proximité de solde", () => {
-    const near = invoice({ id: "inv-near", number: null, certificationId: null, amountDue: 1_500_000n });
-    const far = invoice({ id: "inv-far", number: null, certificationId: null, amountDue: 1_500_000n });
-    // même amountDue → l'ordre reste stable ; on vérifie surtout la confiance
-    const result = suggestMatches({ ...tx, rawLabel: "sans ref" }, [near, far]);
-    expect(result).toHaveLength(2);
-    expect(result.every((s) => s.confidence === "probable")).toBe(true);
+  it("à confiance égale, trie par proximité de solde croissante", () => {
+    // tx à 1 500 000 ; les deux factures matchent par référence (probable),
+    // solde différent → la plus proche du montant du virement d'abord.
+    const far = invoice({ id: "inv-far", certificationId: null, amountDue: 3_000_000n });
+    const near = invoice({ id: "inv-near", certificationId: null, amountDue: 1_600_000n });
+    const result = suggestMatches({ ...tx, amountCentimes: 1_500_000n }, [far, near]);
+    expect(result.map((s) => s.invoiceId)).toEqual(["inv-near", "inv-far"]);
+  });
+
+  it("émise exactement à la limite de la fenêtre (30 j) → weak ; à 31 j → aucune suggestion", () => {
+    const at30 = suggestMatches(
+      { valueDate: new Date("2026-08-31T00:00:00Z"), amountCentimes: 1n, rawLabel: "x" },
+      [invoice({ number: null, certificationId: null, issuedAt: new Date("2026-08-01T00:00:00Z") })],
+    );
+    expect(at30[0]?.confidence).toBe("weak");
+    const at31 = suggestMatches(
+      { valueDate: new Date("2026-09-01T00:00:00Z"), amountCentimes: 1n, rawLabel: "x" },
+      [invoice({ number: null, certificationId: null, issuedAt: new Date("2026-08-01T00:00:00Z") })],
+    );
+    expect(at31).toEqual([]);
+  });
+
+  it("virement daté AVANT l'émission de la facture (délai négatif) → hors fenêtre", () => {
+    const result = suggestMatches(
+      { valueDate: new Date("2026-07-20T00:00:00Z"), amountCentimes: 1n, rawLabel: "x" },
+      [invoice({ number: null, certificationId: null, issuedAt: new Date("2026-08-01T00:00:00Z") })],
+    );
+    expect(result).toEqual([]);
   });
 
   it("trie strong avant probable avant weak", () => {
