@@ -295,6 +295,8 @@ model User {
   pendingMemberInvitesSent      PendingMemberInvite[]      @relation("PendingMemberInviteInviter")
   pendingMemberInvitesResolved  PendingMemberInvite[]      @relation("PendingMemberInviteResolvedUser")
   fiscalPeriodClosingsMade      FiscalPeriodClosing[]
+  bankTransactionsImported      BankTransaction[]          @relation("BankTransactionImporter")
+  bankTransactionsResolved      BankTransaction[]          @relation("BankTransactionResolver")
 
   @@map("user")
 }
@@ -574,6 +576,7 @@ model Organization {
   commissionBypassCases CommissionBypassCase[]
   pendingMemberInvites  PendingMemberInvite[]
   fiscalPeriodClosings  FiscalPeriodClosing[]
+  bankTransactions      BankTransaction[]
 
   @@map("organization")
 }
@@ -1039,6 +1042,7 @@ model Invoice {
   payments      Payment[]
   creditNotes   CreditNote[]
   refunds       Refund[]
+  bankTransactionsMatched BankTransaction[]
 
   @@unique([organizationId, number])
   // E1 — reconstruction de la preuve d'inclusion (feuilles d'une tranche).
@@ -1165,7 +1169,8 @@ model Payment {
 
   collectedAt DateTime @default(now()) @map("collected_at")
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  invoice         Invoice          @relation(fields: [invoiceId], references: [id])
+  bankTransaction BankTransaction?
 
   @@map("payment")
 }
@@ -1669,4 +1674,65 @@ enum DataRightsRequestOutcome {
   completed
   partial
   failed
+}
+
+// Lot rapprochement bancaire (ADR-052, ADR-117 provisoire) — une ligne de relevé
+// bancaire importée (virement ENTRANT uniquement, amountCentimes > 0) et son
+// état de rapprochement. La PWA parse le fichier bancaire (CSV/OFX/MT940) et
+// pousse un tableau JSON ; le backend ne parse aucun fichier.
+//
+// Colonnes d'IDENTITÉ (organizationId, importBatchId, valueDate, amountCentimes,
+// rawLabel, fingerprint, createdAt) IMMUABLES en base : trigger
+// bank_transaction_identity_immutable (pattern J1/E1). DELETE interdit (même
+// trigger). Les colonnes d'ÉTAT (state, matchedInvoiceId, matchedPaymentId,
+// resolvedByUserId, resolvedAt, counterpartyLabel, bankRef) restent mutables :
+// unmatched → matched | ignored, jamais l'inverse dans ce lot.
+//
+// fingerprint = SHA-256(organizationId ‖ valueDate ISO date ‖ amountCentimes ‖
+// rawLabel normalisé), @unique → ré-importer le même relevé ne crée pas de
+// doublons. Table scopée organisation → politique RLS standard (pas
+// cross-org comme merkle_anchor_batch).
+model BankTransaction {
+  id                String               @id @default(uuid())
+  organizationId    String               @map("organization_id")
+  // Regroupe les lignes d'un même import (affichage + audit). Simple texte —
+  // pas d'agrégat BankStatementImport dans ce lot (fast-follow).
+  importBatchId     String               @map("import_batch_id")
+  // Date de valeur, jamais l'heure (@db.Date) — c'est la granularité des
+  // relevés bancaires guinéens et ce qui entre dans l'empreinte.
+  valueDate         DateTime             @map("value_date") @db.Date
+  // Centimes GNF, toujours positif : virements ENTRANTS seulement.
+  amountCentimes    BigInt               @map("amount_centimes")
+  // Libellé brut du relevé — peut contenir nom / NIF / IBAN du donneur d'ordre.
+  // Jamais loggé, scopé à l'organisation (RLS).
+  rawLabel          String               @map("raw_label")
+  counterpartyLabel String?              @map("counterparty_label")
+  bankRef           String?              @map("bank_ref")
+  fingerprint       String               @unique
+  state             BankTransactionState @default(unmatched)
+  matchedInvoiceId  String?              @map("matched_invoice_id")
+  // @unique : une transaction ne produit qu'un Payment, un Payment n'est
+  // rapproché qu'une fois. Posé seulement après succès de recordBankTransferPayment.
+  matchedPaymentId  String?              @unique @map("matched_payment_id")
+  importedByUserId  String               @map("imported_by_user_id")
+  resolvedByUserId  String?              @map("resolved_by_user_id")
+  resolvedAt        DateTime?            @map("resolved_at")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  // onDelete: Restrict partout — ni organisation, ni facture, ni paiement, ni
+  // utilisateur impliqué dans un rapprochement ne se supprime (registre financier).
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  matchedInvoice Invoice?     @relation(fields: [matchedInvoiceId], references: [id], onDelete: Restrict)
+  matchedPayment Payment?     @relation(fields: [matchedPaymentId], references: [id], onDelete: Restrict)
+  importedBy     User         @relation("BankTransactionImporter", fields: [importedByUserId], references: [id], onDelete: Restrict)
+  resolvedBy     User?        @relation("BankTransactionResolver", fields: [resolvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, state])
+  @@map("bank_transaction")
+}
+
+enum BankTransactionState {
+  unmatched
+  matched
+  ignored
 }
