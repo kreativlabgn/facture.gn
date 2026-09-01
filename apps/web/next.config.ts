@@ -39,8 +39,8 @@ const withSerwist = withSerwistInit({
   cacheOnNavigation: false,
   reloadOnOnline: true,
   // Actif uniquement pour un vrai build de production (`next build --webpack`).
-  // Désactivé en dev, en test, et pendant `next typegen` — évite aussi
-  // l'avertissement « @serwist/next ne supporte pas Turbopack ».
+  // Désactivé en dev, en test et pendant `next typegen` (recommandation
+  // @serwist/next pour un projet où le dev tourne sur Turbopack).
   disable: process.env.NODE_ENV !== "production",
   // `[/\.map$/, /^manifest.*\.js$/]` = défauts de @serwist/webpack-plugin (à
   // recopier, un `exclude` explicite les remplace). Ajout : ne PAS précharger le

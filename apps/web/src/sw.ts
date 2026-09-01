@@ -30,11 +30,19 @@ declare const self: ServiceWorkerGlobalScope;
 // et un filet `NetworkOnly` final garantit que rien d'autre n'y arrive jamais.
 const runtimeCaching: RuntimeCaching[] = [
   // 1. Assets immuables produits par le build (hashés) — aucune donnée sensible.
+  //    `maxAgeFrom: "last-used"` : un chunk encore référencé n'est pas re-téléchargé
+  //    au bout de 48 h (il est immuable, seul son nom hashé change au déploiement).
   {
     matcher: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith("/_next/static/"),
     handler: new CacheFirst({
       cacheName: OFFLINE_SHELL_CACHE,
-      plugins: [new ExpirationPlugin({ maxEntries: 128, maxAgeSeconds: OFFLINE_MAX_AGE_SECONDS })],
+      plugins: [
+        new ExpirationPlugin({
+          maxEntries: 128,
+          maxAgeSeconds: OFFLINE_MAX_AGE_SECONDS,
+          maxAgeFrom: "last-used",
+        }),
+      ],
     }),
   },
   // 2. Navigations PUBLIQUES uniquement : accueil, /login, page de vérification
@@ -76,7 +84,8 @@ const serwist = new Serwist({
   navigationPreload: true,
   runtimeCaching,
   // Page servie quand une navigation hors-ligne ne correspond à rien en cache.
-  // `/~offline` est précachée (voir `additionalPrecacheEntries` dans next.config).
+  // OFFLINE_FALLBACK_PATH = `public/offline.html`, précaché automatiquement par
+  // `@serwist/next` (glob de `public/**`) — d'où sa présence dans le manifeste.
   fallbacks: {
     entries: [
       {
