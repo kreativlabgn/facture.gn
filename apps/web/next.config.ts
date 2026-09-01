@@ -41,11 +41,12 @@ const withSerwist = withSerwistInit({
   disable: process.env.NODE_ENV === "development",
   // `[/\.map$/, /^manifest.*\.js$/]` = défauts de @serwist/webpack-plugin (à
   // recopier, un `exclude` explicite les remplace). Ajout : ne PAS précharger le
-  // code des routes authentifiées — un visiteur qui vérifie un reçu sur une
-  // connexion mobile guinéenne (DAT) ne doit pas télécharger le dashboard pour
-  // rien. Ces chunks sont récupérés à la demande à la navigation, puis mis en
-  // cache par la règle runtime `/_next/static/` si l'utilisateur se connecte.
-  exclude: [/\.map$/, /^manifest.*\.js$/, /\/chunks\/app\/(dashboard|cabinet)\//],
+  // code des routes hors du flux public de vérification (dashboard, cabinet,
+  // paiement) — un visiteur qui vérifie un reçu sur une connexion mobile
+  // guinéenne (DAT) ne doit pas les télécharger pour rien. Ces chunks sont
+  // récupérés à la demande à la navigation, puis mis en cache par la règle
+  // runtime `/_next/static/` si l'utilisateur s'y rend réellement.
+  exclude: [/\.map$/, /^manifest.*\.js$/, /\/chunks\/app\/(dashboard|cabinet|pay)\//],
 });
 
 export default withSerwist(nextConfig);

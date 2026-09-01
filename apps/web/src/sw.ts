@@ -4,6 +4,7 @@ import { CacheFirst, ExpirationPlugin, NetworkFirst, NetworkOnly, Serwist } from
 
 import {
   isPubliclyCacheableNavigation,
+  isSensitiveRoute,
   OFFLINE_FALLBACK_PATH,
   OFFLINE_MAX_AGE_SECONDS,
   OFFLINE_PAGES_CACHE,
@@ -39,9 +40,15 @@ const runtimeCaching: RuntimeCaching[] = [
   // 2. Navigations PUBLIQUES uniquement : accueil, /login, page de vérification
   //    /{certificationId}. NetworkFirst → le réseau prime toujours s'il répond ;
   //    le cache ne sert que hors-ligne, expiré après 48 h.
+  //    Le `!isSensitiveRoute` est redondant (isPubliclyCacheableNavigation le
+  //    vérifie déjà) — ceinture + bretelles vu l'enjeu (jamais /dashboard,
+  //    /cabinet, /pay en cache).
   {
     matcher: ({ request, url, sameOrigin }) =>
-      sameOrigin && request.mode === "navigate" && isPubliclyCacheableNavigation(url.pathname),
+      sameOrigin &&
+      request.mode === "navigate" &&
+      !isSensitiveRoute(url.pathname) &&
+      isPubliclyCacheableNavigation(url.pathname),
     handler: new NetworkFirst({
       cacheName: OFFLINE_PAGES_CACHE,
       networkTimeoutSeconds: 3,
