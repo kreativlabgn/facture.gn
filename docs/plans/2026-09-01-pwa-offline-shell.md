@@ -49,12 +49,12 @@ n'est mis en cache, l'app ne s'ouvre même pas hors-ligne. La cible DAT
 
 ## Solution retenue (5 lignes)
 Introduire un **service worker Serwist** : (1) **précache** de l'App Shell (JS/CSS
-du build, fonts, page d'accueil, page fallback `/~offline`) ; (2) **cache runtime
+du build, fonts, page d'accueil, page fallback `/offline.html`) ; (2) **cache runtime
 NetworkFirst** des navigations vers `/` et `/[certificationId]` (expiration 48 h,
 ~60 entrées max) ; (3) **exclusion stricte** de toute route sensible
 (`/dashboard`, `/cabinet`, `/pay`, `/api`) via une **fonction pure testée**
 `offlineCachePolicy` ; (4) une **bannière client** `OfflineBanner` (écoute
-`online`/`offline`) et une **page fallback** `/~offline` cohérentes avec la
+`online`/`offline`) et une **page fallback** `/offline.html` cohérentes avec la
 charte. Le moteur de sync CRDT et le cache du dashboard sont explicitement
 différés.
 
@@ -79,7 +79,7 @@ différés.
 ## Découpage en tâches bite-sized
 
 ### Groupe A — Politique de cache pure (testable / livrable seule)
-- [ ] [P] A1 : `apps/web/src/lib/offline-cache-policy.ts` :
+- [x] [P] A1 : `apps/web/src/lib/offline-cache-policy.ts` :
   - `OFFLINE_SHELL_CACHE`, `OFFLINE_PAGES_CACHE`, `OFFLINE_PAGES_MAX_ENTRIES = 60`,
     `OFFLINE_MAX_AGE_SECONDS = 172_800` (48 h), `OFFLINE_FALLBACK_PATH = "/~offline"`.
   - `isPubliclyCacheableNavigation(pathname: string): boolean` — `true` pour `/`,
@@ -91,57 +91,57 @@ différés.
     (jamais les deux). Réservés connus (`RESERVED_TOP_SEGMENTS = ["dashboard",
     "cabinet", "pay", "login", "api", "_next", "manifest.webmanifest", "sw.js",
     "favicon.ico"]`) exclus de la forme `/{certificationId}`.
-- [ ] [P] A2 : `apps/web/src/lib/offline-cache-policy.spec.ts` (voir « Tests »).
+- [x] [P] A2 : `apps/web/src/lib/offline-cache-policy.spec.ts` (voir « Tests »).
 
 ### Groupe B — Service worker Serwist (dépend de A)
-- [ ] B1 : `pnpm --filter @facture-gn/web add serwist && pnpm --filter @facture-gn/web add -D @serwist/next` ;
+- [x] B1 : `pnpm --filter @facture-gn/web add serwist && pnpm --filter @facture-gn/web add -D @serwist/next` ;
   puis `pnpm audit --prod` + le `audit-ci` du repo → **zéro HIGH/CRITICAL**, sinon
   on s'arrête et on rouvre la question d'outillage.
-- [ ] B2 : `apps/web/src/sw.ts` — entrée Serwist :
+- [x] B2 : `apps/web/src/sw.ts` — entrée Serwist :
   - `import { defaultCache } from "@serwist/next/worker"` ; `Serwist({ precacheEntries: self.__SW_MANIFEST, skipWaiting: true, clientsClaim: true, navigationPreload: true })`.
   - `runtimeCaching` : règle `NetworkFirst` sur `({ request, url }) => request.mode === "navigate" && isPubliclyCacheableNavigation(url.pathname)` →
     cache `OFFLINE_PAGES_CACHE`, `ExpirationPlugin({ maxEntries: OFFLINE_PAGES_MAX_ENTRIES, maxAgeSeconds: OFFLINE_MAX_AGE_SECONDS })`,
     `networkTimeoutSeconds: 3`.
   - `fallbacks` : navigation non résolue (offline + non cachée) → `OFFLINE_FALLBACK_PATH`.
   - **Aucune** règle qui matche `isSensitiveRoute` — vérifié par revue + commentaire explicite.
-- [ ] B3 : `apps/web/next.config.ts` — envelopper l'export dans
+- [x] B3 : `apps/web/next.config.ts` — envelopper l'export dans
   `withSerwist({ swSrc: "src/sw.ts", swDest: "public/sw.js", cacheOnNavigation: true, reloadOnOnline: true, disable: process.env.NODE_ENV === "development" })`.
   **Conserver** `agentRules: false` et `async headers()` existants (X-Frame-Options,
   X-Content-Type-Options).
-- [ ] B4 : `apps/web/tsconfig.sw.json` (ou `compilerOptions.lib` ciblé) —
+- [x] B4 : `apps/web/tsconfig.sw.json` (ou `compilerOptions.lib` ciblé) —
   `lib: ["webworker", "esnext"]`, `types: ["@serwist/next/typings"]` pour `src/sw.ts`
   uniquement ; inclure dans le `tsc --noEmit` du projet sans casser le reste.
-- [ ] B5 : `apps/web/.gitignore` — ajouter `public/sw*.js` et
+- [x] B5 : `apps/web/.gitignore` — ajouter `public/sw*.js` et
   `public/swe-worker-*.js` (générés au build, jamais commités).
 
 ### Groupe C — App Shell offline UX
-- [ ] [P] C1 : `apps/web/src/app/~offline/page.tsx` — page **statique** (pas de
+- [x] [P] C1 : `apps/web/public/offline.html` — page **statique** (pas de
   fetch), charte (`SiteHeader`, `rounded-2xl`, `font-display`), message « Vous
   êtes hors connexion. La dernière vérification consultée reste accessible ;
   reconnectez-vous pour une vérification à jour. » + lien `/`. `export const dynamic = "force-static"`.
-- [ ] [P] C2 : `apps/web/src/components/OfflineBanner.tsx` — `"use client"`,
+- [x] [P] C2 : `apps/web/src/components/OfflineBanner.tsx` — `"use client"`,
   `useSyncExternalStore` sur `navigator.onLine` + events `online`/`offline`,
   bannière discrète (bande `bg-navy-950/…`, texte court, `role="status"`,
   `aria-live="polite"`), rien à l'hydratation si en ligne. Aucune dépendance.
-- [ ] C3 : `apps/web/src/app/layout.tsx` — monter `<OfflineBanner />` en tête de
+- [x] C3 : `apps/web/src/app/layout.tsx` — monter `<OfflineBanner />` en tête de
   `<body>` (au-dessus de `{children}`), et ajouter le `<meta name="theme-color">`
   si absent. `@serwist/next` enregistre le SW automatiquement (`register: true`
   par défaut) — **pas** de composant d'enregistrement manuel sauf si vérifié
   nécessaire.
-- [ ] C4 : `apps/web/public/manifest.webmanifest` — ajouter `"id": "/"`,
+- [x] C4 : `apps/web/public/manifest.webmanifest` — ajouter `"id": "/"`,
   `"scope": "/"`, `"description": "…"`. **Pas d'icônes** (fast-follow).
 
 ### Groupe D — Docs
-- [ ] D1 : ce plan.
-- [ ] D2 : `docs/architecture/adr-e5-pwa-offline.md` (**ADR-118 provisoire**, `V/`
+- [x] D1 : ce plan.
+- [x] D2 : `docs/architecture/adr-e5-pwa-offline.md` (**ADR-118 provisoire**, `V/`
   sale) : Serwist vs next-pwa/Workbox-main, périmètre lecture seule, routes
   sensibles jamais cachées, NetworkFirst + 48 h, sync CRDT + cache dashboard
   différés, fast-follows (icônes/install, précache de la police, `/pay` jamais).
-- [ ] D3 : `docs/runbooks/pwa-offline.md` — noms de caches, ce qui est / n'est
+- [x] D3 : `docs/runbooks/pwa-offline.md` — noms de caches, ce qui est / n'est
   pas caché, comment inspecter le SW (DevTools → Application), comment forcer une
   purge (bump de version Serwist / `caches.delete`), comportement au déploiement
   (`skipWaiting`).
-- [ ] D4 : `apps/web/README.md` — section « PWA / offline » (build génère
+- [x] D4 : `apps/web/README.md` — section « PWA / offline » (build génère
   `public/sw.js`, désactivé en dev).
 
 ## Tests à écrire AVANT le code
@@ -198,7 +198,7 @@ différés.
   allowlist publique, aucune règle runtime générique « toutes les navigations ».
 - **R2 — vérification périmée servie hors-ligne (facture annulée affichée
   « valide »).** → `NetworkFirst` (réseau prioritaire), expiration 48 h,
-  `OfflineBanner` + texte de `/~offline` avertissent que l'affichage peut dater.
+  `OfflineBanner` + texte de `/offline.html` avertissent que l'affichage peut dater.
   Comportement déjà admis par la DAT pour la vérification offline.
 - **R3 — `next build` casse en CI / Docker (Serwist au build).** → `disable` en
   dev, build testé localement + le `Dockerfile` `apps/web` (Lot G) rejoué ;
@@ -209,7 +209,7 @@ différés.
 - **R5 — SW « collant » : ancien App Shell servi après un déploiement.** →
   `skipWaiting: true` + `clientsClaim: true` + `reloadOnOnline: true` ;
   documenté dans le runbook (purge manuelle = bump de révision Serwist).
-- **R6 — `/~offline` ou l'App Shell référence une police Google non précachée →
+- **R6 — `/offline.html` ou l'App Shell référence une police Google non précachée →
   fallback moche hors-ligne.** → inclure les fonts `next/font` dans le précache
   (elles sont self-hostées par `next/font/google` dans `/_next/static`, donc
   capturées par `self.__SW_MANIFEST`) ; vérifié en test manuel offline, noté au
@@ -221,7 +221,7 @@ différés.
 ## Séquence de revue
 Groupes A→D livrés puis : `dev-code-reviewer` + `dev-security-reviewer`
 (sous-agent — mise en cache de contenu public + denylist authentifiée) +
-`dev-frontend-quality` (sous-agent — `OfflineBanner`, `/~offline`, cohérence
+`dev-frontend-quality` (sous-agent — `OfflineBanner`, `/offline.html`, cohérence
 charte) en parallèle. `dev-architect` **non requis** : pas de nouvelle brique
 back-end, périmètre volontairement réduit à l'App Shell ; le vrai morceau
 d'architecture (Sync Engine CRDT) fera l'objet de son propre `dev-architect` au

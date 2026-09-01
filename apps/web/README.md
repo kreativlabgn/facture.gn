@@ -20,6 +20,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## PWA / offline (Phase 1, ADR-118)
+
+`pnpm build` lance `next build --webpack` (Serwist ne supporte pas Turbopack) et
+génère `public/sw.js` (gitignoré). Le service worker précache l'App Shell et met
+en cache, en `NetworkFirst` / 48 h, l'accueil et les pages de vérification
+publiques `/[certificationId]` — **jamais** `/dashboard`, `/cabinet`, `/pay`,
+`/api`. Le SW est désactivé en `next dev`. Détails : `docs/runbooks/pwa-offline.md`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
