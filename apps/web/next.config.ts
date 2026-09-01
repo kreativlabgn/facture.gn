@@ -1,3 +1,4 @@
+import withSerwistInit from "@serwist/next";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -24,4 +25,31 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// PWA offline-first — Phase 1 (App Shell + vérification hors-ligne, ADR-118).
+//
+// `@serwist/next` compile `src/sw.ts` via son plugin webpack → `public/sw.js`
+// (gitignoré). Il ne supporte PAS Turbopack : le script `build` de ce package
+// force donc `next build --webpack` (voir package.json + docs/runbooks/pwa-offline.md).
+// Désactivé en dev (`next dev` peut rester sur Turbopack, le SW n'y tourne pas).
+const withSerwist = withSerwistInit({
+  swSrc: "src/sw.ts",
+  swDest: "public/sw.js",
+  // Le flux public de vérification est un chargement pleine page (scan QR / lien
+  // SMS), pas une navigation `next/link` — inutile d'ajouter le surcoût réseau.
+  cacheOnNavigation: false,
+  reloadOnOnline: true,
+  // Actif uniquement pour un vrai build de production (`next build --webpack`).
+  // Désactivé en dev, en test et pendant `next typegen` (recommandation
+  // @serwist/next pour un projet où le dev tourne sur Turbopack).
+  disable: process.env.NODE_ENV !== "production",
+  // `[/\.map$/, /^manifest.*\.js$/]` = défauts de @serwist/webpack-plugin (à
+  // recopier, un `exclude` explicite les remplace). Ajout : ne PAS précharger le
+  // code des routes hors du flux public de vérification (dashboard, cabinet,
+  // paiement) — un visiteur qui vérifie un reçu sur une connexion mobile
+  // guinéenne (DAT) ne doit pas les télécharger pour rien. Ces chunks sont
+  // récupérés à la demande à la navigation, puis mis en cache par la règle
+  // runtime `/_next/static/` si l'utilisateur s'y rend réellement.
+  exclude: [/\.map$/, /^manifest.*\.js$/, /\/chunks\/app\/(dashboard|cabinet|pay)\//],
+});
+
+export default withSerwist(nextConfig);

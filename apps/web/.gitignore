@@ -17,6 +17,11 @@
 /.next/
 /out/
 
+# serwist — service worker généré au build (PWA offline-first, ADR-118)
+/public/sw.js
+/public/sw.js.map
+/public/swe-worker-*.js
+
 # production
 /build
 

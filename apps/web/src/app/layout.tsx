@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Poppins, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 // Système typographique verrouillé par la Charte Graphique v1.3 : Poppins
 // (marque, titres — jamais en dessous de 12px), Inter (texte courant),
@@ -40,10 +41,16 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
 };
 
+// PWA offline-first — Charte v1.3, couleur de fond de la barre système.
+export const viewport = { themeColor: "#0b1d3a" };
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="fr" className={`${inter.variable} ${poppins.variable} ${jetbrainsMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-grey text-navy-950">{children}</body>
+      <body className="min-h-full flex flex-col bg-grey text-navy-950">
+        <OfflineBanner />
+        {children}
+      </body>
     </html>
   );
 }

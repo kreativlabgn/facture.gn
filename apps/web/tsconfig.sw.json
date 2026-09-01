@@ -1,0 +1,11 @@
+{
+  "//": "PWA offline-first (ADR-118) — le service worker src/sw.ts tourne dans un contexte WebWorker, pas DOM : lib et globals distincts du reste de l'app. Exclu du tsconfig.json principal, typé ici.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "webworker"],
+    "types": ["@serwist/next/typings"],
+    "noEmit": true
+  },
+  "include": ["src/sw.ts", "src/lib/offline-cache-policy.ts"],
+  "exclude": ["node_modules"]
+}
