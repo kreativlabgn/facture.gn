@@ -32,7 +32,7 @@ export function OfflineBanner() {
       aria-live="polite"
       className="bg-navy-950 px-4 py-2 text-center text-xs font-medium text-white"
     >
-      Vous êtes hors connexion — seules les vérifications déjà consultées sont à jour.
+      Hors connexion — seules les vérifications déjà consultées sont à jour.
     </div>
   );
 }
