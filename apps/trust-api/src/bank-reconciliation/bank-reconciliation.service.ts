@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { BankTransaction, Payment, Prisma, PrismaClient } from "@facture-gn/db";
 
 import { PRISMA_CLIENT } from "../common/prisma.module";
@@ -48,6 +48,8 @@ export interface TransactionWithSuggestions extends BankTransaction {
 
 @Injectable()
 export class BankReconciliationService {
+  private readonly logger = new Logger(BankReconciliationService.name);
+
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly paymentsService: PaymentsService,
@@ -95,8 +97,16 @@ export class BankReconciliationService {
           where: { fingerprint: fp },
           select: { id: true },
         });
+        if (!existing) {
+          // P2002 sur `fingerprint` garantit que la ligne existe (DELETE est
+          // interdit par trigger) — une absence ici est une incohérence à
+          // remonter, jamais un id vide silencieux dans le rapport.
+          throw new Error(
+            `Incohérence import rapprochement bancaire : ligne ${index} en doublon (P2002) mais introuvable par empreinte`,
+          );
+        }
         duplicate += 1;
-        results.push({ index, status: "duplicate", transactionId: existing?.id ?? "" });
+        results.push({ index, status: "duplicate", transactionId: existing.id });
       }
     }
 
@@ -189,6 +199,9 @@ export class BankReconciliationService {
         transaction.matchedInvoiceId === invoiceId &&
         transaction.matchedPaymentId === null
       ) {
+        this.logger.warn(
+          `Reprise d'un rapprochement bancaire interrompu — transaction ${transactionId}, facture ${invoiceId}`,
+        );
         const recovered = await this.paymentsService.recordBankTransferPayment(
           invoiceId,
           { amount: transaction.amountCentimes },
@@ -213,17 +226,29 @@ export class BankReconciliationService {
         `bank-reconciliation:${transactionId}`,
       );
     } catch (error) {
-      // Annule la revendication : la transaction redevient rapprochable.
-      await this.prisma.bankTransaction.updateMany({
-        where: { id: transactionId, state: "matched" },
-        data: {
-          state: "unmatched",
-          matchedInvoiceId: null,
-          matchedPaymentId: null,
-          resolvedByUserId: null,
-          resolvedAt: null,
-        },
-      });
+      // Annule la revendication : la transaction redevient rapprochable. Cette
+      // compensation ne doit JAMAIS masquer l'erreur métier d'origine (souvent
+      // actionnable : « facture non payable », « montant > solde dû ») — si elle
+      // échoue elle-même, on la logue avec le contexte et on relève quand même
+      // l'erreur d'origine. La transaction reste alors `matched` sans paiement :
+      // un `confirm` ultérieur la reprend via la branche de reprise ci-dessus.
+      try {
+        await this.prisma.bankTransaction.updateMany({
+          where: { id: transactionId, state: "matched" },
+          data: {
+            state: "unmatched",
+            matchedInvoiceId: null,
+            matchedPaymentId: null,
+            resolvedByUserId: null,
+            resolvedAt: null,
+          },
+        });
+      } catch (revertError) {
+        this.logger.error(
+          `Échec de l'annulation de la revendication du rapprochement — transaction ${transactionId} laissée en état 'matched' sans paiement, à reprendre`,
+          revertError instanceof Error ? revertError.stack : String(revertError),
+        );
+      }
       throw error;
     }
 

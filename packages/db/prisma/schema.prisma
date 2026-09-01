@@ -1682,11 +1682,15 @@ enum DataRightsRequestOutcome {
 // pousse un tableau JSON ; le backend ne parse aucun fichier.
 //
 // Colonnes d'IDENTITÉ (organizationId, importBatchId, valueDate, amountCentimes,
-// rawLabel, fingerprint, createdAt) IMMUABLES en base : trigger
+// rawLabel, fingerprint, importedByUserId, createdAt) IMMUABLES en base : trigger
 // bank_transaction_identity_immutable (pattern J1/E1). DELETE interdit (même
 // trigger). Les colonnes d'ÉTAT (state, matchedInvoiceId, matchedPaymentId,
 // resolvedByUserId, resolvedAt, counterpartyLabel, bankRef) restent mutables :
 // unmatched → matched | ignored, jamais l'inverse dans ce lot.
+//
+// CHECK bank_transaction_state_consistency : unmatched ⟺ aucun résolveur ;
+// matched ⟺ matchedInvoiceId renseigné ; matchedPaymentId renseigné ⟹ matched.
+// CHECK bank_transaction_amount_positive : virements ENTRANTS uniquement.
 //
 // fingerprint = SHA-256(organizationId ‖ valueDate ISO date ‖ amountCentimes ‖
 // rawLabel normalisé), @unique → ré-importer le même relevé ne crée pas de

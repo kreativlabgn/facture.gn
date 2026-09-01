@@ -44,12 +44,17 @@ CREATE TABLE "bank_transaction" (
     -- Virements ENTRANTS uniquement : rend l'invariant irreprésentable en base,
     -- pas seulement vérifié par le DTO Zod (.positive()).
     CONSTRAINT "bank_transaction_amount_positive" CHECK ("amount_centimes" > 0),
-    -- Lie l'enum d'état aux colonnes de résolution : resolved <=> resolved_at ;
-    -- matched => facture rapprochée. Un état incohérent devient impossible.
+    -- Lie l'enum d'état aux colonnes de résolution — rend les états incohérents
+    -- IRREPRÉSENTABLES, pas seulement vérifiés par le service :
+    --   unmatched  <=> aucun résolveur (resolved_at / resolved_by_user_id nuls)
+    --   matched    <=> matched_invoice_id renseigné (ignored ne l'a jamais)
+    --   matched_payment_id renseigné => state = matched (null tolérable tant que
+    --     le paiement n'est pas encore créé, entre la revendication et l'étape 3)
     CONSTRAINT "bank_transaction_state_consistency" CHECK (
       (("state" = 'unmatched') = ("resolved_at" IS NULL))
       AND (("state" = 'unmatched') = ("resolved_by_user_id" IS NULL))
-      AND (("state" = 'matched') OR ("matched_invoice_id" IS NULL AND "matched_payment_id" IS NULL))
+      AND (("state" = 'matched') = ("matched_invoice_id" IS NOT NULL))
+      AND (("state" = 'matched') OR ("matched_payment_id" IS NULL))
     )
 );
 

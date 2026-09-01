@@ -324,6 +324,26 @@ describe("BankReconciliationService.confirmMatch", () => {
     expect(payments.recordBankTransferPayment).not.toHaveBeenCalled();
   });
 
+  it("si l'annulation de la revendication échoue, l'erreur métier d'origine remonte quand même", async () => {
+    const prisma = createFakePrisma({ invoices });
+    const txId = await seedUnmatched(prisma);
+    const businessError = new ConflictException("montant supérieur au solde dû");
+    const payments = createFakePayments({
+      recordBankTransferPayment: vi.fn(() => Promise.reject(businessError)),
+    });
+    // la compensation (2ᵉ updateMany) explose
+    let updateManyCalls = 0;
+    const realUpdateMany = prisma.bankTransaction.updateMany;
+    prisma.bankTransaction.updateMany = vi.fn((args: any) => {
+      updateManyCalls += 1;
+      if (updateManyCalls >= 2) return Promise.reject(new Error("DB indisponible"));
+      return realUpdateMany(args);
+    });
+    const service = new BankReconciliationService(prisma, payments);
+
+    await expect(service.confirmMatch(ORG, txId, "inv-1", USER)).rejects.toBe(businessError);
+  });
+
   it("transaction déjà matched → ConflictException, aucun appel à recordBankTransferPayment", async () => {
     const prisma = createFakePrisma({ invoices });
     const txId = await seedUnmatched(prisma);
