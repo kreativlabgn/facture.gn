@@ -12,5 +12,9 @@ import { PaymentsService } from "./payments.service";
   imports: [MoneyClientModule, CommissionBypassModule, RenderingModule],
   controllers: [PaymentsController],
   providers: [PaymentsService],
+  // Lot rapprochement bancaire (ADR-052) — BankReconciliationModule réutilise
+  // recordBankTransferPayment (chemin C3) plutôt que de dupliquer la logique
+  // d'idempotence / paiement partiel / transitions de statut.
+  exports: [PaymentsService],
 })
 export class PaymentsModule {}

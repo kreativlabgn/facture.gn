@@ -91,7 +91,7 @@ d'identité de `BankTransaction` immuables en base (trigger, pattern J1/E1) ;
 ## Découpage en tâches bite-sized
 
 ### Groupe A — Modèle `BankTransaction` + migration — testable/livrable seul
-- [ ] A1 : `packages/db/prisma/schema.prisma` — `model BankTransaction` :
+- [x] A1 : `packages/db/prisma/schema.prisma` — `model BankTransaction` :
   `id`, `organizationId`, `importBatchId String`, `valueDate DateTime`
   (`@db.Date` — date de valeur, pas d'heure), `amountCentimes BigInt`
   (positif — virements **entrants** seulement), `rawLabel String`,
@@ -103,9 +103,9 @@ d'identité de `BankTransaction` immuables en base (trigger, pattern J1/E1) ;
   (`onDelete: Restrict`), `matchedPayment Payment?` (`onDelete: Restrict`).
   `@@index([organizationId, state])`. `@@map("bank_transaction")`. Enum
   `BankTransactionState { unmatched  matched  ignored }`.
-- [ ] A2 : `Invoice` + `Payment` + `Organization` + `User` — relations inverses
+- [x] A2 : `Invoice` + `Payment` + `Organization` + `User` — relations inverses
   (`bankTransactionsMatched Invoice[]` etc. — nommage cohérent avec l'existant).
-- [ ] A3 : migration manuelle `packages/db/prisma/migrations/<ts>_bank_transaction/migration.sql` :
+- [x] A3 : migration manuelle `packages/db/prisma/migrations/<ts>_bank_transaction/migration.sql` :
   `CREATE TYPE "BankTransactionState"`, `CREATE TABLE`, index (`fingerprint`
   unique, `matched_payment_id` unique, `(organization_id, state)`), FK
   (`organization_id`, `matched_invoice_id` ON DELETE RESTRICT, `matched_payment_id`
@@ -117,13 +117,13 @@ d'identité de `BankTransaction` immuables en base (trigger, pattern J1/E1) ;
   Trigger `bank_transaction_identity_immutable BEFORE UPDATE OR DELETE FOR EACH ROW`.
   (TRUNCATE non couvert — reset CI, cohérent J1.) Copie du patron
   `20260830150000_merkle_anchor_batch`.
-- [ ] A4 : `pnpm --filter @facture-gn/db db:generate && build`.
-- [ ] A5 : `packages/db/src/bank-transaction-identity-immutable.integration.spec.ts`
+- [x] A4 : `pnpm --filter @facture-gn/db db:generate && build`.
+- [x] A5 : `packages/db/src/bank-transaction-identity-immutable.integration.spec.ts`
   — gated `DATABASE_URL` (pattern `merkle` / `invoice-event`) : INSERT OK,
   `UPDATE state` OK, `UPDATE amount_centimes` rejeté, `DELETE` rejeté.
 
 ### Groupe B — Moteur de rapprochement (pur) — testable/livrable seul
-- [ ] B1 : `apps/trust-api/src/bank-reconciliation/bank-matching.ts` (pur) :
+- [x] B1 : `apps/trust-api/src/bank-reconciliation/bank-matching.ts` (pur) :
   - `normalizeLabel(s): string` — minuscules, espaces/ponctuation compressés,
     accents retirés (pour l'empreinte ET la recherche de référence).
   - `fingerprint({ organizationId, valueDate, amountCentimes, rawLabel }): string`
@@ -139,30 +139,30 @@ d'identité de `BankTransaction` immuables en base (trigger, pattern J1/E1) ;
     `strong` si (montant exact **ET** référence), `probable` si l'un des deux
     forts, `weak` sinon (fenêtre seule). Trié `strong > probable > weak`, puis
     `amountDue` le plus proche. Jamais de suggestion sans au moins une `reason`.
-- [ ] B2 : `apps/trust-api/src/bank-reconciliation/bank-reconciliation.constants.ts` :
+- [x] B2 : `apps/trust-api/src/bank-reconciliation/bank-reconciliation.constants.ts` :
   `MATCH_DATE_WINDOW_DAYS = 30`, `MAX_IMPORT_BATCH_SIZE = 500`,
   `MAX_SUGGESTIONS_PER_TX = 10`.
 
 ### Groupe C — `BankReconciliationService` — testable/livrable seul
-- [ ] C1 : `apps/trust-api/src/bank-reconciliation/dto/import-bank-transactions.dto.ts` —
+- [x] C1 : `apps/trust-api/src/bank-reconciliation/dto/import-bank-transactions.dto.ts` —
   Zod : `{ importBatchLabel?: string, transactions: Array&lt;{ valueDate: string (date ISO), amountCentimes: coerce.bigint().positive(), rawLabel: string.min(1), counterpartyLabel?: string, bankRef?: string }&gt; }`,
   tableau `.min(1).max(MAX_IMPORT_BATCH_SIZE)`.
-- [ ] C2 : `apps/trust-api/src/bank-reconciliation/dto/confirm-match.dto.ts` —
+- [x] C2 : `apps/trust-api/src/bank-reconciliation/dto/confirm-match.dto.ts` —
   `{ invoiceId: z.string().uuid() }`.
-- [ ] C3 : `bank-reconciliation.service.ts` — `importTransactions(organizationId, dto, userId)` :
+- [x] C3 : `bank-reconciliation.service.ts` — `importTransactions(organizationId, dto, userId)` :
   génère un `importBatchId` (uuid) ; pour chaque ligne calcule l'empreinte ;
   `createMany({ skipDuplicates: true })` OU boucle `create` + catch P2002 →
   compte `imported` vs `duplicate` par ligne ; retourne
   `{ importBatchId, imported, duplicate, results: [...] }`. Aucune suggestion
   calculée ici (lecture séparée).
-- [ ] C4 : `bank-reconciliation.service.ts` — `listTransactions(organizationId, { state?, importBatchId?, take?, skip? })` :
+- [x] C4 : `bank-reconciliation.service.ts` — `listTransactions(organizationId, { state?, importBatchId?, take?, skip? })` :
   `findMany` scopé org, trié `valueDate desc`. Pour les transactions
   `unmatched`, calcule les suggestions : **un seul** `invoice.findMany` des
   factures payables de l'org (`status ∈ {issued, partially_paid}`), puis
   `suggestMatches` par transaction en mémoire (jamais un N+1). Retourne
   `[{ ...transaction, suggestions }]`, `suggestions` plafonné à
   `MAX_SUGGESTIONS_PER_TX`.
-- [ ] C5 : `bank-reconciliation.service.ts` — `confirmMatch(organizationId, transactionId, invoiceId, userId)` :
+- [x] C5 : `bank-reconciliation.service.ts` — `confirmMatch(organizationId, transactionId, invoiceId, userId)` :
   1. `updateMany({ where: { id: transactionId, organizationId, state: "unmatched" }, data: { state: "matched", matchedInvoiceId: invoiceId, resolvedByUserId: userId, resolvedAt: now } })`
      — **revendication d'abord** ; `count === 0` → `ConflictException`
      (« transaction déjà rapprochée / ignorée / introuvable »). Ferme la course
@@ -175,32 +175,32 @@ d'identité de `BankTransaction` immuables en base (trigger, pattern J1/E1) ;
      ≤ `amountDue` + idempotence + `applyPaymentToInvoice` + `regenerateLink`.
   3. `bankTransaction.update({ where: { id: transactionId }, data: { matchedPaymentId: payment.id } })`.
   4. retourne `{ transaction, payment }`.
-- [ ] C6 : `bank-reconciliation.service.ts` — `ignoreTransaction(organizationId, transactionId, userId)` :
+- [x] C6 : `bank-reconciliation.service.ts` — `ignoreTransaction(organizationId, transactionId, userId)` :
   `updateMany({ where: { id, organizationId, state: "unmatched" }, data: { state: "ignored", resolvedByUserId: userId, resolvedAt: now } })` ;
   `count === 0` → `ConflictException`. (Pas de « ré-activation » d'une
   transaction ignorée dans ce lot — fast-follow si besoin.)
 
 ### Groupe D — Contrôleur + module + câblage
-- [ ] D1 : `bank-reconciliation.controller.ts` — `@Controller("organizations/:id/bank-reconciliation")`,
+- [x] D1 : `bank-reconciliation.controller.ts` — `@Controller("organizations/:id/bank-reconciliation")`,
   `@ApiBearerAuth()`. Routes, toutes `@OrganizationIdSource("organization")`,
   `@Roles("owner", "admin", "accountant_internal")` :
   - `POST import` `{ transactions }` → `importTransactions(id, dto, user.id)`
   - `GET transactions` `?state=&importBatchId=&take=&skip=` → `listTransactions`
   - `POST transactions/:transactionId/confirm` `{ invoiceId }` → `confirmMatch(id, transactionId, dto.invoiceId, user.id)`
   - `POST transactions/:transactionId/ignore` → `ignoreTransaction(id, transactionId, user.id)`
-- [ ] D2 : `bank-reconciliation.module.ts` — `imports: [PaymentsModule]`,
+- [x] D2 : `bank-reconciliation.module.ts` — `imports: [PaymentsModule]`,
   `providers: [BankReconciliationService]`, `controllers: [BankReconciliationController]`.
   `PaymentsModule` gagne `exports: [PaymentsService]`.
-- [ ] D3 : `app.module.ts` — `BankReconciliationModule` après `DataRightsModule`.
-- [ ] D4 : `app.module.spec.ts` — le graphe DI compile (aucun secret nouveau).
-- [ ] D5 : `docs/runbooks/bank-reconciliation.md` — format JSON attendu, moteur de
+- [x] D3 : `app.module.ts` — `BankReconciliationModule` après `DataRightsModule`.
+- [x] D4 : `app.module.spec.ts` — le graphe DI compile (aucun secret nouveau).
+- [x] D5 : `docs/runbooks/bank-reconciliation.md` — format JSON attendu, moteur de
   suggestion, procédure de correction d'un faux rapprochement (avoir +
   remboursement), note LBC/FT, note RLS (`bank_transaction` scopé org).
-- [ ] D6 : `docs/architecture/adr-c-bank-reconciliation.md` (**ADR-117 provisoire**,
+- [x] D6 : `docs/architecture/adr-c-bank-reconciliation.md` (**ADR-117 provisoire**,
   `V/` sale) : import JSON, suggérer-puis-confirmer, empreinte, réutilisation du
   chemin C3, colonnes d'identité immuables, fast-follows (B2G Rail B, parsing
   fichier, agrégat d'import, dé-confirmation).
-- [ ] D7 : `docs/runbooks/rls-rollout.md` — `bank_transaction` scopé org
+- [x] D7 : `docs/runbooks/rls-rollout.md` — `bank_transaction` scopé org
   (politique RLS standard, pas cross-org comme merkle/data_rights).
 
 ## Tests à écrire AVANT le code

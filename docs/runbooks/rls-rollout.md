@@ -183,6 +183,19 @@ signale un bug ou un probing).
   `IS NULL OR`**, la purge serait silencieusement neutralisée (`deleteMany`
   count 0, aucune erreur) : prévoir alors un rôle/bypass dédié pour le job de
   rétention, et surveiller `trust_api_retention_rows_deleted_total`.
+- `bank_transaction` (rapprochement bancaire, ADR-117) porte `organization_id`
+  → politique `org_isolation` **standard** posée par la migration
+  `20260831130000_bank_transaction` (dormante, même forme `IS NULL OR …` que les
+  autres tables directes). `BankReconciliationService` utilise le `PrismaClient`
+  NON scopé mais filtre **toujours** explicitement sur `organizationId` (résolu
+  du path param `:id` par le `RolesGuard`) : la bascule phase 2 sur un rôle
+  applicatif ne change rien à son comportement. Table append-partielle : colonnes
+  d'identité immuables + `DELETE` interdit (trigger
+  `bank_transaction_identity_immutable`), colonnes d'état (`state`, `matched_*`,
+  `resolved_*`) mutées par `confirm` / `ignore` → l'étape 5
+  (`REVOKE UPDATE, DELETE, TRUNCATE … FROM facture_app`) devra **conserver le
+  `UPDATE`** sur `bank_transaction` (ou passer par un rôle dédié), comme pour
+  `customer`.
 - `data_rights_request` (J2) est **cross-organisation** : le chemin ops plateforme
   (`POST /internal/data-rights/*`) écrit des lignes `organization_id IS NULL`
   (demande transverse) → **jamais** de politique RLS dessus, comme

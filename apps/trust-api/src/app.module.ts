@@ -37,6 +37,7 @@ import { QueueModule } from "./queue/queue.module";
 import { RetentionModule } from "./retention/retention.module";
 import { MerkleAnchorModule } from "./certification/merkle-anchor/merkle-anchor.module";
 import { DataRightsModule } from "./data-rights/data-rights.module";
+import { BankReconciliationModule } from "./bank-reconciliation/bank-reconciliation.module";
 import { PendingMemberInvitesModule } from "./pending-member-invites/pending-member-invites.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
@@ -94,6 +95,9 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     MerkleAnchorModule,
     // Lot J2 — droits des personnes (L/2016/037) : accès + anonymisation.
     DataRightsModule,
+    // Lot rapprochement bancaire (ADR-052) — import de relevé, suggestion de
+    // correspondance facture, confirmation manuelle (chemin C3 réutilisé).
+    BankReconciliationModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même
