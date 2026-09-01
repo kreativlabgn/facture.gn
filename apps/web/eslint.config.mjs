@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Service worker généré au build par @serwist/next (PWA offline-first,
+    // ADR-118) — bundle minifié, gitignoré, jamais édité à la main.
+    "public/sw.js",
+    "public/sw.js.map",
+    "public/swe-worker-*.js",
   ]),
 ]);
 
