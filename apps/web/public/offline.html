@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hors connexion — facture.gn</title>
+    <meta name="theme-color" content="#0b1d3a" />
+    <!--
+      PWA offline-first — Phase 1 (ADR-118). Fichier 100 % STATIQUE servi par le
+      service worker quand une navigation hors-ligne ne correspond à rien en
+      cache. Aucune dépendance (JS, police distante) : il doit se rendre sans
+      réseau. Styles inline volontairement — palette de la Charte v1.3.
+    -->
+    <style>
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #f5f7f9;
+        color: #0b1d3a;
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      header {
+        border-bottom: 1px solid rgba(11, 29, 58, 0.12);
+        background: #fff;
+        padding: 16px;
+      }
+      header .wordmark {
+        max-width: 640px;
+        margin: 0 auto;
+        font-weight: 700;
+        font-size: 18px;
+      }
+      main {
+        flex: 1;
+        width: 100%;
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 48px 16px;
+      }
+      .card {
+        border: 1px solid rgba(11, 29, 58, 0.12);
+        background: #fff;
+        border-radius: 16px;
+        padding: 32px;
+        text-align: center;
+      }
+      .card h1 { font-size: 18px; font-weight: 700; }
+      .card p {
+        margin: 12px auto 0;
+        max-width: 22rem;
+        font-size: 14px;
+        color: rgba(11, 29, 58, 0.66);
+      }
+      .card a {
+        display: inline-block;
+        margin-top: 20px;
+        padding: 10px 24px;
+        border-radius: 10px;
+        background: #0b1d3a;
+        color: #fff;
+        font-weight: 600;
+        font-size: 14px;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header><div class="wordmark">facture.gn</div></header>
+    <main>
+      <div class="card">
+        <h1>Vous êtes hors connexion</h1>
+        <p>
+          Les vérifications déjà consultées sur cet appareil restent accessibles. Pour vérifier une
+          facture pour la première fois, ou obtenir un résultat à jour, reconnectez-vous à Internet.
+        </p>
+        <a href="/">Revenir à l'accueil</a>
+      </div>
+    </main>
+  </body>
+</html>
