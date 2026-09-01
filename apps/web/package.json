@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.sw.json",
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.sw.json",
     "test": "vitest run"
   },
   "dependencies": {

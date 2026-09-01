@@ -38,7 +38,10 @@ const withSerwist = withSerwistInit({
   // SMS), pas une navigation `next/link` — inutile d'ajouter le surcoût réseau.
   cacheOnNavigation: false,
   reloadOnOnline: true,
-  disable: process.env.NODE_ENV === "development",
+  // Actif uniquement pour un vrai build de production (`next build --webpack`).
+  // Désactivé en dev, en test, et pendant `next typegen` — évite aussi
+  // l'avertissement « @serwist/next ne supporte pas Turbopack ».
+  disable: process.env.NODE_ENV !== "production",
   // `[/\.map$/, /^manifest.*\.js$/]` = défauts de @serwist/webpack-plugin (à
   // recopier, un `exclude` explicite les remplace). Ajout : ne PAS précharger le
   // code des routes hors du flux public de vérification (dashboard, cabinet,
