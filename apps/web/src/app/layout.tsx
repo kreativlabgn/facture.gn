@@ -1,18 +1,17 @@
 import type { Metadata } from "next";
-import { Inter, Poppins, JetBrains_Mono } from "next/font/google";
+import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { OfflineBanner } from "@/components/OfflineBanner";
 
-// Système typographique verrouillé par la Charte Graphique v1.3 : Poppins
-// (marque, titres — jamais en dessous de 12px), Inter (texte courant),
-// JetBrains Mono (identifiants vérifiables déjà certifiés — certification
-// ID, montants, hash, jamais la saisie utilisateur — chasse fixe pour lever
-// toute ambiguïté 0/O, 1/l). Poids restreints aux poids RÉELLEMENT utilisés
-// par les composants (vérifié par grep sur tout apps/web/src), pas une
-// gamme large par défaut — chaque poids chargé est un aller-retour réseau
-// de plus sur une connexion mobile guinéenne coûteuse (DAT). La charte ne
-// définit d'ailleurs qu'UN SEUL poids mono ("code" = Bold, 700) — aucun
-// poids intermédiaire mono ne devrait donc jamais être introduit ici.
+// Système typographique de la maquette consolidée (ADR-102/103, polices
+// embarquées Space Grotesk / Inter / JetBrains Mono) : Space Grotesk (marque,
+// titres, boutons — jamais en dessous de 12px, sinon Inter prend le relais),
+// Inter (texte courant), JetBrains Mono (identifiants vérifiables DÉJÀ
+// certifiés — certification ID, montants, hash, timestamps ; jamais la saisie
+// utilisateur — chasse fixe pour lever l'ambiguïté 0/O, 1/l). Poids restreints
+// aux poids réellement utilisés — chaque poids chargé est un aller-retour
+// réseau de plus sur une connexion mobile guinéenne coûteuse (DAT). Un seul
+// poids mono (Bold 700, charte §Typographie).
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
@@ -20,10 +19,10 @@ const inter = Inter({
   display: "swap",
 });
 
-const poppins = Poppins({
-  variable: "--font-poppins",
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
   subsets: ["latin"],
-  weight: ["600", "700", "800"],
+  weight: ["500", "600", "700"],
   display: "swap",
 });
 
@@ -41,12 +40,15 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
 };
 
-// PWA offline-first — Charte v1.3, couleur de fond de la barre système.
+// PWA offline-first — Navy Atlantique, couleur de fond de la barre système.
 export const viewport = { themeColor: "#0b1d3a" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="fr" className={`${inter.variable} ${poppins.variable} ${jetbrainsMono.variable} h-full antialiased`}>
+    <html
+      lang="fr"
+      className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased`}
+    >
       <body className="min-h-full flex flex-col bg-grey text-navy-950">
         <OfflineBanner />
         {children}

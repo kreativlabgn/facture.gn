@@ -64,7 +64,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
             id="customerId"
             name="customerId"
             defaultValue=""
-            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+            className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
           >
             <option value="">Facture anonyme</option>
             {customers.map((customer) => (
@@ -83,7 +83,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
             id="documentType"
             name="documentType"
             defaultValue="invoice"
-            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+            className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
           >
             <option value="invoice">Facture</option>
             <option value="quote">Devis</option>
@@ -99,7 +99,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
             id="referenceMarche"
             name="referenceMarche"
             placeholder="TELEMO-2026-000123"
-            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+            className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
           />
         </div>
 
@@ -117,14 +117,14 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
                 value={line.description}
                 onChange={(event) => updateLine(index, { description: event.target.value })}
                 placeholder="Sac de riz 50kg"
-                className="rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+                className="rounded-lg border border-navy-200 bg-white px-3 py-2 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
               />
               <input
                 type="number"
                 min={1}
                 value={line.quantity}
                 onChange={(event) => updateLine(index, { quantity: event.target.value })}
-                className="rounded-lg border border-[#D1D5DB] bg-white px-2 py-2 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+                className="rounded-lg border border-navy-200 bg-white px-2 py-2 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
               />
               <input
                 type="number"
@@ -132,7 +132,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
                 value={line.unitPriceGnf}
                 onChange={(event) => updateLine(index, { unitPriceGnf: event.target.value })}
                 placeholder="85000"
-                className="rounded-lg border border-[#D1D5DB] bg-white px-2 py-2 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+                className="rounded-lg border border-navy-200 bg-white px-2 py-2 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
               />
               <button
                 type="button"

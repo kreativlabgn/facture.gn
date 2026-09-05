@@ -24,7 +24,7 @@ export default async function DashboardHomePage() {
         <h1 className="font-display text-2xl font-bold text-navy-950">Factures récentes</h1>
         <Link
           href="/dashboard/invoices/new"
-          className="rounded-[10px] bg-yellow px-5 py-2.5 font-display text-sm font-semibold text-navy-950 transition hover:brightness-95"
+          className="rounded-[10px] bg-or px-5 py-2.5 font-display text-sm font-semibold text-navy-950 transition hover:brightness-95"
         >
           + Émettre une facture
         </Link>

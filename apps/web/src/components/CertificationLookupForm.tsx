@@ -3,9 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
-// Champ + bouton conformes aux specs "Composants UI — Formulaires" de la
-// charte v1.3 : border default #D1D5DB, focus 2px Navy, label Poppins
-// SemiBold visible au-dessus (pas seulement aria-label — un placeholder seul
+// Champ + bouton conformes aux specs "Composants UI — Formulaires" (charte +
+// maquette consolidée) : bordure hairline `border-navy-200` (= --border-strong
+// de la maquette, teinte Navy plutôt qu'un gris neutre), focus 2px Navy, label
+// Space Grotesk SemiBold visible au-dessus (pas seulement aria-label — un placeholder seul
 // ne suffit pas en plein soleil sur un écran d'entrée de gamme, DAT
 // accessibilité). Bouton "primary" : fond Navy, texte blanc, radius 10px.
 // Texte du champ en Inter (pas JetBrains Mono) — la maquette de référence
@@ -37,7 +38,7 @@ export function CertificationLookupForm() {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="GN-XXXXXXXX-2026-XXXXXX"
-          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
+          className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
         />
       </div>
       <button

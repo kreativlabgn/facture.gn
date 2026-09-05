@@ -1,14 +1,43 @@
 @import "tailwindcss";
 
-/* Charte graphique facture.gn v1.3 (verrouillée) — Navy Autorité + Jaune
-   Fatoora, jamais les couleurs du drapeau guinéen. Tokens recopiés depuis la
-   charte et la maquette de référence (Desktop/facture.gn/V/), ÉCRAN 04
-   Vérification. Les teintes de texte des pastilles de statut (*-pill-text)
-   sont assombries de 2 à 24% par rapport à la couleur sémantique brute de la
-   charte — celle-ci ne passe pas WCAG AA (4.5:1) sur son propre fond teinté
-   à 12% ; même famille de teinte, juste plus foncée pour rester lisible. */
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design System facture.gn — tokens de la maquette consolidée (référence unique
+   `V/Maquette-facture-gn.html`, ADR-102/103). Fond clair (ADR-103) : gris clair,
+   cartes blanches, texte Navy Atlantique. « Navy Autorité + Or de Guinée »,
+   jamais les couleurs du drapeau guinéen, jamais de dégradé (R-01).
+
+   Deux couches :
+   1. `:root`  — valeurs BRUTES, nommées comme la charte (--navy-atlantique,
+      --or-guinee, --good, --bad). Un seul endroit à toucher pour re-mesurer.
+   2. `@theme` — mappe ces valeurs vers les utilitaires Tailwind (bg-*, text-*…).
+
+   Le jeu `green / amber / blue / red` est la palette de STATUT (pastilles de
+   la maquette, écran Vérification) — distincte de `good / bad` qui portent un
+   SENS MÉTIER (vérifié/payé vs erreur/rejet). La maquette garde les deux.
+
+   Les variantes `*-text` sont assombries par rapport à la teinte brute : la
+   couleur sémantique ne passe pas WCAG AA (4.5:1) sur son propre fond teinté
+   à 12 % ni sur blanc à petite taille. Ratios vérifiés (voir revue). Navy sur
+   Or = 9.4:1 (AAA) ; blanc sur Or = 1.8:1 → INTERDIT (R-11).
+   ───────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --color-navy-950: #0b1d3a;
+  /* Marque — ADR-103 (valeurs mesurées sur la maquette) */
+  --navy-atlantique: #0b1d3a; /* texte, structure — ~60 % de la palette */
+  --or-guinee: #fbb500; /* accent marque, CTA, focus — ~30 % */
+  --grey: #f5f7f9; /* fond application */
+  --surface: #ffffff; /* cartes, panneaux, lignes de table */
+
+  /* Sémantique métier */
+  --good: #0f9d6e;
+  --good-text: #0a6e4d;
+  --good-bg: rgba(15, 157, 110, 0.12);
+  --bad: #d14343;
+  --bad-text: #b23636;
+  --bad-bg: rgba(209, 67, 67, 0.12);
+
+  /* Échelle Navy (opacités du navy sur fond clair) */
+  --color-navy-950: var(--navy-atlantique);
   --color-navy-800: #132447;
   --color-navy-700: rgba(11, 29, 58, 0.88);
   --color-navy-600: rgba(11, 29, 58, 0.66);
@@ -17,27 +46,22 @@
   --color-navy-100: rgba(11, 29, 58, 0.12);
   --color-navy-50: rgba(11, 29, 58, 0.08);
 
-  --color-yellow: #f2b705;
-  --color-grey: #f5f7f9;
-
+  /* Palette de STATUT (pastilles) */
   --color-green: #16a34a;
   --color-green-text: #117c38;
   --color-green-bg: rgba(22, 163, 74, 0.12);
-
   --color-amber: #d97706;
   --color-amber-text: #a55a05;
   --color-amber-bg: rgba(217, 119, 6, 0.12);
-
   --color-blue: #2563eb;
   --color-blue-text: #2461e6;
   --color-blue-bg: rgba(37, 99, 235, 0.12);
-
   --color-red: #dc2626;
   --color-red-text: #ca2323;
   --color-red-bg: rgba(220, 38, 38, 0.12);
 
-  --background: var(--color-grey);
-  --foreground: var(--color-navy-950);
+  --background: var(--grey);
+  --foreground: var(--navy-atlantique);
 }
 
 @theme inline {
@@ -53,8 +77,16 @@
   --color-navy-100: var(--color-navy-100);
   --color-navy-50: var(--color-navy-50);
 
-  --color-yellow: var(--color-yellow);
-  --color-grey: var(--color-grey);
+  --color-or: var(--or-guinee);
+  --color-grey: var(--grey);
+  --color-surface: var(--surface);
+
+  --color-good: var(--good);
+  --color-good-text: var(--good-text);
+  --color-good-bg: var(--good-bg);
+  --color-bad: var(--bad);
+  --color-bad-text: var(--bad-text);
+  --color-bad-bg: var(--bad-bg);
 
   --color-green: var(--color-green);
   --color-green-text: var(--color-green-text);
@@ -69,8 +101,12 @@
   --color-red-text: var(--color-red-text);
   --color-red-bg: var(--color-red-bg);
 
+  /* Charte §Typographie + maquette consolidée : Space Grotesk (display,
+     titres, boutons — jamais < 12px, sinon Inter), Inter (courant),
+     JetBrains Mono (données DÉJÀ certifiées : #FG, hash, montants, timestamps
+     — jamais la saisie utilisateur). */
   --font-sans: var(--font-inter);
-  --font-display: var(--font-poppins);
+  --font-display: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains-mono);
 }
 

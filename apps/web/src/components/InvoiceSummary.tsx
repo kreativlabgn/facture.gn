@@ -41,8 +41,8 @@ export function InvoiceSummary({ invoice }: { invoice: PublicInvoiceVerification
         </span>
       </Row>
       <div className="mt-3 border-t border-navy-50 pt-3">
-        {/* "caption" de la charte : Inter Regular — pas Poppins/gras, ce n'est
-            pas un label de formulaire (réservé à la charte pour Poppins SemiBold). */}
+        {/* "caption" de la charte : Inter Regular — pas font-display/gras, ce
+            n'est pas un label de formulaire (réservé à Space Grotesk SemiBold). */}
         <p className="text-[10px] font-normal tracking-wide text-navy-600 uppercase">Identifiant de vérification</p>
         <p className="mt-1 font-mono text-xs font-bold break-all text-navy-600">{invoice.certificationId}</p>
       </div>

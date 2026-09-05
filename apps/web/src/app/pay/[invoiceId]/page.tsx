@@ -51,7 +51,7 @@ function CheckoutSummary({ checkout }: { checkout: NonNullable<Awaited<ReturnTyp
       ) : (
         <a
           href={checkout.paymentLinkUrl}
-          className="mt-6 block rounded-[10px] bg-yellow px-6 py-3 text-center font-display text-sm font-semibold text-navy-950 transition hover:brightness-95"
+          className="mt-6 block rounded-[10px] bg-or px-6 py-3 text-center font-display text-sm font-semibold text-navy-950 transition hover:brightness-95"
         >
           Payer {formatGnf(total.toString())} via {checkout.provider === "djomy" ? "Djomy" : "Moneroo"}
         </a>

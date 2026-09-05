@@ -15,7 +15,7 @@ export function InviteMemberForm() {
           type="tel"
           required
           placeholder="+224620000000"
-          className="rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
+          className="rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
         />
       </div>
       {/* Rôle fixé côté serveur à accountant_external — seul choix MVP (ADR-070),
