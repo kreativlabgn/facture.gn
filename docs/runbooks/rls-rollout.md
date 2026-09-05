@@ -1,19 +1,52 @@
 # Runbook — Activation de Row-Level Security PostgreSQL (C2 / ADR-111)
 
-La migration `20260829150000_enable_row_level_security` pose les politiques mais
-les laisse **dormantes**. Ce runbook les active, par étapes réversibles, avec un
-point de validation sur staging avant la production.
+Deux migrations posent les politiques et les laissent **dormantes** :
+
+- `20260829150000_enable_row_level_security` — politiques `org_isolation` par
+  **organisation** (GUC `app.current_org_id`).
+- `20260905120000_rls_practice_scope` (Chantier A, ADR-111 phase 2) — **remplace**
+  ces politiques par une forme combinée qui couvre aussi le scope **practice**
+  (GUC `app.current_practice_id` → un cabinet/CGA voit ses organisations à mandat
+  `active` non expiré, DAT §7.2), via la fonction `public.rls_practice_sees_org(text)`.
+
+Ce runbook les active, par étapes réversibles, avec un point de validation sur
+staging avant la production.
 
 Prérequis : un environnement staging avec un PostgreSQL réel (pas SQLite, pas de
-mock) et un jeu de données à ≥ 2 organisations.
+mock), un jeu de données à ≥ 2 organisations, et — pour valider le scope practice —
+≥ 1 cabinet avec un mandat `active` sur l'une d'elles.
+
+Raccourci Supabase : `packages/db/prisma/scripts/rls-activate-supabase.sql`
+transcrit les étapes 2, 4 et 5 ci-dessous en un script à exécuter dans l'éditeur
+SQL Supabase (à lire en parallèle de ce runbook, pas à la place).
 
 ## Vue d'ensemble
 
 | État | `FORCE` ? | Rôle applicatif | `app.current_org_id` | Effet |
 |---|---|---|---|---|
-| Après la migration (défaut) | non | propriétaire des tables | jamais défini | aucun (double garde : bypass propriétaire + prédicat `... IS NULL OR ...`) |
-| Étape 2 (rôle dédié) | non | `facture_app` (non-propriétaire) | défini par `organizationScopedClient` | RLS actif pour les requêtes scopées ; les requêtes non scopées voient tout |
+| Après la migration (défaut) | non | propriétaire des tables | jamais défini | aucun (double garde : bypass propriétaire + échappement `(org IS NULL AND practice IS NULL) OR ...`) |
+| Étape 2 (rôle dédié) | non | `facture_app` (non-propriétaire) | défini par `organizationScopedClient` / `practiceScopedClient` | RLS actif pour les requêtes scopées ; les requêtes non scopées voient tout |
 | Étape 4 (FORCE) | oui | `facture_app` | défini | RLS actif y compris pour le propriétaire ; une requête non scopée ne voit **rien** |
+
+### Scope practice (`app.current_practice_id`)
+
+Depuis `20260905120000_rls_practice_scope`, le prédicat dormant exige que **les
+deux** GUC soient nuls (une 2ᵉ politique permissive keyée sur le seul
+`app.current_practice_id` serait OU-ée avec `org_isolation` et neutraliserait son
+filtre dès qu'une PME normale ne pose que `app.current_org_id` — d'où la politique
+unique combinée).
+
+| GUC posé | Ce que la connexion voit |
+|---|---|
+| `app.current_org_id` seul | les données de cette organisation (inchangé) |
+| `app.current_practice_id` seul | les données de **toutes** les organisations à mandat `active` non expiré de ce cabinet (vue transversale) |
+| les deux | l'organisation ciblée **ou** toute organisation mandatée |
+
+Côté code : `practiceScopedClient(prisma, practiceId)` (ou `setPracticeScope(tx,
+practiceId)` dans une transaction interactive), exporté par `@facture-gn/db`, sur
+le même modèle que `organizationScopedClient`. `mandate` et `revenue_share_credit`
+sont filtrées sur `practice_id` en direct ; `professional_practice` /
+`practice_member` restent **hors RLS** (aucune story ne les expose cross-tenant).
 
 ## Étape 1 — Adopter `organizationScopedClient` dans le code
 
@@ -47,12 +80,19 @@ await prisma.$transaction(async (tx) => {
 Tant que l'étape 2 n'est pas faite, `set_config` est inoffensif (le rôle
 propriétaire bypasse RLS).
 
+**Dashboard cabinet/CGA** (routes `practices/*`, `mandates/*`) : utiliser
+`practiceScopedClient(this.prisma, practiceId)` / `setPracticeScope(tx, practiceId)`
+au lieu des variantes org, là où l'accès est délégué par mandat plutôt que direct.
+Ne jamais poser les deux GUC pour une même requête sauf « entrée » explicite dans
+une organisation précise (le prédicat les OU-e).
+
 ## Étape 2 — Créer le rôle applicatif non-propriétaire (staging)
 
 ```sql
 CREATE ROLE facture_app LOGIN PASSWORD '<secret depuis le gestionnaire>';
 GRANT CONNECT ON DATABASE facture_gn TO facture_app;
 GRANT USAGE ON SCHEMA public TO facture_app;
+GRANT EXECUTE ON FUNCTION public.rls_practice_sees_org(text) TO facture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO facture_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO facture_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -75,8 +115,11 @@ et money-api. Redéployer.
 - [ ] Les deux services démarrent, `/health/ready` vert.
 - [ ] Un utilisateur de l'organisation A ne voit aucune donnée de l'organisation
       B via l'API (factures, clients, paiements) — même en forgeant des IDs.
-- [ ] Le test d'intégration `packages/db` / `apps/trust-api` marqué
-      skip-sans-`DATABASE_URL` passe (isolation réelle vérifiée).
+- [ ] Un collaborateur d'un cabinet mandaté sur A voit les données de A via le
+      dashboard cabinet, **jamais** celles d'une organisation non mandatée ; la
+      révocation / l'expiration du mandat coupe l'accès immédiatement.
+- [ ] Le test d'intégration `packages/db` (`RLS_INTEGRATION_TEST=1`) passe —
+      `rls.integration.spec.ts` couvre l'isolation org **et** le scope practice.
 - [ ] Aucune régression fonctionnelle sur les parcours e2e principaux.
 - [ ] Les requêtes NON encore scopées (services pas encore migrés à l'étape 1)
       fonctionnent toujours (RLS non forcé → elles voient tout). Suivre leur
@@ -84,16 +127,16 @@ et money-api. Redéployer.
 
 ## Étape 4 — `FORCE ROW LEVEL SECURITY` (après migration complète du code)
 
-Uniquement quand **tous** les accès tenant passent par
-`organizationScopedClient`. Sinon une requête non scopée ne verra plus rien.
+Uniquement quand **tous** les accès tenant passent par `organizationScopedClient`
+ou `practiceScopedClient`. Sinon une requête non scopée ne verra plus rien.
 
 ```sql
 DO $$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'account_recovery_request','api_key','assisted_session','branch',
-    'commission_bypass_case','credit_limit_change_request','customer',
+    'account_recovery_request','api_key','assisted_session','bank_transaction',
+    'branch','commission_bypass_case','credit_limit_change_request','customer',
     'fiscal_period_closing','invoice','invoice_sequence','mandate',
     'organization_member','organization_signing_key','product',
     'recurring_invoice_template','revenue_share_credit','ussd_session',
@@ -160,8 +203,13 @@ signale un bug ou un probing).
 - Étape 4 → 3 : `ALTER TABLE %I NO FORCE ROW LEVEL SECURITY`.
 - Étape 3 → 1 : rebasculer `DATABASE_URL` sur le rôle propriétaire.
 - Étape 1 → 0 : les politiques restent en place mais dormantes (rôle
-  propriétaire + `app.current_org_id` jamais défini). Aucun `DROP POLICY`
+  propriétaire + aucun GUC `app.current_*` défini). Aucun `DROP POLICY`
   nécessaire.
+- Annuler le scope practice seul (revenir aux politiques par organisation de
+  `20260829150000`) : rejouer le corps de cette migration (chaque `CREATE POLICY`
+  après `DROP POLICY IF EXISTS`), puis
+  `DROP FUNCTION IF EXISTS public.rls_practice_sees_org(text);`. Aucune donnée
+  touchée.
 
 ## Notes
 
@@ -173,16 +221,21 @@ signale un bug ou un probing).
 - `merkle_anchor_batch` (E1) est **cross-organisation** par conception (une
   tranche couvre N orgs) → **jamais** de politique RLS dessus, comme
   `payment_webhook`. Le job de scellement lit les factures de toutes les orgs.
-- `payment_webhook` et les tables scoped-practice ne sont pas couvertes — voir
-  ADR-111 phase 2.
+- `payment_webhook`, `merkle_anchor_batch`, `data_rights_request` (cross-org par
+  conception) ne sont **pas** couvertes. `professional_practice` / `practice_member`
+  non plus (jamais exposées cross-tenant). Le scope practice (`app.current_practice_id`)
+  est en place depuis `20260905120000_rls_practice_scope` — ce qui était « ADR-111
+  phase 2 ».
 - **Interaction avec la rétention (J3)** : `RetentionService` purge `ussd_session`,
   `client_portal_otp`, `pending_member_invite` via le `PrismaClient` NON scopé →
-  `current_setting('app.current_org_id', true)` renvoie `NULL` → la clause
-  `IS NULL OR …` des politiques laisse la purge s'exécuter cross-org (voulu, job
-  système). **Si la phase 2 durcit les politiques en retirant l'échappatoire
-  `IS NULL OR`**, la purge serait silencieusement neutralisée (`deleteMany`
-  count 0, aucune erreur) : prévoir alors un rôle/bypass dédié pour le job de
-  rétention, et surveiller `trust_api_retention_rows_deleted_total`.
+  aucun GUC posé → l'échappement dormant
+  `(app.current_org_id IS NULL AND app.current_practice_id IS NULL)` fire → la
+  purge s'exécute cross-org (voulu, job système). Inchangé par
+  `20260905120000` (qui ne fait qu'ajouter `AND app.current_practice_id IS NULL`
+  à un échappement déjà pris). **Si une phase ultérieure retire cet échappement**,
+  la purge serait silencieusement neutralisée (`deleteMany` count 0, aucune
+  erreur) : prévoir alors un rôle/bypass dédié, et surveiller
+  `trust_api_retention_rows_deleted_total`.
 - `bank_transaction` (rapprochement bancaire, ADR-117) porte `organization_id`
   → politique `org_isolation` **standard** posée par la migration
   `20260831130000_bank_transaction` (dormante, même forme `IS NULL OR …` que les

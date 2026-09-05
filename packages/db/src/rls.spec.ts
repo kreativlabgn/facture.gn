@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { makeOrgScopedOperation, organizationScopedClient, RLS_ORG_SETTING, setOrganizationScope } from "./rls";
+import {
+  makeOrgScopedOperation,
+  makePracticeScopedOperation,
+  organizationScopedClient,
+  practiceScopedClient,
+  RLS_ORG_SETTING,
+  RLS_PRACTICE_SETTING,
+  setOrganizationScope,
+  setPracticeScope,
+} from "./rls";
 
 describe("makeOrgScopedOperation", () => {
   it("exécute set_config(app.current_org_id, <orgId>, TRUE) puis l'opération, dans une seule transaction", async () => {
@@ -59,5 +68,44 @@ describe("organizationScopedClient", () => {
       query: { $allModels: { $allOperations: unknown } };
     };
     expect(typeof extendArg.query.$allModels.$allOperations).toBe("function");
+  });
+});
+
+describe("makePracticeScopedOperation", () => {
+  it("exécute set_config(app.current_practice_id, <practiceId>, TRUE) puis l'opération, dans une seule transaction", async () => {
+    const setConfigHandle = Symbol("set_config");
+    const queryHandle = Symbol("query");
+
+    const baseClient = {
+      $executeRaw: vi.fn().mockReturnValue(setConfigHandle),
+      $transaction: vi.fn().mockResolvedValue([1, "RESULTAT"]),
+    };
+    const query = vi.fn().mockReturnValue(queryHandle);
+
+    const op = makePracticeScopedOperation(baseClient as never, "prac_abc");
+    const result = await op({ args: { where: { id: "x" } }, query });
+
+    const sql = baseClient.$executeRaw.mock.calls[0][0] as { values: unknown[] };
+    expect(sql.values).toEqual([RLS_PRACTICE_SETTING, "prac_abc"]);
+    expect(baseClient.$transaction).toHaveBeenCalledWith([setConfigHandle, queryHandle]);
+    expect(result).toBe("RESULTAT");
+  });
+});
+
+describe("practiceScopedClient", () => {
+  it("rejette un practiceId vide ou non-chaîne", () => {
+    const client = { $extends: vi.fn() } as never;
+    expect(() => practiceScopedClient(client, "")).toThrow(/practiceId/);
+    expect(() => practiceScopedClient(client, "   ")).toThrow(/practiceId/);
+    expect(() => practiceScopedClient(client, undefined as never)).toThrow(/practiceId/);
+  });
+
+  it("setPracticeScope rejette un practiceId vide et pose sinon le bon GUC", async () => {
+    const tx = { $executeRaw: vi.fn().mockResolvedValue(1) };
+    await expect(setPracticeScope(tx as never, "")).rejects.toThrow(/practiceId/);
+
+    await setPracticeScope(tx as never, "prac_xyz");
+    const sql = tx.$executeRaw.mock.calls[0][0] as { values: unknown[] };
+    expect(sql.values).toEqual([RLS_PRACTICE_SETTING, "prac_xyz"]);
   });
 });

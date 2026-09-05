@@ -1,16 +1,28 @@
-// Schéma Prisma — Trust Context (bootstrap)
+// Schéma Prisma — Trust Context (+ amorces Money / Capital / Platform)
 //
-// Périmètre volontairement réduit aux 6 entités MVP nécessaires au cycle de vie
-// facture minimal : user, user_phone, organization, invoice, invoice_line, invoice_event.
-// Référence : Desktop/facture.gn/V/ERD-facture-gn.md (26/07/2026).
+// Référence métier : V/ERD-facture-gn.md + V/DAT-facture-gn.md §4. Le schéma a
+// dépassé le bootstrap « 6 entités MVP » d'origine — il couvre aujourd'hui le
+// cycle de vie facture complet (machine à états `invoice` : draft → issued →
+// partially_paid → paid, + voided/converted/expired — DAT §4), l'audit
+// append-only (`invoice_event`, garde trigger 20260830120000), la certification
+// chaînée, les paiements/avoirs/remboursements, l'écosystème cabinet/CGA
+// (professional_practice ── mandate ── organization) et le rapprochement bancaire.
 //
-// Divergences assumées vis-à-vis de l'ERD complet (27 entités) :
-// - customer_id (C6), branch_id (E1), product_id sur INVOICE_LINE (E7),
-//   financed_by_partner_id (K4/K5) et recurring_template_id (I1) sur INVOICE
-//   sont désormais tous de vraies relations FK — plus aucun scalaire orphelin.
-// - InvoiceSequence est un ajout (absent de l'ERD) pour garantir number sans trou
-//   par organisation/année sous concurrence (voir Registre-ADR, Article 23 OHADA).
+// Conventions & divergences assumées vis-à-vis de l'ERD :
 // - Colonnes en snake_case en base (@map), camelCase côté client Prisma.
+// - InvoiceSequence : ajout (absent de l'ERD) — number sans trou par
+//   organisation/année sous concurrence (Registre-ADR, Article 23 OHADA).
+// - customer_id / branch_id / product_id / financed_by_partner_id /
+//   recurring_template_id : de vraies relations FK, aucun scalaire orphelin.
+//
+// Isolation multi-tenant — Row-Level Security PostgreSQL (Prisma ne modélise PAS
+// les policies : elles vivent dans les migrations SQL) :
+// - 20260829150000_enable_row_level_security : politiques `org_isolation` par
+//   ORGANISATION (GUC `app.current_org_id`), dormantes.
+// - 20260905120000_rls_practice_scope : même politique étendue au scope PRACTICE
+//   (GUC `app.current_practice_id` → organisations à mandat `active`, DAT §7.2).
+// - Helpers : packages/db/src/rls.ts. Activation : docs/runbooks/rls-rollout.md
+//   + packages/db/prisma/scripts/rls-activate-supabase.sql.
 
 generator client {
   provider = "prisma-client-js"
