@@ -22,7 +22,7 @@ const TONE_CLASSES: Record<string, string> = {
   amber: "bg-amber-bg text-amber-text",
   blue: "bg-blue-bg text-blue-text",
   red: "bg-red-bg text-red-text",
-  navy: "bg-navy-50 text-navy-400",
+  navy: "bg-navy-50 text-navy-600",
 };
 
 const PILL_CLASSES = "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] font-bold";

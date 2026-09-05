@@ -36,7 +36,10 @@
   --bad-text: #b23636;
   --bad-bg: rgba(209, 67, 67, 0.12);
 
-  /* Échelle Navy (opacités du navy sur fond clair) */
+  /* Échelle Navy (opacités du navy sur fond clair). Seuil de contraste : à
+     partir de navy-600 (5.5:1 sur blanc, 5.3:1 sur --grey) c'est du texte ;
+     navy-400 (2.8:1) et en dessous sont des bordures et des séparateurs, jamais
+     du texte — placeholders compris. Garde-fou : design-system.guardrails. */
   --color-navy-950: var(--navy-atlantique);
   --color-navy-800: #132447;
   --color-navy-700: rgba(11, 29, 58, 0.88);

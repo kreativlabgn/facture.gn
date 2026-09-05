@@ -41,7 +41,7 @@ export default async function DashboardHomePage() {
             >
               <div className="flex flex-col gap-0.5">
                 <span className="font-mono text-xs text-navy-600">{invoice.number ?? "Brouillon"}</span>
-                <span className="text-xs text-navy-400">{formatDate(invoice.createdAt)}</span>
+                <span className="text-xs text-navy-600">{formatDate(invoice.createdAt)}</span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="font-mono text-sm font-bold text-navy-950">{formatGnf(invoice.totalTtc)}</span>

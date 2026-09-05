@@ -38,7 +38,7 @@ export function CertificationLookupForm() {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="GN-XXXXXXXX-2026-XXXXXX"
-          className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
+          className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-600 focus:border-2 focus:border-navy-950 focus:outline-none"
         />
       </div>
       <button

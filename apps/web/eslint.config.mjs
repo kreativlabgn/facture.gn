@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   // Design System facture.gn — garde-fous au lint (complète
   // src/design-system.guardrails.spec.ts, qui couvre aussi les cas hors JSX).
   // Cible les valeurs littérales dans `className="…"` / `className={`…`}`.
+  // Couvre les DEUX orthographes de dégradé : `bg-gradient-*` (v3, dépréciée)
+  // et `bg-linear-* / bg-radial* / bg-conic*` (Tailwind v4, celle en vigueur ici).
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/**/*.spec.ts", "src/**/*.spec.tsx"],
@@ -17,15 +19,15 @@ const eslintConfig = defineConfig([
         "error",
         {
           selector:
-            "JSXAttribute[name.name='className'] Literal[value=/(?:bg|text|border|ring|from|via|to)-gradient|(?:linear|radial|conic)-gradient\\(|-\\[#[0-9a-fA-F]{3,8}\\]/]",
+            "JSXAttribute[name.name='className'] Literal[value=/(?:bg|text|border|ring|from|via|to)-gradient|bg-(?:linear|radial|conic)|(?:linear|radial|conic)-gradient\\(|-\\[#[0-9a-fA-F]{3,8}\\]/]",
           message:
-            "Design System : dégradé (R-01) ou couleur hex arbitraire interdits en className. Utiliser un token (globals.css @theme : navy-*, or, good, bad, grey, surface…).",
+            "Design System : dégradé (R-01) ou couleur hex arbitraire interdits en className (v3 et v4). Utiliser un token (globals.css @theme : navy-*, or, good, bad, grey, surface…).",
         },
         {
           selector:
-            "JSXAttribute[name.name='className'] TemplateElement[value.cooked=/(?:bg|text|border|ring|from|via|to)-gradient|(?:linear|radial|conic)-gradient\\(|-\\[#[0-9a-fA-F]{3,8}\\]/]",
+            "JSXAttribute[name.name='className'] TemplateElement[value.cooked=/(?:bg|text|border|ring|from|via|to)-gradient|bg-(?:linear|radial|conic)|(?:linear|radial|conic)-gradient\\(|-\\[#[0-9a-fA-F]{3,8}\\]/]",
           message:
-            "Design System : dégradé (R-01) ou couleur hex arbitraire interdits en className. Utiliser un token (globals.css @theme).",
+            "Design System : dégradé (R-01) ou couleur hex arbitraire interdits en className (v3 et v4). Utiliser un token (globals.css @theme).",
         },
       ],
     },

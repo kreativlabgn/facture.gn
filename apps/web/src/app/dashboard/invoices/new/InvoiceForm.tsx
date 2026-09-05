@@ -138,7 +138,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
                 type="button"
                 onClick={() => removeLine(index)}
                 aria-label="Retirer cette ligne"
-                className="text-navy-400 transition hover:text-red-text"
+                className="text-navy-600 transition hover:text-red-text"
               >
                 ×
               </button>

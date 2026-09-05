@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 //   R-01  — aucun dégradé, sur aucun support.
 //   R-11  — jamais de texte clair sur fond Or de Guinée (contraste 1.8:1).
 //   Tokens — aucune couleur hex en dur : tout passe par globals.css @theme.
+//   AA    — aucun token Navy sous navy-600 utilisé comme couleur de texte.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SRC = path.resolve(__dirname);
@@ -26,9 +27,12 @@ const HEX_ALLOWLIST = new Set<string>([
 const NON_BRAND_HEX = /^#(?:fff|ffffff|000|000000)$/i;
 
 // Retire les commentaires ligne (// …) et bloc (/* … */) avant de scanner —
-// une doc qui MENTIONNE un hex n'est pas une violation.
+// une doc qui MENTIONNE un hex ou un dégradé n'est pas une violation. Le
+// contenu des commentaires bloc est blanchi caractère par caractère plutôt que
+// supprimé : les sauts de ligne survivent, donc les numéros de ligne rapportés
+// restent ceux du fichier réel.
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  return src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " ")).replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 function walk(dir: string): string[] {
@@ -44,7 +48,7 @@ const files = walk(SRC).filter((f) => !f.endsWith(".spec.ts") && !f.endsWith(".g
 function scan(re: RegExp): { file: string; line: number; match: string }[] {
   const hits: { file: string; line: number; match: string }[] = [];
   for (const file of files) {
-    const lines = readFileSync(file, "utf8").split("\n");
+    const lines = stripComments(readFileSync(file, "utf8")).split("\n");
     lines.forEach((text, i) => {
       const m = text.match(re);
       if (m) hits.push({ file: path.relative(SRC, file), line: i + 1, match: m[0].trim().slice(0, 80) });
@@ -54,9 +58,14 @@ function scan(re: RegExp): { file: string; line: number; match: string }[] {
 }
 
 describe("Design System — R-01 : aucun dégradé", () => {
+  // Tailwind v4 a renommé les utilitaires de dégradé : `bg-linear-*`,
+  // `bg-radial*`, `bg-conic*` — `bg-gradient-*` n'est plus que l'alias v3
+  // déprécié. Les deux orthographes sont couvertes, sinon la règle ne bloque
+  // que la syntaxe que le projet n'écrit plus. Les stops (`from-`/`via-`/`to-`)
+  // sont rattrapés en début de chaîne comme après une espace.
   it("aucune utilitaire ou valeur de dégradé Tailwind/CSS", () => {
     const hits = scan(
-      /\b(bg|text|border)-gradient-|\bbg-\[(?:linear|radial|conic)-gradient|(?:linear|radial|conic)-gradient\(|\b(?:from|via|to)-\[?#|\s(?:from|via|to)-(?:navy|or|good|bad|green|amber|blue|red|grey|surface|white|black)\b/,
+      /\b(?:bg|text|border)-gradient-|\bbg-(?:linear|radial|conic)\b|\bbg-\[(?:linear|radial|conic)-gradient|(?:linear|radial|conic)-gradient\(|\b(?:from|via|to)-\[?#|(?:^|[\s"'`{])(?:from|via|to)-(?:navy|or|good|bad|green|amber|blue|red|grey|surface|white|black)\b/,
     );
     expect(hits, `Dégradé(s) détecté(s) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
   });
@@ -95,7 +104,7 @@ describe("Design System — R-11 : jamais de texte clair sur Or de Guinée", () 
     const OR_BG = /bg-(?:or|amber|amber-bg|\[#[fF][bB]{2}500\])\b/;
     const hits: { file: string; line: number; match: string }[] = [];
     for (const file of files) {
-      readFileSync(file, "utf8")
+      stripComments(readFileSync(file, "utf8"))
         .split("\n")
         .forEach((text, i) => {
           // on regarde le contenu entre guillemets sur la ligne (className="…")
@@ -107,5 +116,18 @@ describe("Design System — R-11 : jamais de texte clair sur Or de Guinée", () 
         });
     }
     expect(hits, `Texte clair sur Or (utiliser text-navy-950) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+});
+
+describe("Design System — AA : pas de texte sous le seuil de contraste", () => {
+  // L'échelle Navy sous navy-600 est faite d'opacités faibles : sur blanc,
+  // navy-400 donne 2.8:1 et navy-200 1.6:1 — sous le seuil WCAG AA texte
+  // (4.5:1) et même sous le 3:1 des éléments non textuels. Ces teintes sont
+  // là pour les bordures et les séparateurs ; elles ne portent jamais de
+  // texte, placeholders compris (le 1.4.3 s'y applique aussi). Le token du
+  // texte secondaire est navy-600 — 5.5:1 sur blanc, 5.3:1 sur le fond grey.
+  it("aucun text-navy-* en dessous de navy-600", () => {
+    const hits = scan(/\btext-navy-(?:50|100|200|400)\b/);
+    expect(hits, `Texte sous le seuil AA (utiliser text-navy-600) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
   });
 });

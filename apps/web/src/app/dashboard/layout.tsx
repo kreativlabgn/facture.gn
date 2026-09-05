@@ -39,7 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {organization ? (
             <span className="text-sm text-navy-600">
               <span className="font-semibold text-navy-950">{organization.name}</span>
-              <span className="ml-2 font-mono text-xs uppercase text-navy-400">{organization.role}</span>
+              <span className="ml-2 font-mono text-xs uppercase text-navy-600">{organization.role}</span>
             </span>
           ) : null}
         </div>
