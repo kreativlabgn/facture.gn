@@ -39,6 +39,10 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/facture_gn_dev?schema=public
+      # schema.prisma déclare `directUrl = env("DIRECT_URL")` (ADR-120) → requis
+      # par `prisma migrate` / `validate`. Identique à DATABASE_URL en CI (pas de
+      # pooler ; le pooler Supabase n'existe qu'en prod).
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/facture_gn_dev?schema=public
       REDIS_URL: redis://localhost:6379
       # Le smoke DI compile sans Redis (lazyConnect) ; les workers/jobs ne s'arment
       # pas en CI (reconciliation = opt-out "false" ; retention = opt-in, "false"

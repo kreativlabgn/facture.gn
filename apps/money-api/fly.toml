@@ -1,0 +1,66 @@
+# Fly.io — money-api (hébergement intérimaire, ADR-120).
+# Cible DAT : Kubernetes OVH Gravelines. Passerelle réversible.
+#
+# DÉPLOIEMENT — toujours depuis la RACINE du monorepo :
+#
+#   fly deploy . --config apps/money-api/fly.toml
+#
+# CRÉATION (une fois) :        fly apps create facture-gn-money-api
+# SECRETS (une fois, cf. MONEY_API_SECRETS dans src/common/secrets.ts) :
+#   fly secrets set --config apps/money-api/fly.toml \
+#     DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-eu-west-3.pooler.supabase.com:6543/postgres?pgbouncer=true' \
+#     DIRECT_URL='postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres' \
+#     MONEY_API_INTERNAL_KEY=<hex32 — MÊME valeur que sur facture-gn-trust-api> \
+#     REDIS_URL='rediss://default:<token>@<endpoint>.upstash.io:6379' \
+#     DJOMY_WEBHOOK_STUB_SECRET=<hex32> \
+#     MONEROO_WEBHOOK_STUB_SECRET=<hex32>
+#
+# REDIS obligatoire : MONEY_API_SECRETS marque REDIS_URL requiredInProduction —
+# money-api ne démarre pas en NODE_ENV=production sans une URL rediss:// valide.
+# Upstash free tier suffit. Le worker de réconciliation reste DÉSARMÉ
+# (RECONCILIATION_ENABLED=false) tant qu'il n'y a pas de credentials provider.
+#
+# MIGRATIONS : jamais depuis money-api — c'est trust-api qui porte le
+# release_command (une seule base partagée).
+
+app = "facture-gn-money-api"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "apps/money-api/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3001"
+  # trust-api joint par le réseau privé Fly (6PN) — rappel de confirmation de
+  # paiement (C2 Phase 2b). Non secret.
+  TRUST_API_URL = "http://facture-gn-trust-api.internal:3000"
+  # Worker BullMQ chargé mais non armé (pas de credentials provider réels).
+  RECONCILIATION_ENABLED = "false"
+  OTEL_TRACES_ENABLED = "false"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # /health/live seulement : /health/ready de money-api dépend AUSSI de Redis, et
+  # on ne veut pas qu'un incident Upstash bloque un déploiement. La readiness
+  # réelle se vérifie à la main post-deploy (`fly ssh console` → curl /health/ready).
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health/live"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "15s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# money-api n'a pas besoin d'être public (aucun navigateur ne l'appelle ; les
+# webhooks providers réels = phase ultérieure). Pour le rendre interne-seul plus
+# tard : `fly ips release` des IP publiques + Flycast. Laissé public pour
+# l'instant — simplicité de diagnostic.
