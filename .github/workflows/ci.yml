@@ -7,9 +7,12 @@ on:
   #      la branche par défaut (ou si la PR le modifie) — sans quoi les PR vers
   #      `app` qui ne touchent pas `.github/` n'ont aucune CI.
   #   2. À la convergence `app` → `master`, la CI sur `push: master` s'active
-  #      d'elle-même (le filtre `paths` ci-dessous se met à matcher).
-  # Tant que `master` n'a pas le monorepo, `push` ne déclenche rien (aucun de ces
-  # chemins n'existe).
+  #      d'elle-même (les filtres `paths` se mettent à matcher).
+  # Les filtres `paths` (monorepo) rendent le workflow inerte tant que `master`
+  # n'a que de la doc : rien à builder, aucun X rouge sur un commit ou une PR de
+  # doc. Une PR vers `app` qui touche du code déclenche la CI via le `ci.yml` de
+  # SA propre ref (bloc `pull_request:` non filtré côté `app`) — ce filtre ici ne
+  # la gêne pas.
   push:
     branches: [master]
     paths:
@@ -18,8 +21,21 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "tsconfig*.json"
       - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "tsconfig*.json"
+      - "eslint.config.js"
+      - ".audit-ci.jsonc"
+      - ".gitleaks.toml"
 
 jobs:
   build:
