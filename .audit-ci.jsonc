@@ -28,6 +28,22 @@
     // webpack/@nestjs/cli). Jamais atteint au runtime des services NestJS.
     "GHSA-2v37-7h3g-55p8",
     // vitest UI arbitrary file read — le mode UI (`vitest --ui`) n'est jamais lancé.
-    "GHSA-5xrq-8626-4rwp"
+    "GHSA-5xrq-8626-4rwp",
+    // fast-uri SSRF / host confusion (4 avis, publiés 02/09/2026) — chaîne
+    // @nestjs/cli > webpack > terser-webpack-plugin > schema-utils > ajv > fast-uri
+    // (devDependency, build-time). `ajv` n'utilise `fast-uri` que pour résoudre
+    // les `$ref`/`$id` de schémas JSON STATIQUES (options de loaders webpack) —
+    // jamais d'URL contrôlée par un tiers, aucune requête réseau dérivée.
+    "GHSA-jqff-g426-hqxp",
+    "GHSA-f65p-4m7j-42xc",
+    "GHSA-fph4-wmhf-6fwf",
+    "GHSA-5jgf-p345-68v8",
+    // browserslist crash/prototype-write + OOM (publiés 01/09/2026) — chaîne
+    // apps/web > @serwist/next > browserslist. `browserslist` tourne au BUILD
+    // (résolution des cibles pour le bundle SW), jamais sous `next start`. Les
+    // deux vecteurs exigent un `browserslist-stats.json` non fiable ou des
+    // requêtes pathologiques — la config est statique et in-repo.
+    "GHSA-73wf-gq98-2v4g",
+    "GHSA-c83g-rgw3-j3cx"
   ]
 }

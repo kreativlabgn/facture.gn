@@ -20,6 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 WORKDIR /repo
 
 FROM base AS deps
+# argon2 (dép runtime de trust-api, `allowBuilds` dans pnpm-workspace.yaml) : pnpm
+# exécute son script d'install, qui retombe sur `node-gyp` quand le prebuild N-API
+# n'est pas résolu sur linux-x64 → il faut la toolchain C. Confinée aux stages
+# deps/build : le runner dérive de `base`, sans ces paquets.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
 # Tous les manifestes du workspace : `pnpm install --frozen-lockfile` compare les
 # importers du lockfile aux paquets trouvés — un manifeste manquant le fait échouer.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
