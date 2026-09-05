@@ -1,0 +1,61 @@
+# Vague 0 (C1) — analyse statique de sécurité (SAST). Le code manipule des flux
+# GNF, des secrets de webhook et des clés de certification : une injection ou une
+# fuite de secret introduite par mégarde doit être signalée sur la PR, pas
+# découverte en production.
+#
+# `master` = documentation seule aujourd'hui. Les filtres `paths` ci-dessous
+# rendent ce workflow inerte tant qu'aucun fichier JS/TS n'y vit ; il s'active de
+# lui-même à la convergence `app` → `master`.
+#
+# Le `schedule` de la version `app` (`cron: "27 3 * * 1"`) est volontairement
+# RETIRÉ ici : une analyse planifiée tourne sur la branche par défaut sans filtre
+# `paths` possible, et `codeql-action/analyze` échoue s'il ne trouve aucun code.
+# À restaurer à la convergence `app` → `master`.
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.mjs"
+      - "**/*.cjs"
+      - ".github/workflows/codeql.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.mjs"
+      - "**/*.cjs"
+
+jobs:
+  analyze:
+    name: Analyse CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialiser CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Analyser
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

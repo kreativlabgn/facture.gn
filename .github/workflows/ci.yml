@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  # `master` = documentation seule ; le monorepo applicatif vit sur `app`. Ce
+  # fichier est porté ici pour deux raisons :
+  #   1. GitHub n'exécute un workflow `pull_request` que si son fichier existe sur
+  #      la branche par défaut (ou si la PR le modifie) — sans quoi les PR vers
+  #      `app` qui ne touchent pas `.github/` n'ont aucune CI.
+  #   2. À la convergence `app` → `master`, la CI sur `push: master` s'active
+  #      d'elle-même (le filtre `paths` ci-dessous se met à matcher).
+  # Tant que `master` n'a pas le monorepo, `push` ne déclenche rien (aucun de ces
+  # chemins n'existe).
+  push:
+    branches: [master]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: facture_gn_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # Lot E — Redis pour BullMQ (worker de réconciliation, money-api).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/facture_gn_dev?schema=public
+      REDIS_URL: redis://localhost:6379
+      # Le smoke DI compile sans Redis (lazyConnect) ; les workers/jobs ne s'arment
+      # pas en CI (reconciliation = opt-out "false" ; retention = opt-in, "false"
+      # ≠ "true" donc non armé — explicite quand même).
+      RECONCILIATION_ENABLED: "false"
+      RETENTION_ENABLED: "false"
+      MERKLE_ANCHOR_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @facture-gn/db db:generate
+
+      - name: Apply migrations
+        run: pnpm --filter @facture-gn/db db:migrate:deploy
+
+      - run: pnpm turbo lint
+
+      - run: pnpm turbo typecheck
+
+      # Vague 0 (B1) — `pnpm turbo test` exécute désormais `vitest run --coverage`
+      # dans trust-api et money-api ; un seuil de couverture non tenu fait échouer
+      # ce job (voir apps/*/vitest.config.ts).
+      - run: pnpm turbo test
+
+      - name: Archiver les rapports de couverture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: apps/*/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Vague 0 (C1) — sécurité de la chaîne d'approvisionnement. Job séparé,
+  # indépendant de `build` : une CVE ou un secret commité doit bloquer le merge
+  # même si les tests passent.
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historique complet pour `gitleaks git`
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Bloque sur toute vulnérabilité HIGH/CRITICAL non explicitement tolérée
+      # (et justifiée) dans .audit-ci.jsonc.
+      - name: Audit des dépendances
+        run: pnpm exec audit-ci --config .audit-ci.jsonc
+
+      # Binaire gitleaks pinné plutôt que gitleaks/gitleaks-action@v2 : cette
+      # action exige une GITLEAKS_LICENSE pour les dépôts d'organisation. On
+      # scanne l'historique git (`gitleaks git`) — jamais l'arbre de travail
+      # (`dir`), qui parcourrait node_modules après `pnpm install`.
+      - name: Scan de secrets (gitleaks)
+        run: |
+          GITLEAKS_VERSION=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks git . --config .gitleaks.toml --redact --no-banner --exit-code 1
+
+  # Lot G — valide que les Dockerfiles buildent (le seul vrai test dans cet
+  # environnement sans Docker en local). Pas de push d'image.
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write # export du cache de build vers le service de cache GHA
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [trust-api, money-api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.service }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
