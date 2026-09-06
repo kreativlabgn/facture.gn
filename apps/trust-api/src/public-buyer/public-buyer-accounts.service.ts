@@ -3,6 +3,12 @@ import type { PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreatePublicBuyerAccountDto } from "./dto/create-public-buyer-account.dto";
 
+// RLS (ADR-111 étape 1) — CE SERVICE RESTE ENTIÈREMENT NON SCOPÉ.
+// `public_buyer_account` et `public_buyer_account_member` sont HORS des
+// politiques RLS : elles n'ont aucune colonne organization_id, elles décrivent
+// une administration, pas une PME. Le $transaction ci-dessous crée un compte
+// acheteur public en dehors de toute organisation — aucun setOrganizationScope()
+// n'a de sens ici. Voir la carte complète en tête de PublicBuyerPortalService.
 @Injectable()
 export class PublicBuyerAccountsService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}

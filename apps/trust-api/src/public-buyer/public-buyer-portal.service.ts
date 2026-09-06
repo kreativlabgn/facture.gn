@@ -1,10 +1,35 @@
 import { ConflictException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. Le portail B2G a une particularité
+// que ne partage aucun module migré jusqu'ici : son acteur, le DAF d'une
+// administration, n'est membre d'AUCUNE organisation PME. Il agit légitimement
+// sur les factures d'organisations tierces, son autorisation venant entièrement
+// de la chaîne inline (appartenance au compte acheteur public, compte
+// « verified », lien client confirmé) — jamais de RolesGuard, jamais du scope.
+// Poser le GUC de l'organisation ÉMETTRICE est donc purement DESCRIPTIF ici
+// (« cette ligne appartient à l'organisation X »), jamais autorisant : un GUC ne
+// confère aucun droit, il ne fait que restreindre.
+//
+// À ne JAMAIS scoper (le scope casserait la fonctionnalité) :
+//   • listReceivedInvoices() : le tableau de bord « encours fournisseurs » agrège
+//     par construction les factures de TOUTES les PME ayant facturé cette
+//     administration. Un GUC n'en renverrait qu'une.
+//
+// Restent globaux pour la raison habituelle :
+//   • `public_buyer_account` et `public_buyer_account_member` : hors RLS, aucune
+//     colonne organization_id — ces tables décrivent l'administration, pas une PME.
+//   • Les deux lectures de DÉCOUVERTE dont SORT l'organisation : la facture dans
+//     validateLiquidation(), le client dans confirmCustomerLink().
+//
+// Sont SCOPÉS, une fois l'organisation émettrice connue : la lecture du client
+// dans validateLiquidation(), la transaction de validation (setOrganizationScope
+// en première ligne) et la confirmation du lien client.
 @Injectable()
 export class PublicBuyerPortalService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -16,13 +41,33 @@ export class PublicBuyerPortalService {
   // déjà validée est un no-op, jamais un second InvoiceEvent (pas de mécanisme de
   // "dévalidation", cohérent avec le fait que la liquidation n'est jamais reprise).
   async validateLiquidation(invoiceId: string, requesterUserId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    // Lecture de DÉCOUVERTE, non scopée à dessein : l'organisation émettrice
+    // sort de cette ligne. findFirst nullable, plus findUniqueOrThrow : cette
+    // application n'a AUCUN ExceptionFilter (vérifié), donc un invoiceId inconnu
+    // remontait en 500 — distinguable du 403 d'une facture non-B2G, soit un
+    // oracle d'énumération sur un :id fourni par l'appelant. On renvoie
+    // désormais le MÊME message que « pas une facture B2G » : les deux cas
+    // deviennent indistinguables.
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId } });
+    if (!invoice) {
+      throw new ForbiddenException(
+        `Facture ${invoiceId} n'est rattachée à aucune entité publique — pas une facture B2G`,
+      );
+    }
+
+    // À partir d'ici l'organisation émettrice est connue (voir la carte en tête
+    // de classe : descriptif, jamais autorisant).
+    const scoped = organizationScopedClient(this.prisma, invoice.organizationId);
 
     // Requête séparée plutôt qu'un include — invoice ne porte jamais la relation
     // customer, sa forme reste identique que ce soit le premier appel ou un rejeu
-    // idempotent (voir le retour ligne ~40 ci-dessous).
+    // idempotent (voir le retour ligne ~40 ci-dessous). Double clause : elle
+    // matérialise l'invariant « le client d'une facture appartient à la même
+    // organisation qu'elle ».
     const customer = invoice.customerId
-      ? await this.prisma.customer.findUnique({ where: { id: invoice.customerId } })
+      ? await scoped.customer.findFirst({
+          where: { id: invoice.customerId, organizationId: invoice.organizationId },
+        })
       : null;
 
     const publicBuyerAccountId = customer?.publicBuyerAccountId;
@@ -83,6 +128,11 @@ export class PublicBuyerPortalService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // GUC en première ligne : il couvre la validation et sa trace d'audit.
+      // `update` garde son `where` unique (il ne peut pas porter la colonne de
+      // scope) — la chaîne d'autorisation B2G ci-dessus en est la barrière réelle.
+      await setOrganizationScope(tx, invoice.organizationId);
+
       const updated = await tx.invoice.update({
         where: { id: invoiceId },
         data: { validatedByAdministration: true },
@@ -100,6 +150,10 @@ export class PublicBuyerPortalService {
   // userId seul (un DAF n'appartient qu'à un seul public_buyer_account en V1,
   // aucun sélecteur multi-compte nécessaire) — même garde d'autorisation inline
   // que validateLiquidation(), jamais via RolesGuard.
+  // NON SCOPÉE de bout en bout, et c'est sa raison d'être : ce tableau de bord
+  // agrège les factures de TOUTES les PME ayant facturé cette administration.
+  // Poser un GUC n'en renverrait qu'une — ce ne serait pas un durcissement,
+  // ce serait une régression fonctionnelle.
   async listReceivedInvoices(requesterUserId: string, pagination: { take?: number; skip?: number }) {
     const membership = await this.prisma.publicBuyerAccountMember.findFirst({
       where: { userId: requesterUserId },
@@ -135,8 +189,12 @@ export class PublicBuyerPortalService {
   // l'a posé (flagPublicEntity()). Même autorisation inline que
   // validateLiquidation()/listReceivedInvoices() ci-dessus — jamais RolesGuard.
   async confirmCustomerLink(customerId: string, requesterUserId: string) {
-    const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
-    if (!customer.publicBuyerAccountId) {
+    // Lecture de DÉCOUVERTE, non scopée à dessein : l'organisation du client
+    // sort de cette ligne. Même correction d'oracle que validateLiquidation() —
+    // un customerId inconnu remontait en 500, il renvoie désormais le MÊME
+    // message que « client non rattaché à un compte acheteur public ».
+    const customer = await this.prisma.customer.findFirst({ where: { id: customerId } });
+    if (!customer?.publicBuyerAccountId) {
       throw new ForbiddenException(`Client ${customerId} n'est rattaché à aucun compte acheteur public`);
     }
 
@@ -147,7 +205,10 @@ export class PublicBuyerPortalService {
       throw new ForbiddenException("Aucun accès à ce compte acheteur public");
     }
 
-    return this.prisma.customer.update({
+    // L'organisation est connue et l'appartenance au compte acheteur public est
+    // prouvée : écriture scopée. `update` garde son `where` unique, la lecture
+    // et le contrôle d'appartenance ci-dessus sont la barrière.
+    return organizationScopedClient(this.prisma, customer.organizationId).customer.update({
       where: { id: customerId },
       data: { isPublicEntityConfirmed: true },
     });

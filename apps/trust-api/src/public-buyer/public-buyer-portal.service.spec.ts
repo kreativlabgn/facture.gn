@@ -22,8 +22,14 @@ function createFakePrisma(
     invoiceEvent: {
       create: vi.fn().mockResolvedValue({ id: "evt-1", type: "liquidation_validated" }),
     },
+    // setOrganizationScope(tx, ...) pose le GUC en première ligne de la
+    // transaction : le vrai client transactionnel porte $executeRaw, le faux
+    // doit donc l'offrir aussi (inerte — la pose réelle du set_config est
+    // couverte par packages/db, rls.spec.ts).
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
-  return {
+
+  const prisma: any = {
     publicBuyerAccountMember: {
       findFirst: vi.fn().mockResolvedValue({ id: "pbam-1", publicBuyerAccountId: "pba-1", userId: REQUESTER_USER_ID }),
       ...overrides.publicBuyerAccountMember,
@@ -31,6 +37,7 @@ function createFakePrisma(
     invoice: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({
         id: "inv-1",
+        organizationId: "org-fournisseur",
         status: "issued",
         validatedByAdministration: false,
         amountDue: 5_000_000n,
@@ -44,8 +51,8 @@ function createFakePrisma(
       // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed: true par
       // défaut ici (lien déjà confirmé par le compte acheteur public) ; voir les
       // tests dédiés plus bas pour le cas non-confirmé et confirmCustomerLink().
-      findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
+      findUnique: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: true }),
       update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
       ...overrides.customer,
     },
@@ -56,12 +63,75 @@ function createFakePrisma(
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "pba-1", verificationStatus: "verified" }),
       ...overrides.publicBuyerAccount,
     },
-    $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
+    $transaction: vi.fn().mockImplementation((arg: any) =>
+      Array.isArray(arg) ? Promise.all(arg) : arg(tx),
+    ),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope() pose le
+    // GUC via $executeRaw. $extends rend le client LUI-MÊME, pour que les mocks de
+    // modèle restent partagés et les assertions existantes inchangées.
+    $extends: vi.fn(),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     __tx: tx,
   };
+
+  prisma.$extends.mockReturnValue(prisma);
+
+  // Les DEUX lectures de client du service passent désormais par findFirst et ne
+  // se distinguent que par la présence de `organizationId` dans le `where` :
+  //   • avec  → lecture SCOPÉE de validateLiquidation() ;
+  //   • sans  → lecture de DÉCOUVERTE de confirmCustomerLink().
+  // On dispatche vers les deux mocks historiques plutôt que de les fusionner :
+  // toutes les surcharges déjà écrites par les tests gardent ainsi leur effet.
+  prisma.customer.findFirst = vi.fn(({ where }: any) =>
+    where?.organizationId !== undefined
+      ? prisma.customer.findUnique({ where })
+      : prisma.customer.findUniqueOrThrow({ where }),
+  );
+  prisma.invoice.findFirst = vi.fn(({ where }: any) => prisma.invoice.findUniqueOrThrow({ where }));
+
+  return prisma;
 }
 
 describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/081/098)", () => {
+  // Régression : ce chemin passait par findUniqueOrThrow, dont la NotFoundError
+  // Prisma n'était interceptée par aucun ExceptionFilter (il n'y en a aucun dans
+  // cette application) — un invoiceId inconnu remontait en 500, distinguable du
+  // 403 d'une facture non-B2G, soit un oracle d'énumération sur un :id fourni par
+  // l'appelant. Les deux cas renvoient désormais le même message.
+  it("répond comme pour une facture non-B2G sur un invoiceId inexistant — jamais un 500, jamais un oracle", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(null) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(service.validateLiquidation("inv-inconnue", REQUESTER_USER_ID)).rejects.toThrow(
+      /B2G|entité publique/i,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  // Les faux `$extends` de ce dépôt se renvoient eux-mêmes : la VALEUR du scope
+  // n'est donc pas observable directement, et vérifier que `$extends` a été
+  // appelé ne prouverait rien sur l'organisation réellement posée. On rejoue ici
+  // l'extension capturée — `$allOperations` exécute le set_config via
+  // `$executeRaw` — pour lire l'identifiant qui y a été injecté. Même technique
+  // que client-portal.service.spec.ts. (Le helper lui-même est couvert par
+  // packages/db, rls.spec.ts.)
+  it("pose le scope RLS de l'organisation ÉMETTRICE, résolue depuis la facture", async () => {
+    const prisma = createFakePrisma();
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await service.validateLiquidation("inv-1", REQUESTER_USER_ID);
+
+    const extension = prisma.$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = prisma.$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("org-fournisseur");
+    expect(setConfig.values).toContain("app.current_org_id");
+  });
+
+
   it("refuse un appelant qui n'est PAS membre du public_buyer_account propriétaire du client de la facture (IDOR)", async () => {
     const prisma = createFakePrisma({
       publicBuyerAccountMember: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -76,7 +146,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
 
   it("refuse une facture dont le client n'a pas de publicBuyerAccountId (pas une facture B2G)", async () => {
     const prisma = createFakePrisma({
-      customer: { findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: null }) },
+      customer: { findUnique: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: null }) },
     });
     const service = new PublicBuyerPortalService(prisma as any);
 
@@ -89,6 +159,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
       invoice: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
+          organizationId: "org-fournisseur",
           status: "draft",
           validatedByAdministration: false,
           customerId: "cust-1",
@@ -125,6 +196,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
       invoice: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
+          organizationId: "org-fournisseur",
           status: "issued",
           validatedByAdministration: true,
           customerId: "cust-1",
@@ -144,6 +216,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
       invoice: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
+          organizationId: "org-fournisseur",
           status: "voided",
           validatedByAdministration: false,
           customerId: "cust-1",
@@ -159,7 +232,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
   it("refuse de valider la liquidation tant que le lien client<->compte acheteur public n'a pas été confirmé (Security Audit 2026-08-23, finding #13)", async () => {
     const prisma = createFakePrisma({
       customer: {
-        findUnique: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+        findUnique: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
       },
     });
     const service = new PublicBuyerPortalService(prisma as any);
@@ -188,6 +261,7 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
       invoice: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "inv-1",
+          organizationId: "org-fournisseur",
           status: "issued",
           validatedByAdministration: true,
           customerId: "cust-1",
@@ -271,7 +345,7 @@ describe("PublicBuyerPortalService.confirmCustomerLink (Security Audit 2026-08-2
       customer: {
         findUniqueOrThrow: vi
           .fn()
-          .mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+          .mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
       },
     });
     const service = new PublicBuyerPortalService(prisma as any);
@@ -294,7 +368,7 @@ describe("PublicBuyerPortalService.confirmCustomerLink (Security Audit 2026-08-2
       customer: {
         findUniqueOrThrow: vi
           .fn()
-          .mockResolvedValue({ id: "cust-1", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+          .mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
       },
     });
     const service = new PublicBuyerPortalService(prisma as any);
@@ -306,7 +380,7 @@ describe("PublicBuyerPortalService.confirmCustomerLink (Security Audit 2026-08-2
   it("refuse un client jamais rattaché à un compte acheteur public", async () => {
     const prisma = createFakePrisma({
       customer: {
-        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", publicBuyerAccountId: null, isPublicEntityConfirmed: false }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: null, isPublicEntityConfirmed: false }),
       },
     });
     const service = new PublicBuyerPortalService(prisma as any);
