@@ -597,6 +597,10 @@ function createFakePrismaForForfeitDeposit(
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
@@ -1815,6 +1819,10 @@ function createFakePrismaForRegeneratePaymentLink(
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
@@ -1847,7 +1855,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
     expect(result.paymentLinkId).toBe("djomy-ref-nouveau");
@@ -1869,7 +1877,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: { invoiceId: "inv-1", type: "payment_link_regenerated", actorId: "user-djenabou" },
@@ -1891,7 +1899,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(prisma.$transaction).toHaveBeenCalled();
   });
@@ -1911,7 +1919,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(null) as any,
     );
 
-    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(prisma.invoice.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1929,7 +1937,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
   });
 
   it("refuse la régénération sur une facture voided ou paid — plus rien à régler", async () => {
@@ -1945,7 +1953,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
-    await expect(serviceVoided.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(serviceVoided.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
 
     const prismaPaid = createFakePrismaForRegeneratePaymentLink({
       id: "inv-1",
@@ -1959,7 +1967,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
-    await expect(servicePaid.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(servicePaid.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
   });
 
   it("accepte la régénération sur une facture partially_paid — toujours payable", async () => {
@@ -1977,7 +1985,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
   });
@@ -1998,7 +2006,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       paymentLinkClient as any,
     );
 
-    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     // 120 000 + commission freemium 2,1% (2 520) = 122 520 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
@@ -2025,7 +2033,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 });

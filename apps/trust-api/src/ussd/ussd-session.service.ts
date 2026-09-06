@@ -45,6 +45,10 @@ interface SessionContext {
   emitAmountCentimes?: string;
   payInvoiceId?: string;
   payInvoiceNumber?: string;
+  // Organisation ayant servi à TROUVER la facture à l'étape de sélection.
+  // Conservée pour que la confirmation soit scopée sur la même, sans la
+  // redécouvrir — deux résolutions successives pourraient diverger.
+  payOrganizationId?: string;
   mandateAction?: "accept" | "revoke";
   mandateOptions?: { id: string; name: string }[];
   // K3, §2.6.1 Spec USSD — client entité publique déjà résolu (sélection
@@ -712,6 +716,7 @@ export class UssdSessionService {
     await this.setState(session.id, "pay_awaiting_confirmation", {
       payInvoiceId: invoice.id,
       payInvoiceNumber: invoice.number as string,
+      payOrganizationId: organizationId,
     });
 
     return {
@@ -735,7 +740,11 @@ export class UssdSessionService {
       return { continue: false, text: "Paiement annulé." };
     }
 
-    await this.ussdPayment.confirmPayment(context.payInvoiceId as string, session.userId as string);
+    await this.ussdPayment.confirmPayment(
+      context.payInvoiceId as string,
+      session.userId as string,
+      context.payOrganizationId as string,
+    );
     return { continue: false, text: `Lien de paiement envoyé pour la facture ${context.payInvoiceNumber}.` };
   }
 

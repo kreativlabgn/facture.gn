@@ -125,8 +125,12 @@ export class InvoicesController {
   // (C18, ADR-066).
   @Post(":id/regenerate-payment-link")
   @Roles("owner", "admin", "cashier")
-  regeneratePaymentLink(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.invoicesService.regeneratePaymentLink(id, user.id);
+  regeneratePaymentLink(
+    @Param("id") id: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.invoicesService.regeneratePaymentLink(id, user.id, organizationId);
   }
 
   // Même trio que /regenerate-payment-link — action de relance à la demande (I2).

@@ -33,7 +33,11 @@ export class UssdPaymentService {
     return computePlatformFee(amountDue, organization.commercialTier);
   }
 
-  async confirmPayment(invoiceId: string, actorId: string) {
-    return this.invoicesService.regeneratePaymentLink(invoiceId, actorId);
+  // Hors HTTP : aucun RolesGuard ne tourne, aucune organisation n'est résolue
+  // pour nous. Elle vient du contexte de session, où elle a été posée à l'étape
+  // de sélection de la facture — celle-là même qui a servi à la trouver
+  // (findPayableInvoice), jamais une organisation redécouverte après coup.
+  async confirmPayment(invoiceId: string, actorId: string, organizationId: string) {
+    return this.invoicesService.regeneratePaymentLink(invoiceId, actorId, organizationId);
   }
 }

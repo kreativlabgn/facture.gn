@@ -59,8 +59,8 @@ describe("UssdPaymentService — confirmation (délègue à C18)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new UssdPaymentService(createFakePrisma() as any, invoicesService as any);
 
-    await service.confirmPayment("inv-1", "user-1");
+    await service.confirmPayment("inv-1", "user-1", "org-1");
 
-    expect(invoicesService.regeneratePaymentLink).toHaveBeenCalledWith("inv-1", "user-1");
+    expect(invoicesService.regeneratePaymentLink).toHaveBeenCalledWith("inv-1", "user-1", "org-1");
   });
 });

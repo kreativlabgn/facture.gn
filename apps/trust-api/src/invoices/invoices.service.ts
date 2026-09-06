@@ -644,8 +644,14 @@ export class InvoicesService {
   // silencieux sans nouveau lien. Le tag "dormant" (2e mécanisme d'ADR-066, factures
   // >90j sans action) est hors scope : nécessiterait une tâche planifiée périodique,
   // absente de ce repo.
-  async regeneratePaymentLink(invoiceId: string, actorId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  // `organizationId` est AJOUTÉ EN DERNIER, contrairement à issue(invoiceId,
+  // organizationId) : la signature existait déjà avec actorId en deuxième
+  // position. Insérer le scope au milieu aurait rendu possible une inversion
+  // silencieuse entre deux paramètres tous deux de type string ; en l'ajoutant
+  // à la fin, tout appel non mis à jour devient une erreur d'arité.
+  async regeneratePaymentLink(invoiceId: string, actorId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const invoice = await scoped.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
 
     if (invoice.status !== "issued" && invoice.status !== "partially_paid") {
       throw new ConflictException(
@@ -659,7 +665,7 @@ export class InvoicesService {
     // amountDue (jamais totalTtc, C11) : sur une facture partially_paid, le lien doit
     // refléter le solde RESTANT — utiliser totalTtc redemanderait au client un
     // montant déjà partiellement réglé (bug corrigé, C11).
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findUniqueOrThrow({
       where: { id: invoice.organizationId },
     });
     // Majoré de la commission (ADR-074) — même précédent que issue().
@@ -685,8 +691,16 @@ export class InvoicesService {
     // a pu solder la facture. Sans cette revérification transactionnelle, un
     // nouveau lien payant pouvait être publié sur une facture déjà réglée.
     return this.prisma.$transaction(async (tx) => {
+      // RLS — première ligne du bloc : le client scopé est inutilisable dans une
+      // transaction interactive (chaque opération y ouvrirait une transaction
+      // imbriquée).
+      await setOrganizationScope(tx, organizationId);
+
       const claimed = await tx.invoice.updateMany({
-        where: { id: invoiceId, status: { in: ["issued", "partially_paid"] } },
+        // organizationId dans le where de l'ÉCRITURE, pas seulement de la
+        // lecture : tant que RLS dort, c'est lui qui empêche de republier un
+        // lien de paiement sur la facture d'un autre locataire.
+        where: { id: invoiceId, organizationId, status: { in: ["issued", "partially_paid"] } },
         data: {
           paymentLinkUrl: paymentLink.paymentLinkUrl,
           paymentLinkId: paymentLink.providerRef,
@@ -703,7 +717,7 @@ export class InvoicesService {
         data: { invoiceId, type: "payment_link_regenerated", actorId },
       });
 
-      return tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      return tx.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
     });
   }
 
