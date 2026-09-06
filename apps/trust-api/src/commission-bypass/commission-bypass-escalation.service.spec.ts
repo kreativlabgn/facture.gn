@@ -10,6 +10,9 @@ function createFakePrisma(organizationOverrides: Record<string, unknown> = {}) {
   };
 
   const prisma: any = {
+    // organizationScopedClient() appelle $extends ; il rend le client LUI-MÊME
+    // pour que les mocks à état mutable restent partagés.
+    $extends: vi.fn(),
     organization: {
       findUniqueOrThrow: vi.fn(() => Promise.resolve(orgState)),
       // Même garde de concurrence que financeableInvoiceWhere (K4/K5) : la clause
@@ -26,6 +29,9 @@ function createFakePrisma(organizationOverrides: Record<string, unknown> = {}) {
       }),
     },
   };
+  prisma.$extends.mockReturnValue(prisma);
+  // Le service lit par findFirstOrThrow (règle RLS) : même espion, même lecture.
+  prisma.organization.findFirstOrThrow = prisma.organization.findUniqueOrThrow;
   return { prisma, getOrgState: () => orgState };
 }
 

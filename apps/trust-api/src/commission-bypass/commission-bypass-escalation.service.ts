@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CASH_PROOF_THRESHOLD_GNF_CENTIMES } from "../payments/dto/create-payment.dto";
 
@@ -26,7 +27,12 @@ export class CommissionBypassEscalationService {
     }
 
     try {
-      const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+      // Appelée depuis PaymentsService.detectAndRecordCashAnomaly(), où
+      // l'organisation est celle de la facture encaissée — scope connu et sûr.
+      // Aucune transaction ici : les deux escalades sont des updateMany gardés
+      // par la clause where, pas un bloc atomique.
+      const scoped = organizationScopedClient(this.prisma, organizationId);
+      const organization = await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
 
       if (organization.commissionBypassLevel === "none") {
         // Garde de concurrence par la clause where (même pattern que
@@ -34,12 +40,12 @@ export class CommissionBypassEscalationService {
         // paiement concurrent a déjà fait avancer le niveau — no-op silencieux,
         // jamais une erreur (contrairement à CommissionBypassReviewService, qui
         // agit au premier plan pour une action humaine explicite).
-        await this.prisma.organization.updateMany({
+        await scoped.organization.updateMany({
           where: { id: organizationId, commissionBypassLevel: "none" },
           data: { commissionBypassLevel: "level_1_nudged" },
         });
       } else if (organization.commissionBypassLevel === "level_1_nudged") {
-        await this.prisma.organization.updateMany({
+        await scoped.organization.updateMany({
           where: { id: organizationId, commissionBypassLevel: "level_1_nudged" },
           data: {
             commissionBypassLevel: "level_2_proof_threshold_lowered",
