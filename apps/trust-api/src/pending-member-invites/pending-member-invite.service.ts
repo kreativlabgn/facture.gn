@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { OrganizationRole, PracticeMemberRole, Prisma, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, practiceScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { assertPracticeAdmin } from "../common/rbac/practice-access";
 import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
@@ -28,6 +29,24 @@ function pendingInviteNotExpiredWhere(): Prisma.PendingMemberInviteWhereInput {
   return { acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } };
 }
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. `pending_member_invite` est sous
+// politique org_isolation en XOR : elle porte organization_id OU practice_id,
+// et le prédicat teste les DEUX GUC. Ce service a donc, comme mandates, deux
+// scopes selon l'acteur — organisation pour le chemin PME, cabinet pour le
+// chemin practice. Jamais les deux GUC sur une même requête.
+//
+// Restent GLOBAUX, à dessein :
+//   • `user_phone` : hors RLS. Le contrôle « ce numéro a-t-il DÉJÀ un compte »
+//     est une question d'annuaire GLOBAL — scopé, il serait aveugle aux comptes
+//     des autres organisations et laisserait créer une invitation en doublon.
+//   • `practice_member` (via assertPracticeAdmin) et `professional_practice` :
+//     hors RLS, annuaire cabinet partagé.
+//   • resolveForNewUser() en entier : voir son commentaire — c'est la méthode
+//     qui doit voir les invitations de TOUTES les organisations et cabinets.
+//
+// Aucune transaction propre à ce module : la seule dans laquelle il s'exécute
+// est celle de son APPELANT (register/createAssisted/portail client), qui la
+// laisse volontairement sans GUC. Aucun setOrganizationScope() à poser ici.
 @Injectable()
 export class PendingMemberInviteService {
   private readonly logger = new Logger(PendingMemberInviteService.name);
@@ -48,16 +67,22 @@ export class PendingMemberInviteService {
     dto: InviteOrganizationPendingDto,
     requesterUserId: string,
   ): Promise<{ id: string }> {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+
     if (dto.role === "admin" || dto.role === "approver") {
-      const requesterMembership = await this.prisma.organizationMember.findUnique({
-        where: { organizationId_userId: { organizationId, userId: requesterUserId } },
+      const requesterMembership = await scoped.organizationMember.findFirst({
+        where: { organizationId, userId: requesterUserId },
       });
       if (requesterMembership?.role !== "owner") {
         throw new ForbiddenException(`Seul le owner peut inviter un membre avec le rôle ${dto.role}`);
       }
     }
 
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    // Pas d'oracle 500 ici malgré le *OrThrow : la route est imbriquée sous
+    // /organizations/:id avec @OrganizationIdSource("organization"), donc
+    // RolesGuard a DÉJÀ résolu cette organisation (findUnique + 404 explicite)
+    // avant d'entrer dans le service — un id inconnu n'atteint jamais ce point.
+    const organization = await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
     if (!isRoleAllowedForTier(dto.role as OrganizationRole, organization.commercialTier)) {
       throw new ForbiddenException(
         `Le rôle ${dto.role} nécessite un palier commercial supérieur à ${organization.commercialTier}`,
@@ -65,7 +90,7 @@ export class PendingMemberInviteService {
     }
     const maxMembers = maxMembersForTier(organization.commercialTier);
     if (maxMembers !== null) {
-      const activeMemberCount = await this.prisma.organizationMember.count({
+      const activeMemberCount = await scoped.organizationMember.count({
         where: { organizationId, revokedAt: null },
       });
       // F10, revue post-fix #4 — le quota ne comptait auparavant que les
@@ -74,7 +99,7 @@ export class PendingMemberInviteService {
       // (aucune des invitations en cours n'incrémente le compte actif tant
       // qu'elle n'est pas résolue), dépassant durablement le quota du palier
       // si plusieurs invités s'inscrivent ensuite.
-      const pendingInviteCount = await this.prisma.pendingMemberInvite.count({
+      const pendingInviteCount = await scoped.pendingMemberInvite.count({
         where: { organizationId, ...pendingInviteNotExpiredWhere() },
       });
       if (activeMemberCount + pendingInviteCount >= maxMembers) {
@@ -84,6 +109,9 @@ export class PendingMemberInviteService {
       }
     }
 
+    // Annuaire GLOBAL, non scopé à dessein : la question est « ce numéro a-t-il
+    // un compte facture.gn », pas « dans cette organisation ». user_phone est
+    // hors RLS de toute façon.
     const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
     if (existingPhone) {
       throw new ConflictException(
@@ -91,7 +119,7 @@ export class PendingMemberInviteService {
       );
     }
 
-    const existingPending = await this.prisma.pendingMemberInvite.findFirst({
+    const existingPending = await scoped.pendingMemberInvite.findFirst({
       where: { msisdn: dto.msisdn, organizationId, ...pendingInviteNotExpiredWhere() },
     });
     if (existingPending) {
@@ -105,7 +133,7 @@ export class PendingMemberInviteService {
     // garde-fou réel sous concurrence.
     let invite;
     try {
-      invite = await this.prisma.pendingMemberInvite.create({
+      invite = await scoped.pendingMemberInvite.create({
         data: {
           msisdn: dto.msisdn,
           role: dto.role,
@@ -131,8 +159,13 @@ export class PendingMemberInviteService {
     dto: InvitePracticePendingDto,
     requesterUserId: string,
   ): Promise<{ id: string }> {
+    // practice_member est hors RLS (annuaire cabinet partagé) : cette garde
+    // reste sur le client global, à dessein.
     await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "inviter un collaborateur");
 
+    const scoped = practiceScopedClient(this.prisma, practiceId);
+
+    // Annuaire GLOBAL, même raison que dans inviteToOrganization().
     const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
     if (existingPhone) {
       throw new ConflictException(
@@ -140,13 +173,17 @@ export class PendingMemberInviteService {
       );
     }
 
-    const existingPending = await this.prisma.pendingMemberInvite.findFirst({
+    const existingPending = await scoped.pendingMemberInvite.findFirst({
       where: { msisdn: dto.msisdn, practiceId, ...pendingInviteNotExpiredWhere() },
     });
     if (existingPending) {
       throw new ConflictException(`Une invitation est déjà en attente pour le numéro ${dto.msisdn}`);
     }
 
+    // professional_practice est hors RLS. Pas d'oracle 500 malgré le *OrThrow :
+    // assertPracticeAdmin() ci-dessus lève déjà ForbiddenException pour un
+    // practiceId inconnu (aucune appartenance ne peut exister) — cette ligne
+    // n'est jamais atteinte avec un identifiant qui n'existe pas.
     const practice = await this.prisma.professionalPractice.findUniqueOrThrow({ where: { id: practiceId } });
 
     // F10, revue post-fix #1 — même garde que inviteToOrganization : l'index
@@ -154,7 +191,7 @@ export class PendingMemberInviteService {
     // (20260823160000) reste le seul garde-fou réel sous concurrence.
     let invite;
     try {
-      invite = await this.prisma.pendingMemberInvite.create({
+      invite = await scoped.pendingMemberInvite.create({
         data: {
           msisdn: dto.msisdn,
           role: dto.role,
@@ -181,6 +218,14 @@ export class PendingMemberInviteService {
   // (user créé mais invitation non résolue) ne puisse jamais survivre à un
   // rollback. Résout TOUTES les invitations en attente pour ce numéro (une
   // même personne peut être invitée par plusieurs organisations/cabinets).
+  //
+  // RLS — À NE JAMAIS SCOPER, et c'est la raison d'être de la méthode : elle
+  // résout les invitations de TOUTES les organisations et de TOUS les cabinets
+  // ayant invité ce numéro. Poser un GUC (org ou practice) sur la transaction de
+  // l'appelant n'en laisserait voir qu'une seule et ferait échouer silencieusement
+  // les autres. C'est exactement ce qui est documenté côté appelants —
+  // AuthService.register() et OrganizationsService.createAssisted() gardent leurs
+  // transactions sans GUC pour cette raison précise.
   async resolveForNewUser(tx: Prisma.TransactionClient, userId: string, msisdn: string): Promise<void> {
     const pendingInvites = await tx.pendingMemberInvite.findMany({
       where: { msisdn, ...pendingInviteNotExpiredWhere() },
@@ -253,7 +298,10 @@ export class PendingMemberInviteService {
     // OrganizationsService.revokeAssistedSession() : une révocation concurrente
     // ou une invitation déjà résolue/expirée ne doit jamais réémettre un
     // revokedAt "gagnant" trompeur.
-    const claimed = await this.prisma.pendingMemberInvite.updateMany({
+    // Aucun oracle ici : « invitation inexistante » et « invitation d'une autre
+    // organisation » produisent toutes deux count===0, donc le MÊME 404. La
+    // discipline était déjà en place, la double clause la renforce.
+    const claimed = await organizationScopedClient(this.prisma, organizationId).pendingMemberInvite.updateMany({
       where: { id: inviteId, organizationId, acceptedAt: null, revokedAt: null },
       data: { revokedAt: new Date() },
     });
@@ -265,7 +313,7 @@ export class PendingMemberInviteService {
   async revokeForPractice(practiceId: string, inviteId: string, requesterUserId: string): Promise<void> {
     await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "révoquer une invitation");
 
-    const claimed = await this.prisma.pendingMemberInvite.updateMany({
+    const claimed = await practiceScopedClient(this.prisma, practiceId).pendingMemberInvite.updateMany({
       where: { id: inviteId, practiceId, acceptedAt: null, revokedAt: null },
       data: { revokedAt: new Date() },
     });
@@ -276,7 +324,7 @@ export class PendingMemberInviteService {
 
   // RolesGuard (@Roles("owner","admin")) garde déjà l'accès à cette méthode.
   async listPendingForOrganization(organizationId: string) {
-    return this.prisma.pendingMemberInvite.findMany({
+    return organizationScopedClient(this.prisma, organizationId).pendingMemberInvite.findMany({
       where: { organizationId, ...pendingInviteNotExpiredWhere() },
       orderBy: { createdAt: "desc" },
     });
@@ -285,7 +333,7 @@ export class PendingMemberInviteService {
   async listPendingForPractice(practiceId: string, requesterUserId: string) {
     await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "consulter les invitations en attente");
 
-    return this.prisma.pendingMemberInvite.findMany({
+    return practiceScopedClient(this.prisma, practiceId).pendingMemberInvite.findMany({
       where: { practiceId, ...pendingInviteNotExpiredWhere() },
       orderBy: { createdAt: "desc" },
     });

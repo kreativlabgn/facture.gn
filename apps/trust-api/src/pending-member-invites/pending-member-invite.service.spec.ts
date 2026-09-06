@@ -2,6 +2,27 @@ import { ConflictException, ForbiddenException, NotFoundException } from "@nestj
 import { describe, expect, it, vi } from "vitest";
 import { PendingMemberInviteService } from "./pending-member-invite.service";
 
+// organizationScopedClient()/practiceScopedClient() appellent `$extends`, et les
+// méthodes migrées lisent par findFirst/findFirstOrThrow. Le vrai client offre
+// tout cela ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  // $transaction bi-forme : la forme tableau est celle qu'emploie
+  // makeScopedOperation(), ce qui rend l'extension rejouable par le test de scope.
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function createFakeSmsProvider() {
   return { send: vi.fn().mockResolvedValue(undefined) };
 }
@@ -45,7 +66,7 @@ function createFakePrisma(overrides: Record<string, Record<string, unknown>> = {
   for (const key of Object.keys(defaults)) {
     prisma[key] = { ...defaults[key], ...(overrides[key] ?? {}) };
   }
-  return prisma;
+  return auClientScope(prisma);
 }
 
 describe("PendingMemberInviteService", () => {
@@ -173,6 +194,41 @@ describe("PendingMemberInviteService", () => {
       await expect(
         service.inviteToOrganization("org-1", { msisdn: "+224600000001", role: "cashier" }, "requester-1"),
       ).rejects.toThrow("DB down");
+    });
+
+    // Les faux `$extends` de ce dépôt se renvoient eux-mêmes : la VALEUR du
+    // scope n'est pas observable directement, et vérifier que `$extends` a été
+    // appelé ne prouverait rien sur l'identifiant réellement posé. On rejoue donc
+    // l'extension capturée — `$allOperations` exécute le set_config via
+    // `$executeRaw` — pour lire ce qui y a été injecté. Ce module a DEUX scopes
+    // (org et cabinet, XOR dans la politique) : les deux sont épinglés.
+    it("pose le scope RLS de l'ORGANISATION sur le chemin PME", async () => {
+      const prisma = createFakePrisma();
+      const service = new PendingMemberInviteService(prisma, createFakeSmsProvider() as any);
+
+      await service.inviteToOrganization("org-1", { msisdn: "+224600000001", role: "cashier" }, "requester-1");
+
+      const extension = prisma.$extends.mock.calls[0][0];
+      await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+      const setConfig = prisma.$executeRaw.mock.calls.at(-1)?.[0];
+      expect(setConfig.values).toContain("app.current_org_id");
+      expect(setConfig.values).toContain("org-1");
+    });
+
+    it("pose le scope RLS du CABINET sur le chemin practice, jamais celui d'une organisation", async () => {
+      const prisma = createFakePrisma();
+      const service = new PendingMemberInviteService(prisma, createFakeSmsProvider() as any);
+
+      await service.inviteToPractice("practice-1", { msisdn: "+224600000001", role: "collaborator" } as any, "requester-1");
+
+      const extension = prisma.$extends.mock.calls[0][0];
+      await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+      const setConfig = prisma.$executeRaw.mock.calls.at(-1)?.[0];
+      expect(setConfig.values).toContain("app.current_practice_id");
+      expect(setConfig.values).toContain("practice-1");
+      expect(setConfig.values).not.toContain("app.current_org_id");
     });
 
     it("crée l'invitation et notifie l'invité par SMS, best-effort", async () => {
