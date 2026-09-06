@@ -3,7 +3,8 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireSessionToken } from "@/lib/session";
-import { createInvoice, issueInvoice, listMyOrganizations, TrustApiError } from "@/lib/trust-api";
+import { resolveActiveOrganization } from "@/lib/active-organization";
+import { createInvoice, issueInvoice, TrustApiError } from "@/lib/trust-api";
 
 export type CreateInvoiceActionState = { error: string } | null;
 
@@ -21,8 +22,7 @@ export async function createAndIssueInvoiceAction(
   formData: FormData,
 ): Promise<CreateInvoiceActionState> {
   const token = await requireSessionToken();
-  const organizations = await listMyOrganizations(token);
-  const organization = organizations[0];
+  const { active: organization } = await resolveActiveOrganization(token);
   if (!organization) {
     return { error: "Aucune organisation associée à ce compte" };
   }

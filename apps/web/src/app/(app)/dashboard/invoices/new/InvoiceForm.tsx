@@ -57,7 +57,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
 
       <div className="rounded-2xl border border-navy-100 bg-white p-5">
         <div className="mb-4">
-          <label htmlFor="customerId" className="mb-1.5 block font-display text-[10px] font-semibold tracking-wide text-navy-950 uppercase">
+          <label htmlFor="customerId" className="mb-1.5 block font-sans text-[11px] font-semibold tracking-wide text-navy-950 uppercase">
             Client
           </label>
           <select
@@ -76,7 +76,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
         </div>
 
         <div className="mb-4">
-          <label htmlFor="documentType" className="mb-1.5 block font-display text-[10px] font-semibold tracking-wide text-navy-950 uppercase">
+          <label htmlFor="documentType" className="mb-1.5 block font-sans text-[11px] font-semibold tracking-wide text-navy-950 uppercase">
             Type de document
           </label>
           <select
@@ -91,7 +91,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
         </div>
 
         <div className="mb-4">
-          <label htmlFor="referenceMarche" className="mb-1.5 block font-display text-[10px] font-semibold tracking-wide text-navy-950 uppercase">
+          <label htmlFor="referenceMarche" className="mb-1.5 block font-sans text-[11px] font-semibold tracking-wide text-navy-950 uppercase">
             Référence marché (TELEMO) — optionnel
           </label>
           <input
@@ -104,7 +104,7 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
         </div>
 
         <div className="mt-5">
-          <p className="mb-2 grid grid-cols-[1fr_70px_110px_32px] gap-2 font-display text-[10px] font-semibold tracking-wide text-navy-600 uppercase">
+          <p className="mb-2 grid grid-cols-[1fr_70px_110px_32px] gap-2 font-sans text-[11px] font-semibold tracking-wide text-navy-600 uppercase">
             <span>Description</span>
             <span>Qté</span>
             <span>P.U. (GNF)</span>

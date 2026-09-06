@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { requireSessionToken } from "@/lib/session";
-import { listCustomers, listMyOrganizations } from "@/lib/trust-api";
+import { resolveActiveOrganization } from "@/lib/active-organization";
+import { listCustomers } from "@/lib/trust-api";
 import { InvoiceForm } from "./InvoiceForm";
 
 export const metadata: Metadata = { title: "Émettre une facture — facture.gn" };
 
 export default async function NewInvoicePage() {
   const token = await requireSessionToken();
-  const organizations = await listMyOrganizations(token);
-  const organization = organizations[0];
+  const { active: organization } = await resolveActiveOrganization(token);
   if (!organization) {
     return null;
   }

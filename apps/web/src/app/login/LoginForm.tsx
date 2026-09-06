@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { Button, Field, TextInput } from "@/components/ui";
 import { loginAction, type LoginActionState } from "./actions";
 
 export function LoginForm() {
@@ -8,39 +9,16 @@ export function LoginForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4 text-left">
-      <div>
-        <label htmlFor="msisdn" className="mb-1.5 block font-display text-[10px] font-semibold tracking-wide text-navy-950 uppercase">
-          Numéro de téléphone
-        </label>
-        <input
-          id="msisdn"
-          name="msisdn"
-          type="tel"
-          required
-          placeholder="+224620000000"
-          className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-600 focus:border-2 focus:border-navy-950 focus:outline-none"
-        />
-      </div>
-      <div>
-        <label htmlFor="password" className="mb-1.5 block font-display text-[10px] font-semibold tracking-wide text-navy-950 uppercase">
-          Mot de passe
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
-        />
-      </div>
+      <Field label="Numéro de téléphone" htmlFor="msisdn">
+        <TextInput id="msisdn" name="msisdn" type="tel" required placeholder="+224620000000" />
+      </Field>
+      <Field label="Mot de passe" htmlFor="password">
+        <TextInput id="password" name="password" type="password" required />
+      </Field>
       {state?.error ? <p className="text-sm text-red-text">{state.error}</p> : null}
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-[10px] bg-navy-950 px-6 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800 disabled:opacity-45"
-      >
+      <Button type="submit" disabled={pending}>
         {pending ? "Connexion..." : "Se connecter"}
-      </button>
+      </Button>
     </form>
   );
 }

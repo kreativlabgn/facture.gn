@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 //   R-11  — jamais de texte clair sur fond Or de Guinée (contraste 1.8:1).
 //   Tokens — aucune couleur hex en dur : tout passe par globals.css @theme.
 //   AA    — aucun token Navy sous navy-600 utilisé comme couleur de texte.
+//   Typo  — `font-display` jamais en dessous de 12px (charte §Typographie).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SRC = path.resolve(__dirname);
@@ -116,6 +117,39 @@ describe("Design System — R-11 : jamais de texte clair sur Or de Guinée", () 
         });
     }
     expect(hits, `Texte clair sur Or (utiliser text-navy-950) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+});
+
+describe("Design System — typographie : plancher du display", () => {
+  // Charte §Typographie : Space Grotesk « jamais en dessous de 12px, sinon
+  // Inter prend le relais ». Une display serrée en capitales à 10px devient
+  // illisible en plein soleil sur un écran d'entrée de gamme — exactement le
+  // contexte d'usage visé (DAT). Sept libellés de formulaire enfreignaient la
+  // règle avant les primitives ; le garde-fou empêche le retour.
+  const DISPLAY_FLOOR_PX = 12;
+
+  it("aucune classe ne combine font-display et une taille sous 12px", () => {
+    const hits: { file: string; line: number; match: string }[] = [];
+    for (const file of files) {
+      stripComments(readFileSync(file, "utf8"))
+        .split("\n")
+        .forEach((text, i) => {
+          for (const quoted of text.match(/["'`][^"'`]*["'`]/g) ?? []) {
+            if (!quoted.includes("font-display")) {
+              continue;
+            }
+            for (const size of quoted.match(/\btext-\[(\d+)px\]/g) ?? []) {
+              const px = Number(size.replace(/\D/g, ""));
+              if (px < DISPLAY_FLOOR_PX) {
+                hits.push({ file: path.relative(SRC, file), line: i + 1, match: quoted.slice(0, 90) });
+              }
+            }
+          }
+        });
+    }
+    expect(hits, `font-display sous ${DISPLAY_FLOOR_PX}px (passer en font-sans) :\n${JSON.stringify(hits, null, 2)}`).toEqual(
+      [],
+    );
   });
 });
 

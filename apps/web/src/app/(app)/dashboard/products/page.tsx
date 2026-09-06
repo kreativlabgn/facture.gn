@@ -1,0 +1,67 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { requireSessionToken } from "@/lib/session";
+import { resolveActiveOrganization } from "@/lib/active-organization";
+import { listProducts, type ProductListItem } from "@/lib/trust-api";
+import { formatGnf } from "@/lib/format";
+import { DuplicateWarningPill } from "@/components/StatusPill";
+import { DataTable, type Column } from "@/components/data/DataTable";
+
+export const metadata: Metadata = { title: "Produits — facture.gn" };
+
+// Le lien est porté par la cellule « Produit », pas par la ligne entière : une
+// <tr> cliquable n'est ni annoncée comme un lien ni atteignable au clavier, et
+// le clic milieu n'y ouvre rien. Un <a> dans la première cellule reste un lien
+// ordinaire, avec tout ce que ça implique.
+const COLUMNS: readonly Column<ProductListItem>[] = [
+  {
+    key: "name",
+    header: "Produit",
+    cell: (product) => (
+      <span className="flex flex-wrap items-center gap-2">
+        <Link
+          href={`/dashboard/products/${product.id}`}
+          className="font-semibold text-navy-950 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
+        >
+          {product.name}
+        </Link>
+        {product.possibleDuplicateOf ? <DuplicateWarningPill /> : null}
+      </span>
+    ),
+  },
+  {
+    key: "costPrice",
+    header: "Coût",
+    align: "right",
+    // costPrice nullable — E6 : la création d'un produit n'est jamais bloquée
+    // par l'absence de coût. Un tiret dit « non renseigné », pas « zéro ».
+    cell: (product) => (
+      <span className="font-mono text-xs text-navy-600">{product.costPrice ? formatGnf(product.costPrice) : "—"}</span>
+    ),
+  },
+];
+
+// UI backlog gap comblé ici — écran liste produits. Pas de formulaire de
+// création (hors périmètre demandé : la création existe déjà côté API —
+// POST /products, E10 — mais aucun écran n'est demandé ici).
+export default async function ProductsPage() {
+  const token = await requireSessionToken();
+  const { active: organization } = await resolveActiveOrganization(token);
+  if (!organization) {
+    return null;
+  }
+
+  const products = await listProducts(token, organization.id, { take: 100 });
+
+  return (
+    <div>
+      <h1 className="mb-6 font-display text-2xl font-bold text-navy-950">Produits</h1>
+      <DataTable
+        columns={COLUMNS}
+        rows={products}
+        getRowKey={(product) => product.id}
+        emptyMessage="Aucun produit pour le moment."
+      />
+    </div>
+  );
+}

@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSessionToken } from "@/lib/session";
-import { createCustomer, listMyOrganizations, TrustApiError } from "@/lib/trust-api";
+import { resolveActiveOrganization } from "@/lib/active-organization";
+import { createCustomer, TrustApiError } from "@/lib/trust-api";
 
 export type CreateCustomerActionState = { error: string } | null;
 
@@ -11,8 +12,7 @@ export async function createCustomerAction(
   formData: FormData,
 ): Promise<CreateCustomerActionState> {
   const token = await requireSessionToken();
-  const organizations = await listMyOrganizations(token);
-  const organization = organizations[0];
+  const { active: organization } = await resolveActiveOrganization(token);
   if (!organization) {
     return { error: "Aucune organisation associée à ce compte" };
   }

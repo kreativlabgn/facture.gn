@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { resolveActiveOrganization } from "@/lib/active-organization";
+import { TrustApiError } from "@/lib/trust-api";
 import { requireSessionToken } from "@/lib/session";
 
 // Route Handler plutôt qu'un lien direct vers trust-api : un <a href> ne peut
@@ -10,15 +12,19 @@ const TRUST_API_URL = process.env.TRUST_API_URL ?? "http://localhost:3000";
 export async function GET() {
   const token = await requireSessionToken();
 
-  const orgResponse = await fetch(`${TRUST_API_URL}/organizations`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!orgResponse.ok) {
-    return NextResponse.json({ message: "Organisation introuvable" }, { status: orgResponse.status });
+  // Même résolution que les écrans : l'export doit porter sur l'organisation
+  // ACTIVE (OrgSwitcher), pas sur la première de la liste — sinon un
+  // utilisateur multi-organisation exporterait le FEC d'une autre société que
+  // celle qu'il a sous les yeux, sans rien remarquer avant la DGI.
+  let organization;
+  try {
+    ({ active: organization } = await resolveActiveOrganization(token));
+  } catch (error) {
+    if (error instanceof TrustApiError) {
+      return NextResponse.json({ message: "Organisation introuvable" }, { status: error.status });
+    }
+    throw error;
   }
-  const organizations = await orgResponse.json();
-  const organization = organizations[0];
   if (!organization) {
     return NextResponse.json({ message: "Aucune organisation associée à ce compte" }, { status: 404 });
   }
