@@ -95,11 +95,11 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
       // plus bas dans ce fichier.
       $transaction: vi.fn((callback: any) => callback(prisma)),
       // Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) —
-      // pg_advisory_xact_lock posé via $queryRaw avant le findFirst. Resolved
+      // pg_advisory_xact_lock posé via $executeRaw avant le findFirst. Resolved
       // par défaut ici (aucune contention simulée) — voir le test de
-      // concurrence dédié plus bas pour un $queryRaw qui simule réellement le
+      // concurrence dédié plus bas pour un $executeRaw qui simule réellement le
       // verrou.
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(1),
       customer: {
         // findFirst simule fidèlement le filtrage Prisma réel sur organizationId : un
         // existingMatch configuré pour une AUTRE organisation que celle demandée dans le
@@ -205,7 +205,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
     // Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) — aucun
     // téléphone, rien à sérialiser : le verrou n'a de sens que pour la clé de
     // dédoublonnage (organizationId+phone), jamais posé quand elle n'existe pas.
-    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.customer.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ possibleDuplicateOf: null }),
     });
@@ -226,7 +226,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
     const $transaction = vi.fn(async (callback: any) => {
       let releaseLock: (() => void) | undefined;
       const tx: any = {
-        $queryRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
+        $executeRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
           const previous = locks.get(key) ?? Promise.resolve();
           let release!: () => void;
           const mine = new Promise<void>((resolve) => {
@@ -235,7 +235,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
           locks.set(key, previous.then(() => mine));
           await previous;
           releaseLock = release;
-          return [];
+          return 1;
         }),
         customer: {
           findFirst: vi.fn(async ({ where }: any) =>
@@ -870,7 +870,7 @@ describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
   it("le dédoublonnage unitaire ignore les lignes anonymisées (anonymizedAt: null dans le where)", async () => {
     const prisma: any = {
       $transaction: vi.fn((cb: any) => cb(prisma)),
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(1),
       customer: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cust-new", ...data })),

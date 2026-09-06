@@ -222,7 +222,7 @@ function buildAnon(
 ) {
   const full = opts.fullRead ?? customer;
   const tx: any = {
-    $queryRaw: vi.fn().mockResolvedValue([{ pg_advisory_xact_lock: "" }]),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     customer: {
       findUnique: vi.fn().mockResolvedValue({ organizationId: customer.organizationId, phone: customer.phone }),
       findUniqueOrThrow: vi.fn().mockResolvedValue(full),
@@ -301,7 +301,7 @@ describe("DataRightsService.anonymizeCustomerById", () => {
 
     await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
 
-    const lockOrder = tx.$queryRaw.mock.invocationCallOrder[0];
+    const lockOrder = tx.$executeRaw.mock.invocationCallOrder[0];
     const rereadOrder = tx.customer.findUniqueOrThrow.mock.invocationCallOrder[0];
     const updateOrder = tx.customer.update.mock.invocationCallOrder[0];
     expect(lockOrder).toBeLessThan(rereadOrder);
@@ -343,7 +343,7 @@ describe("DataRightsService.anonymizeSubjectByPhone (chemin ops, transverse)", (
     });
     const byId: Record<string, any> = { "cus-a": c1, "cus-b": c2 };
     const tx: any = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(1),
       customer: {
         findUnique: vi.fn((args: any) =>
           Promise.resolve({ organizationId: byId[args.where.id].organizationId, phone: byId[args.where.id].phone }),

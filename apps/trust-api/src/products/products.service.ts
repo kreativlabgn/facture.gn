@@ -45,7 +45,8 @@ export class ProductsService {
     const name = dto.name.trim();
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`product:${dto.organizationId}:${name.toLowerCase()}`}))`;
+      // $executeRaw, jamais $queryRaw — voir CustomersService.create().
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`product:${dto.organizationId}:${name.toLowerCase()}`}))`;
 
       const existingMatch = await tx.product.findFirst({
         where: {

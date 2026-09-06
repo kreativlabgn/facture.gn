@@ -310,7 +310,8 @@ export class DataRightsService {
   private async lockDedupKey(tx: TxClient, organizationId: string, phone: string | null): Promise<void> {
     // Même clé que CustomersService.create() / importCustomers() (E3) : sérialise
     // l'anonymisation contre une (re)création concurrente sur le même téléphone.
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${organizationId}:${phone ?? ""}`}))`;
+    // $executeRaw, jamais $queryRaw — voir CustomersService.create().
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${organizationId}:${phone ?? ""}`}))`;
   }
 
   private async applyAnonymization(

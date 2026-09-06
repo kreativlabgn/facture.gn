@@ -8,12 +8,12 @@ function createFakePrisma(overrides: { existingMatch?: any } = {}) {
     // directement les mêmes mocks product.findFirst/create (tx === prisma ici).
     $transaction: vi.fn((callback: any) => callback(prisma)),
     // Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) —
-    // pg_advisory_xact_lock posé via $queryRaw avant le findFirst, à chaque
+    // pg_advisory_xact_lock posé via $executeRaw avant le findFirst, à chaque
     // create() (le nom est toujours présent, contrairement au téléphone
     // optionnel de CustomersService). Resolved par défaut ici — voir le test
-    // de concurrence dédié plus bas pour un $queryRaw qui simule réellement le
+    // de concurrence dédié plus bas pour un $executeRaw qui simule réellement le
     // verrou.
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     product: {
       // findFirst simule fidèlement le filtrage Prisma réel sur organizationId : un
       // existingMatch configuré pour une AUTRE organisation que celle demandée dans le
@@ -152,7 +152,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const $transaction = vi.fn(async (callback: any) => {
       let releaseLock: (() => void) | undefined;
       const tx: any = {
-        $queryRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
+        $executeRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
           const previous = locks.get(key) ?? Promise.resolve();
           let release!: () => void;
           const mine = new Promise<void>((resolve) => {
@@ -161,7 +161,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
           locks.set(key, previous.then(() => mine));
           await previous;
           releaseLock = release;
-          return [];
+          return 1;
         }),
         product: {
           findFirst: vi.fn(async ({ where }: any) =>
