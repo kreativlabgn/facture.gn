@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type { EmissionChannel, Prisma, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
 import { resolveNifForCertification } from "../certification/certification.service";
@@ -741,7 +742,17 @@ export class InvoicesService {
     if (options.emissionChannel) {
       where.emissionChannel = options.emissionChannel;
     }
-    return this.prisma.invoice.findMany({
+    // RLS (étape 1 du runbook rls-rollout) — la lecture passe par le client
+    // scopé, qui ouvre une transaction précédée de
+    // `set_config('app.current_org_id', …, TRUE)`.
+    //
+    // `where.organizationId` est CONSERVÉ, contrairement à l'exemple du
+    // runbook qui le retire. Les politiques sont encore DORMANTES (étape 2 non
+    // faite, et le rôle applicatif est propriétaire des tables, donc contourne
+    // RLS) : le supprimer aujourd'hui rendrait les factures de TOUTES les
+    // organisations. Il deviendra redondant le jour où RLS mordra, jamais
+    // dangereux.
+    return organizationScopedClient(this.prisma, organizationId).invoice.findMany({
       where,
       orderBy: { createdAt: "desc" },
       take,

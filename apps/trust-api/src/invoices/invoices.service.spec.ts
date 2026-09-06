@@ -74,6 +74,32 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscal
     // vraie base, le verrou lui-même n'a rien à vérifier ici).
     $transaction: vi.fn((callback: any) => callback(prisma)),
     $queryRaw: vi.fn().mockResolvedValue([]),
+
+    // organizationScopedClient() appelle client.$extends(). Le faux rend un
+    // client DISTINCT (`__scoped`) plutôt que lui-même : un test peut ainsi
+    // prouver qu'une lecture passe bien par le client scopé, au lieu de se
+    // contenter de ne rien casser. La mécanique du set_config est couverte
+    // ailleurs, par le test unitaire de makeOrgScopedOperation (packages/db).
+    $extends: vi.fn(() => prisma.__scoped),
+  };
+  prisma.__scoped = {
+    invoice: { findMany: vi.fn().mockResolvedValue([]) },
+  };
+
+  return prisma;
+}
+
+// Faux client pour les lectures scopées RLS (étape 1 du runbook rls-rollout).
+// `$extends()` rend un client DISTINCT plutôt que lui-même : c'est ce qui
+// permet à un test de distinguer une lecture passée par le client scopé d'une
+// lecture restée sur le client de base. Un faux qui se renverrait lui-même
+// laisserait passer une régression sans rien dire.
+function createFakeScopedPrisma(rows: any[] = []) {
+  const scoped = { invoice: { findMany: vi.fn().mockResolvedValue(rows) } };
+  const prisma: any = {
+    invoice: { findMany: vi.fn().mockResolvedValue(rows) },
+    $extends: vi.fn(() => scoped),
+    __scoped: scoped,
   };
   return prisma;
 }
@@ -2064,11 +2090,49 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
   });
 });
 
+// RLS, étape 1 du runbook rls-rollout : la lecture doit passer par
+// organizationScopedClient(), qui pose app.current_org_id pour la durée de
+// la transaction. Tant que les politiques sont dormantes cela ne change rien
+// au résultat — d'où ce test, sinon rien ne signalerait une régression.
+describe("findAllByOrganization — scope RLS", () => {
+  it("passe par le client scopé RLS, avec l'organisation demandée", async () => {
+    const prisma = createFakeScopedPrisma();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", {});
+
+    expect(prisma.$extends).toHaveBeenCalledTimes(1);
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalled();
+    // Le client de base ne doit PAS avoir servi : sinon la requête
+    // s'exécuterait hors de toute transaction scopée.
+    expect(prisma.invoice.findMany).not.toHaveBeenCalled();
+  });
+
+  // Le where explicite reste la seule protection réelle tant que RLS dort.
+  it("garde organizationId dans le where, RLS étant encore dormant", async () => {
+    const prisma = createFakeScopedPrisma();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", {});
+
+    const args = prisma.__scoped.invoice.findMany.mock.calls[0][0];
+    expect(args.where.organizationId).toBe("org-1");
+  });
+});
+
 describe("findAllByOrganization", () => {
   it("liste les factures de l'organisation, plus récentes d'abord, paginées avec une limite par défaut", async () => {
-    const prisma: any = {
-      invoice: { findMany: vi.fn().mockResolvedValue([{ id: "inv-2" }, { id: "inv-1" }]) },
-    };
+    const prisma = createFakeScopedPrisma([{ id: "inv-2" }, { id: "inv-1" }]);
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2078,7 +2142,7 @@ describe("findAllByOrganization", () => {
 
     const result = await service.findAllByOrganization("org-1", {});
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith({
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith({
       where: { organizationId: "org-1" },
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -2088,7 +2152,7 @@ describe("findAllByOrganization", () => {
   });
 
   it("respecte take/skip explicites, plafonnés à 100 pour éviter une réponse non bornée (DAT, 1M factures/mois)", async () => {
-    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma = createFakeScopedPrisma();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2098,7 +2162,7 @@ describe("findAllByOrganization", () => {
 
     await service.findAllByOrganization("org-1", { take: 500, skip: 20 });
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 100, skip: 20 }),
     );
   });
@@ -2430,7 +2494,7 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
   });
 
   it("findAllByOrganization filtre par emissionChannel quand il est fourni", async () => {
-    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma = createFakeScopedPrisma();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2440,13 +2504,13 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
 
     await service.findAllByOrganization("org-1", { emissionChannel: "ussd" });
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { organizationId: "org-1", emissionChannel: "ussd" } }),
     );
   });
 
   it("findAllByOrganization n'ajoute pas de clé emissionChannel au where quand le filtre est absent", async () => {
-    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma = createFakeScopedPrisma();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2456,7 +2520,7 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
 
     await service.findAllByOrganization("org-1", {});
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { organizationId: "org-1" } }),
     );
   });
