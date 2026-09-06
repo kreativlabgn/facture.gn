@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
+
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { RenderingService } from "../rendering/rendering.service";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { listInvoicesQuerySchema, type ListInvoicesQueryDto } from "./dto/list-invoices-query.dto";
@@ -70,8 +72,8 @@ export class InvoicesController {
   // (lecture seule des factures) — jamais sur customers/audit-log/trust-score
   // ni sur FEC_ELIGIBLE_ROLES (export fiscal, hors périmètre d'un proche).
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
-  findOne(@Param("id") id: string) {
-    return this.invoicesService.findOne(id);
+  findOne(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.findOne(id, organizationId);
   }
 
   // Lot A — PDF de la facture certifiée. Même trio de rôles que GET /invoices/:id
@@ -95,8 +97,8 @@ export class InvoicesController {
 
   @Post(":id/void")
   @Roles("owner", "admin")
-  void(@Param("id") id: string) {
-    return this.invoicesService.void(id);
+  void(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.void(id, organizationId);
   }
 
   // Même trio que /issue (owner/admin/cashier) — portée similaire, transforme un

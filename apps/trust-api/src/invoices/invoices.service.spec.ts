@@ -80,11 +80,24 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscal
     // prouver qu'une lecture passe bien par le client scopé, au lieu de se
     // contenter de ne rien casser. La mécanique du set_config est couverte
     // ailleurs, par le test unitaire de makeOrgScopedOperation (packages/db).
-    $extends: vi.fn(() => prisma.__scoped),
+    // organizationScopedClient() appelle client.$extends(). Ici le faux se
+    // renvoie LUI-MÊME : les méthodes migrées (findOne, void) partagent alors
+    // les mêmes mocks de modèle, ce qui garde lisibles les assertions
+    // existantes sur les arguments. La contrepartie est qu'on ne distingue
+    // plus le client scopé du client de base — c'est pourquoi les tests
+    // vérifient explicitement que `$extends` a été appelé, et que le
+    // `where` porte bien l'organisation. La discrimination complète, elle,
+    // vit dans createFakeScopedPrisma() (tests de findAllByOrganization).
+    $extends: vi.fn(() => prisma),
   };
-  prisma.__scoped = {
-    invoice: { findMany: vi.fn().mockResolvedValue([]) },
-  };
+  // Les méthodes migrées RLS appellent findFirstOrThrow : leur `where` porte
+  // désormais deux champs (id ET organizationId), ce qui n'est plus une clé
+  // unique. Les faux existants ne déclarent que findUniqueOrThrow — on adosse
+  // l'un à l'autre plutôt que de réécrire chaque test, les deux désignant la
+  // même lecture. Les assertions sur findUniqueOrThrow restent donc valables.
+  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
+    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
+  }
 
   return prisma;
 }
@@ -849,7 +862,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.void("inv-1");
+    const result = await service.void("inv-1", "org-1");
 
     expect(result.status).toBe("voided");
   });
@@ -867,7 +880,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.void("inv-1")).rejects.toThrow(/statut voided/);
+    await expect(service.void("inv-1", "org-1")).rejects.toThrow(/statut voided/);
   });
 
   it("refuse d'annuler une facture ayant déjà un paiement enregistré", async () => {
@@ -883,7 +896,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.void("inv-1")).rejects.toThrow(/avoir/);
+    await expect(service.void("inv-1", "org-1")).rejects.toThrow(/avoir/);
   });
 
   it("refuse d'annuler si updateMany ne réclame rien (paiement/statut modifié entretemps, Quality Audit 2026-08-23, finding #3)", async () => {
@@ -900,9 +913,12 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.void("inv-1")).rejects.toThrow(ConflictException);
+    await expect(service.void("inv-1", "org-1")).rejects.toThrow(ConflictException);
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", status: { in: ["draft", "issued"] }, amountPaid: 0n },
+      // organizationId dans le where de l'ÉCRITURE, pas seulement de la lecture :
+      // c'est le garde-fou qui empêche d'annuler la facture d'une autre
+      // organisation tant que RLS est dormant.
+      where: { id: "inv-1", organizationId: "org-1", status: { in: ["draft", "issued"] }, amountPaid: 0n },
       data: { status: "voided" },
     });
   });
@@ -2062,7 +2078,7 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.findOne("inv-1");
+    const result = await service.findOne("inv-1", "org-1");
 
     expect(result).toEqual({
       id: "inv-1",
@@ -2086,7 +2102,7 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.findOne("inv-inconnue")).rejects.toThrow(/introuvable/);
+    await expect(service.findOne("inv-inconnue", "org-1")).rejects.toThrow(/introuvable/);
   });
 });
 

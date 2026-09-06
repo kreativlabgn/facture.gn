@@ -722,8 +722,17 @@ export class InvoicesService {
   // le "temps réel" de la story est un problème de fréquence de polling côté
   // client, pas un mécanisme serveur. RolesGuard (idSource "invoice", défaut)
   // a déjà résolu et 404-é la facture avant d'arriver ici.
-  async findOne(invoiceId: string) {
-    return this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  // `organizationId` vient de @CurrentOrganizationId() : RolesGuard l'a déjà
+  // résolu depuis params.id, on cesse simplement de jeter ce travail.
+  //
+  // findFirstOrThrow et non findUniqueOrThrow : le where porte désormais DEUX
+  // champs, et `{ id, organizationId }` n'est pas une clé unique. Le filtre
+  // organisation est explicite, il reste la seule protection réelle tant que
+  // RLS est dormant (rls-rollout.md, étape 1).
+  async findOne(invoiceId: string, organizationId: string) {
+    return organizationScopedClient(this.prisma, organizationId).invoice.findFirstOrThrow({
+      where: { id: invoiceId, organizationId },
+    });
   }
 
   // "Factures récentes" (dashboard) — aucun endpoint de liste n'existait jusqu'ici
@@ -761,8 +770,9 @@ export class InvoicesService {
   }
 
   // voided réservé aux factures sans aucun paiement (PRD §4.2).
-  async void(invoiceId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  async void(invoiceId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const invoice = await scoped.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
 
     if (invoice.amountPaid > 0n) {
       throw new ConflictException(
@@ -781,8 +791,8 @@ export class InvoicesService {
     // (PRD §4.2). Message d'erreur générique en cas de count=0 — la lecture
     // initiale a déjà distingué la cause probable (paiement vs statut) pour
     // l'appelant qui vient de la voir il y a quelques millisecondes.
-    const claimed = await this.prisma.invoice.updateMany({
-      where: { id: invoiceId, status: { in: ["draft", "issued"] }, amountPaid: 0n },
+    const claimed = await scoped.invoice.updateMany({
+      where: { id: invoiceId, organizationId, status: { in: ["draft", "issued"] }, amountPaid: 0n },
       data: { status: "voided" },
     });
     if (claimed.count === 0) {
@@ -790,6 +800,6 @@ export class InvoicesService {
         `Facture ${invoiceId} ne peut être annulée — statut ou paiement modifié entretemps, réessayer`,
       );
     }
-    return this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    return scoped.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
   }
 }
