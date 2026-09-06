@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type { EmissionChannel, Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -10,8 +10,17 @@ import { resolveLocale } from "../i18n";
 import { InvoiceNumberingService } from "./invoice-numbering.service";
 import { computeTaxBreakdown, resolveTaxRateBps } from "./tax-regime";
 import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
-import type { PaymentLinkNotificationService } from "../notifications/payment-link-notification.service";
-import type { PaymentReminderService } from "../notifications/payment-reminder.service";
+// Imports de VALEUR, pas `import type` : Nest lit les dépendances du
+// constructeur dans la métadonnée `design:paramtypes` émise par TypeScript, et
+// un `import type` est effacé à la compilation — le paramètre n'y apparaît
+// alors plus que comme `Function`, un jeton que l'injecteur ne peut pas
+// résoudre. C'est ce qui faisait échouer le démarrage de l'application
+// ("Nest can't resolve dependencies of the InvoicesService … argument at
+// index [4]"), alors que NotificationsModule est @Global() et exporte bien les
+// deux services. Aucun cycle : ni l'un ni l'autre n'importe quoi que ce soit
+// d'invoices/.
+import { PaymentLinkNotificationService } from "../notifications/payment-link-notification.service";
+import { PaymentReminderService } from "../notifications/payment-reminder.service";
 import { isOverdue } from "./overdue";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
@@ -64,11 +73,19 @@ export class InvoicesService {
     // les forcer à le fournir romprait tous les call sites pour un gain nul
     // (voir plan payment-link-notifications, risque de rayon d'impact déjà
     // documenté pour ce fichier dans le plan organization-root-key, A3).
-    private readonly notificationService?: PaymentLinkNotificationService,
+    //
+    // @Optional() est indispensable et ne fait pas doublon avec le `?` : le
+    // point d'interrogation de TypeScript est une information de compilation
+    // que l'injecteur Nest ne voit jamais. Sans lui, une instanciation par
+    // Nest exigerait le paramètre ; avec lui, un contexte où le service
+    // n'est pas fourni (tests, module isolé) reçoit `undefined` au lieu de
+    // faire échouer le démarrage. En application complète, NotificationsModule
+    // étant @Global(), le service est bel et bien injecté.
+    @Optional() private readonly notificationService?: PaymentLinkNotificationService,
     // I2 — même précédent que notificationService ci-dessus (optionnel, en
     // dernière position) : jamais forcer les 65+ tests existants de ce fichier
     // à fournir un paramètre sans rapport avec leur comportement testé.
-    private readonly paymentReminderService?: PaymentReminderService,
+    @Optional() private readonly paymentReminderService?: PaymentReminderService,
   ) {}
 
   // Lot D — channel est un argument SERVEUR, jamais dans CreateInvoiceDto : un
