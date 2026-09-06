@@ -1,5 +1,25 @@
 import { ConflictException } from "@nestjs/common";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// practiceScopedClient() / organizationScopedClient() appellent `$extends`, et
+// les méthodes migrées lisent par findFirst/findFirstOrThrow (le `where` porte
+// deux champs, donc plus de clé unique). Le vrai client offre tout cela ; un
+// faux qui ne l'offre pas ne teste pas le service migré, il plante dessus.
+//
+// `$extends` rend le client LUI-MÊME : les mocks de modèle restent partagés et
+// les assertions existantes sur les arguments restent lisibles.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { MandatesService } from "./mandates.service";
 
 const PRACTICE_ID = "practice-1";
@@ -12,7 +32,7 @@ function createFakePrisma(overrides: {
   existingMandate?: any;
   createImpl?: ReturnType<typeof vi.fn>;
 } = {}) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     practiceMember: {
       findFirst: vi.fn().mockResolvedValue(
         overrides.member !== undefined ? overrides.member : { id: "member-1", role: "practice_admin" },
@@ -27,7 +47,7 @@ function createFakePrisma(overrides: {
       findFirst: vi.fn().mockResolvedValue(overrides.existingMandate ?? null),
       create: overrides.createImpl ?? vi.fn().mockResolvedValue({ id: "mandate-1" }),
     },
-  };
+  });
   return prisma;
 }
 
@@ -115,7 +135,7 @@ const ACCEPTOR_ID = "owner-1";
 function createFakePrismaForAccept(
   overrides: { mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
 ) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     mandate: {
       findUnique: vi.fn().mockResolvedValue(
         overrides.mandate !== undefined
@@ -127,7 +147,7 @@ function createFakePrismaForAccept(
       updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
     },
-  };
+  });
   return prisma;
 }
 
@@ -139,7 +159,7 @@ describe("MandatesService — acceptation (F1, ADR-069)", () => {
     await service.accept(ORG_ID, MANDATE_ID, ACCEPTOR_ID);
 
     expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID, status: "pending" },
+      where: { id: MANDATE_ID, organizationId: ORG_ID, status: "pending" },
       data: { status: "active", grantedBy: ACCEPTOR_ID, grantedAt: expect.any(Date) },
     });
   });
@@ -207,7 +227,7 @@ const CGA_PRACTICE_ID = "cga-practice-1";
 function createFakePrismaForRequestFromOrganization(
   overrides: { practice?: any; existingMandate?: any; createImpl?: ReturnType<typeof vi.fn> } = {},
 ) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     professionalPractice: {
       findUnique: vi.fn().mockResolvedValue(
         overrides.practice !== undefined ? overrides.practice : { id: CGA_PRACTICE_ID, type: "cga" },
@@ -217,7 +237,7 @@ function createFakePrismaForRequestFromOrganization(
       findFirst: vi.fn().mockResolvedValue(overrides.existingMandate ?? null),
       create: overrides.createImpl ?? vi.fn().mockResolvedValue({ id: "mandate-1" }),
     },
-  };
+  });
   return prisma;
 }
 
@@ -267,7 +287,7 @@ describe("MandatesService — adhérer à un CGA, initié par l'organisation (F1
 function createFakePrismaForAcceptAsPractice(
   overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
 ) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     practiceMember: {
       findFirst: vi.fn().mockResolvedValue(
         overrides.member !== undefined ? overrides.member : { id: "member-1", role: "practice_admin" },
@@ -283,7 +303,7 @@ function createFakePrismaForAcceptAsPractice(
       updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "active" }),
     },
-  };
+  });
   return prisma;
 }
 
@@ -295,7 +315,7 @@ describe("MandatesService — accepter une adhésion, côté CGA (F12, ADR-078)"
     await service.acceptAsPractice(CGA_PRACTICE_ID, MANDATE_ID, ACCEPTOR_ID);
 
     expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID, status: "pending" },
+      where: { id: MANDATE_ID, practiceId: CGA_PRACTICE_ID, status: "pending" },
       data: { status: "active", grantedBy: ACCEPTOR_ID, grantedAt: expect.any(Date) },
     });
   });
@@ -362,7 +382,7 @@ describe("MandatesService — accepter une adhésion, côté CGA (F12, ADR-078)"
 function createFakePrismaForRevoke(
   overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
 ) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     practiceMember: {
       findFirst: vi.fn().mockResolvedValue(
         overrides.member !== undefined ? overrides.member : { id: "member-1", role: "practice_admin" },
@@ -378,7 +398,7 @@ function createFakePrismaForRevoke(
       updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
     },
-  };
+  });
   return prisma;
 }
 
@@ -390,7 +410,7 @@ describe("MandatesService — révocation (F6, ADR-069)", () => {
     await service.revoke(PRACTICE_ID, MANDATE_ID, REQUESTER_ID);
 
     expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID, status: "active" },
+      where: { id: MANDATE_ID, practiceId: PRACTICE_ID, status: "active" },
       data: { status: "revoked", revokedAt: expect.any(Date) },
     });
   });
@@ -447,7 +467,7 @@ describe("MandatesService — révocation (F6, ADR-069)", () => {
 function createFakePrismaForListAccessibleOrganizations(
   overrides: { member?: any; mandates?: any[] } = {},
 ) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     practiceMember: {
       findFirst: vi.fn().mockResolvedValue(
         overrides.member !== undefined ? overrides.member : { id: "member-1", role: "accountant_external" },
@@ -460,7 +480,7 @@ function createFakePrismaForListAccessibleOrganizations(
         ],
       ),
     },
-  };
+  });
   return prisma;
 }
 
@@ -505,7 +525,7 @@ describe("MandatesService — organisations accessibles (F7, ADR-070)", () => {
 
 describe("MandatesService — lister tous les mandats d'un cabinet (pending + active)", () => {
   it("retourne les mandats pending et active avec l'organisation, tout membre actif peut consulter", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       practiceMember: { findFirst: vi.fn().mockResolvedValue({ id: "member-1", role: "accountant_external" }) },
       mandate: {
         findMany: vi.fn().mockResolvedValue([
@@ -513,7 +533,7 @@ describe("MandatesService — lister tous les mandats d'un cabinet (pending + ac
           { id: "mandate-2", status: "pending", initiatedBy: "organization", organization: { id: "org-2", name: "Salon Djénabou" } },
         ]),
       },
-    };
+    });
     const service = new MandatesService(prisma as any);
 
     const result = await service.listAll(PRACTICE_ID, REQUESTER_ID);
@@ -535,10 +555,10 @@ describe("MandatesService — lister tous les mandats d'un cabinet (pending + ac
   });
 
   it("refuse un non-membre de la practice", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       practiceMember: { findFirst: vi.fn().mockResolvedValue(null) },
       mandate: { findMany: vi.fn() },
-    };
+    });
     const service = new MandatesService(prisma as any);
 
     await expect(service.listAll(PRACTICE_ID, REQUESTER_ID)).rejects.toThrow(/membre/);
@@ -548,9 +568,9 @@ describe("MandatesService — lister tous les mandats d'un cabinet (pending + ac
 
 describe("MandatesService — vues et révocation côté organisation (option 5 USSD, §2.5 Spec USSD)", () => {
   it("liste les mandats pending initiés par une practice (F5) — jamais ceux initiés par l'organisation elle-même (F12)", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       mandate: { findMany: vi.fn().mockResolvedValue([{ id: "mandate-1" }]) },
-    };
+    });
     const service = new MandatesService(prisma as any);
 
     const result = await service.listPendingForOrganization(ORG_ID);
@@ -563,9 +583,9 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
   });
 
   it("liste les mandats actifs de l'organisation", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       mandate: { findMany: vi.fn().mockResolvedValue([{ id: "mandate-1" }]) },
-    };
+    });
     const service = new MandatesService(prisma as any);
 
     await service.listActiveForOrganization(ORG_ID);
@@ -591,7 +611,7 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
       { id: "mandate-valid", status: "active", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
       { id: "mandate-no-expiry", status: "active", expiresAt: null },
     ];
-    const prisma: any = {
+    const prisma: any = auClientScope({
       mandate: {
         findMany: vi.fn().mockImplementation(() => {
           const now = new Date();
@@ -600,7 +620,7 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
           );
         }),
       },
-    };
+    });
     const service = new MandatesService(prisma as any);
 
     const result = await service.listActiveForOrganization(ORG_ID);
@@ -611,7 +631,7 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
   function createFakePrismaForRevokeAsOrganization(
     overrides: { member?: any; mandate?: any; updateManyImpl?: ReturnType<typeof vi.fn> } = {},
   ) {
-    return {
+    return auClientScope({
       organizationMember: {
         findUnique: vi.fn().mockResolvedValue(
           overrides.member !== undefined ? overrides.member : { role: "owner", revokedAt: null },
@@ -625,7 +645,7 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
         updateMany: overrides.updateManyImpl ?? vi.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: MANDATE_ID, status: "revoked" }),
       },
-    };
+    });
   }
 
   it("révoque un mandat actif — autorisé owner/admin de l'organisation elle-même", async () => {
@@ -635,7 +655,7 @@ describe("MandatesService — vues et révocation côté organisation (option 5 
     await service.revokeAsOrganization(ORG_ID, MANDATE_ID, ACCEPTOR_ID);
 
     expect(prisma.mandate.updateMany).toHaveBeenCalledWith({
-      where: { id: MANDATE_ID, status: "active" },
+      where: { id: MANDATE_ID, organizationId: ORG_ID, status: "active" },
       data: { status: "revoked", revokedAt: expect.any(Date) },
     });
   });
