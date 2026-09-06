@@ -36,6 +36,9 @@ export class MerkleAnchorFlushService {
   ) {}
 
   async flushPending(limit: number = FLUSH_BATCH_LIMIT): Promise<FlushSummary> {
+    // RLS — non scopé à dessein : `merkle_anchor_batch` est hors RLS (aucune
+    // colonne organization_id) et l'ancrage est plateforme par nature. Voir
+    // MerkleAnchorSealService.sealDue().
     const batches = await this.prisma.merkleAnchorBatch.findMany({
       where: { anchorStatus: "pending" },
       orderBy: { asOf: "asc" },
