@@ -1,0 +1,55 @@
+# Fly.io — web (hébergement intérimaire, ADR-120).
+# Cible DAT : Kubernetes OVH Gravelines. Ceci est une passerelle réversible.
+#
+# DÉPLOIEMENT — toujours depuis la RACINE du monorepo (le Dockerfile COPY
+# pnpm-lock.yaml, pnpm-workspace.yaml, packages/db/…, apps/…) :
+#
+#   fly deploy . --config apps/web/fly.toml
+#
+# Le `.` fixe le contexte de build à la racine ; `build.dockerfile` ci-dessous
+# est résolu relativement à ce contexte — d'où le chemin complet et non un
+# simple "Dockerfile", qui serait cherché à la racine du contexte.
+#
+# CRÉATION (une fois) :  fly apps create facture-gn-web
+# SECRETS :              voir scripts/setup-staging-secrets.ps1
+#
+# `web` n'a qu'un seul secret réel (TRUST_API_URL, ci-dessous en clair car ce
+# n'en est pas un : c'est une adresse du réseau privé Fly). Tout le reste des
+# secrets vit sur trust-api — le navigateur ne voit jamais un jeton, et
+# TRUST_API_URL n'a pas le préfixe NEXT_PUBLIC_ (voir src/lib/trust-api.ts).
+
+app = "facture-gn-web"
+primary_region = "cdg"   # Paris — le plus proche de Conakry chez Fly (puis 'jnb' Johannesburg)
+
+[build]
+  dockerfile = "apps/web/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3002"
+  # Réseau privé Fly : jamais l'URL publique de trust-api. Le trafic ne sort
+  # pas de l'organisation, et trust-api peut rester sans adresse publique.
+  TRUST_API_URL = "http://facture-gn-trust-api.internal:3000"
+
+[http_service]
+  internal_port = 3002
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0   # démo à trafic intermittent — cold start de quelques s accepté
+  processes = ["app"]
+
+  # Sonde sur "/" : la page d'accueil est publique (vérification de facture),
+  # elle ne dépend d'aucune session et rend 200 même si trust-api est éteint.
+  # Une sonde sur une route authentifiée ferait redémarrer la machine en
+  # boucle dès qu'un cookie manque.
+  [[http_service.checks]]
+    method = "GET"
+    path = "/"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"   # Next.js en `next start` ; 256 est court au premier rendu
