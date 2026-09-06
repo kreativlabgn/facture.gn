@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { resolveActiveOrganization } from "@/lib/active-organization";
 import { canEmit, visibleMoreEntries, visibleTabs } from "@/lib/nav";
 import { requireSessionToken } from "@/lib/session";
@@ -5,7 +6,6 @@ import { TrustApiError, listMyPractices } from "@/lib/trust-api";
 import { AppHeader } from "@/components/shell/AppHeader";
 import { BottomTabBar } from "@/components/shell/BottomTabBar";
 import { NavGate } from "@/components/shell/NavGate";
-import { EmptyState } from "@/components/ui";
 
 // Coquille de l'espace connecté (ADR-095). Groupe de routes `(app)` : les
 // parenthèses ne changent aucune URL — /dashboard reste /dashboard — elles
@@ -35,15 +35,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }),
   ]);
 
+  // Un compte sans organisation ne peut rien faire de la coquille : ni onglet,
+  // ni émission, ni liste. L'état vide affiché ici était une impasse — on
+  // envoie désormais vers le tunnel qui la crée. /onboarding renvoie de
+  // lui-même vers /dashboard dès qu'une organisation existe : les deux
+  // redirections ne peuvent donc pas se renvoyer la balle.
   if (!active) {
-    return (
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6">
-        <EmptyState
-          title="Aucune organisation"
-          description="Votre compte n'est rattaché à aucune organisation pour le moment."
-        />
-      </main>
-    );
+    redirect("/onboarding");
   }
 
   const role = active.role;
