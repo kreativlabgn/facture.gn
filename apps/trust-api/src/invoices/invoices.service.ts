@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type { EmissionChannel, Prisma, PrismaClient } from "@facture-gn/db";
-import { organizationScopedClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
 import { resolveNifForCertification } from "../certification/certification.service";
@@ -229,7 +229,9 @@ export class InvoicesService {
     }
 
     const draft = await this.createDraft(dto, "agent_terrain");
-    return this.issue(draft.id);
+    // createAssisted connaît déjà son organisation par le DTO : elle vient du
+    // corps de la requête, validé et vérifié par AssistedSession juste au-dessus.
+    return this.issue(draft.id, dto.organizationId);
   }
 
   // Une facture issued est immuable — toute correction passe par un avoir (DAT §5.4).
@@ -250,7 +252,7 @@ export class InvoicesService {
     return this.prisma.invoice.update({ where: { id: invoiceId }, data: patch });
   }
 
-  async issue(invoiceId: string) {
+  async issue(invoiceId: string, organizationId: string) {
     // Quality Audit 2026-08-23, finding #1 (CRITIQUE) — tout le bloc critique
     // (vérification de statut → nextNumber() → certification Ed25519 → écriture)
     // tourne désormais sous un verrou de ligne Postgres réel (SELECT ... FOR
@@ -271,9 +273,23 @@ export class InvoicesService {
     };
     try {
       transactionResult = await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM invoice WHERE id = ${invoiceId} FOR UPDATE`;
+        // RLS (rls-rollout.md, étape 1) — PREMIÈRE ligne du bloc. On ne peut pas
+        // utiliser organizationScopedClient ici : chaque opération y ouvrirait
+        // sa propre transaction, imbriquée dans celle-ci. setOrganizationScope
+        // pose le GUC pour toute la durée de CETTE transaction.
+        await setOrganizationScope(tx, organizationId);
 
-      const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+        // Le verrou de ligne porte aussi le filtre organisation : sous RLS
+        // appliqué la politique le ferait, mais tant qu'elle dort ce SQL brut
+        // verrouillerait sinon la facture d'un autre locataire.
+        await tx.$queryRaw`SELECT id FROM invoice WHERE id = ${invoiceId} AND organization_id = ${organizationId} FOR UPDATE`;
+
+      // findFirstOrThrow : le where porte deux champs, { id, organizationId }
+      // n'est pas une clé unique. C'est ce filtre qui empêche d'émettre la
+      // facture d'une autre organisation tant que RLS est dormant — les
+      // requêtes internes plus bas s'appuient ensuite sur invoice.organizationId,
+      // désormais garanti égal au scope demandé.
+      const invoice = await tx.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
       if (invoice.status !== "draft") {
         throw new ConflictException(
           `Facture ${invoiceId} ne peut être émise depuis le statut ${invoice.status}`,

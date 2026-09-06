@@ -89,7 +89,10 @@ export class UssdInvoiceService {
       // Lot D — canal *620#. Posé ici, jamais dans le DTO.
       "ussd",
     );
-    return this.invoicesService.issue(draft.id);
+    // Hors HTTP : aucun RolesGuard ne tourne ici, donc aucune organisation
+    // n'est résolue pour nous. Elle vient du paramètre d'emitInvoice(), lui-même
+    // issu de la session USSD authentifiée — c'est la source de scope de ce flux.
+    return this.invoicesService.issue(draft.id, organizationId);
   }
 
   // K3, §2.6.1 Spec USSD, décision 1 du plan — Option 6 sélectionne parmi les

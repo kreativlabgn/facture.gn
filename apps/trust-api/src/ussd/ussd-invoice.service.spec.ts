@@ -145,7 +145,7 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
       // Lot D — canal 'ussd' posé côté serveur, jamais déduit d'un DTO.
       "ussd",
     );
-    expect(invoicesService.issue).toHaveBeenCalledWith("inv-1");
+    expect(invoicesService.issue).toHaveBeenCalledWith("inv-1", ORG_ID);
     expect(result.number).toBe("FG-2026-000001");
   });
 

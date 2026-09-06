@@ -91,8 +91,8 @@ export class InvoicesController {
 
   @Post(":id/issue")
   @Roles("owner", "admin", "cashier")
-  issue(@Param("id") id: string) {
-    return this.invoicesService.issue(id);
+  issue(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.issue(id, organizationId);
   }
 
   @Post(":id/void")
