@@ -23,6 +23,16 @@ export interface PinVerificationResult {
 // Argon2PasswordService (B3, mot de passe) — le risque réel d'un PIN à 4
 // chiffres n'est pas la force du hash mais le brute-force ONLINE, mitigé par
 // le compteur d'essais ci-dessous, pas par l'algorithme de hash lui-même.
+//
+// RLS (ADR-111 étape 1) — CE SERVICE RESTE NON SCOPÉ, À DESSEIN. Il travaille
+// AVANT qu'une organisation soit connue : c'est lui qui la découvre.
+//   • `user`, `user_phone` : tables d'IDENTITÉ, hors des politiques RLS
+//     (un même téléphone sert plusieurs organisations).
+//   • `organization` / `organization_member` : interrogées ici pour RÉSOUDRE
+//     le scope (recherche par accountCode, liste des appartenances). Poser
+//     app.current_org_id supposerait connu ce qu'on cherche — l'œuf et la poule.
+// Les services appelés ENSUITE (compte, factures, paiement, palier) reçoivent
+// l'organizationId résolu ici et passent, eux, par organizationScopedClient().
 @Injectable()
 export class UssdAuthService {
   constructor(

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { computePlatformFee } from "../common/commission-grid";
 import { InvoicesService } from "../invoices/invoices.service";
@@ -20,7 +21,7 @@ export class UssdPaymentService {
   // Invoice.number n'est unique que par organisation — jamais une recherche
   // sans organizationId. Exclut paid/voided/draft : rien à payer.
   async findPayableInvoice(organizationId: string, number: string) {
-    return this.prisma.invoice.findFirst({
+    return organizationScopedClient(this.prisma, organizationId).invoice.findFirst({
       where: { organizationId, number, status: { in: ["issued", "partially_paid"] } },
     });
   }
@@ -29,7 +30,9 @@ export class UssdPaymentService {
   // même calcul qu'InvoicesService.regeneratePaymentLink()/issue() (ADR-074),
   // jamais un montant deviné ni dupliqué autrement.
   async previewFee(organizationId: string, amountDue: bigint): Promise<bigint> {
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const organization = await organizationScopedClient(this.prisma, organizationId).organization.findUniqueOrThrow({
+      where: { id: organizationId },
+    });
     return computePlatformFee(amountDue, organization.commercialTier);
   }
 

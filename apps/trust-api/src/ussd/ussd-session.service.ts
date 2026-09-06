@@ -25,6 +25,16 @@ const VERIFICATION_SHORTCUT = /^2\*(.+)$/;
 // rejet immédiat au-delà, jamais un plafonnement silencieux.
 const ANONYMOUS_EMISSION_MAX_GNF = 500_000n;
 
+// RLS (ADR-111 étape 1) — les accès `ussdSession` de ce service RESTENT NON
+// SCOPÉS, à dessein. `ussd_session` est bien sous politique org_isolation, mais
+// son `organization_id` est NULLABLE : le flux d'émission anonyme (*620*1*…#)
+// crée et fait vivre une session AVANT toute organisation, et chaque tour de
+// menu recharge la session par son `sessionId` seul — poser app.current_org_id
+// masquerait les sessions à organisation nulle, cassant l'entrée du menu.
+// L'isolation d'une session tient à l'imprévisibilité du sessionId opérateur,
+// pas à RLS. Tout ce qui découle de la session (factures, paiements, compte)
+// passe, lui, par les services scopés.
+
 export interface UssdResponse {
   continue: boolean;
   text: string;

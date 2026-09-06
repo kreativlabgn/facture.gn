@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 
 const DISPLAYABLE_STATUSES = ["issued", "partially_paid", "paid", "voided"] as const;
@@ -16,7 +17,9 @@ export class UssdInvoiceListService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
   async listRecent(organizationId: string) {
-    return this.prisma.invoice.findMany({
+    // `where.organizationId` conservé : les politiques dorment encore et le
+    // rôle applicatif possède les tables, donc contourne RLS.
+    return organizationScopedClient(this.prisma, organizationId).invoice.findMany({
       where: { organizationId, documentType: "invoice", status: { in: [...DISPLAYABLE_STATUSES] } },
       orderBy: { issuedAt: "desc" },
       take: MAX_RESULTS,
@@ -32,7 +35,7 @@ export class UssdInvoiceListService {
   // émettrice. draft exclu : jamais "en cours de validation" tant que la PME
   // ne l'a pas émise. Aucune donnée Trésor (Niveau 3, ADR-086) — hors scope.
   async listPublicOrderStatus(organizationId: string) {
-    return this.prisma.invoice.findMany({
+    return organizationScopedClient(this.prisma, organizationId).invoice.findMany({
       where: {
         organizationId,
         documentType: "invoice",

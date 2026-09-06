@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { resolveVelocityTier, VELOCITY_LIMITS_CENTIMES, type VelocityTier } from "./velocity-tier";
 
@@ -18,10 +19,14 @@ export class VelocityTierService {
   // 5.2 Spec USSD ("voir mon palier") — extrait pour être réutilisable en
   // dehors d'assertWithinLimits(), même calcul, aucune duplication.
   async resolveTier(organizationId: string): Promise<VelocityTier> {
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const organization = await scoped.organization.findUniqueOrThrow({ where: { id: organizationId } });
 
     const hasAnomalyFlag = organization.dgiVerifiedAt
-      ? (await this.prisma.invoiceEvent.count({
+      ? // invoice_event est sous RLS par INDIRECTION (politique via invoice_id) :
+        // le scope org s'y applique, et `invoice: { organizationId }` reste la
+        // garde explicite tant que les politiques dorment.
+        (await scoped.invoiceEvent.count({
           where: {
             type: "suspicious_cash_pattern_detected",
             createdAt: { gte: organization.dgiVerifiedAt },
@@ -70,7 +75,7 @@ export class VelocityTierService {
   }
 
   private async sumIssuedSince(organizationId: string, windowMs: number): Promise<bigint> {
-    const result = await this.prisma.invoice.aggregate({
+    const result = await organizationScopedClient(this.prisma, organizationId).invoice.aggregate({
       _sum: { totalTtc: true },
       where: {
         organizationId,
