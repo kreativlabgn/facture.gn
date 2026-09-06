@@ -346,8 +346,25 @@ export class InvoicesService {
       // est censé éliminer.
       const number = await this.numbering.nextNumber(invoice.organizationId, issuedAt.getFullYear(), tx);
 
+      // Le maillon précédent de la chaîne de hash. Le critère est « a été
+      // ÉMISE », pas « n'est pas un brouillon » — la nuance a cassé la chaîne
+      // en silence :
+      //
+      // un brouillon ANNULÉ porte status='voided', il passait donc le filtre
+      // `not: "draft"`, avec issued_at NULL et hash NULL. Or PostgreSQL trie
+      // les NULL EN PREMIER en ORDER BY … DESC : cette ligne remontait
+      // systématiquement, previousInvoice.hash valait null, et la facture
+      // suivante repartait sur le sentinelle GENESIS. Aucune erreur, aucun
+      // signal — et GET /verify continue de répondre integrityValid:true, la
+      // vérification ne contrôlant que la signature d'une facture, jamais la
+      // continuité de la chaîne.
+      //
+      // `issuedAt: { not: null }` exprime la vraie règle et exclut les
+      // brouillons au passage (un brouillon n'a pas d'issuedAt). Une facture
+      // ÉMISE puis annulée, elle, garde son hash et reste un maillon : la
+      // chaîne retrace ce qui a été certifié, pas ce qui est encore valide.
       const previousInvoice = await tx.invoice.findFirst({
-        where: { organizationId: invoice.organizationId, status: { not: "draft" } },
+        where: { organizationId: invoice.organizationId, issuedAt: { not: null } },
         orderBy: { issuedAt: "desc" },
       });
 

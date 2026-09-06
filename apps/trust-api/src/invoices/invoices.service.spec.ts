@@ -725,6 +725,72 @@ describe("InvoicesService — immutabilité post-émission", () => {
 });
 
 describe("InvoicesService — machine à états", () => {
+  // Non-régression — un brouillon annulé cassait la chaîne de hash de TOUTES
+  // les factures suivantes, en silence. Il porte status='voided' (il passait
+  // donc l'ancien filtre `not: "draft"`) avec issued_at NULL, et PostgreSQL
+  // trie les NULL EN PREMIER en ORDER BY … DESC : c'est lui qui remontait,
+  // previousHash devenait nul, et la facture suivante repartait sur GENESIS.
+  //
+  // Le faux ci-dessous applique VRAIMENT le where et reproduit ce tri : sans
+  // cela le test passerait quelle que soit la requête, et ne prouverait rien.
+  it("un brouillon annulé ne devient jamais un maillon de la chaîne de hash", async () => {
+    const HASH_PRECEDENT = "c".repeat(64);
+    const lignes = [
+      {
+        id: "inv-emise",
+        status: "issued",
+        organizationId: "org-1",
+        issuedAt: new Date("2026-09-01T10:00:00Z"),
+        hash: HASH_PRECEDENT,
+      },
+      // Jamais émise : ni date d'émission, ni hash. Ce n'est pas un maillon.
+      { id: "inv-brouillon-annule", status: "voided", organizationId: "org-1", issuedAt: null, hash: null },
+    ];
+
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+        findFirst: vi.fn().mockImplementation(({ where }: any) => {
+          const retenues = lignes.filter((ligne) => {
+            if (where.organizationId && ligne.organizationId !== where.organizationId) return false;
+            if (where.issuedAt?.not === null && ligne.issuedAt === null) return false;
+            if (where.status?.not && ligne.status === where.status.not) return false;
+            return true;
+          });
+          // NULLS FIRST en DESC, comme PostgreSQL.
+          const triees = [...retenues].sort((a, b) => {
+            if (a.issuedAt === null) return -1;
+            if (b.issuedAt === null) return 1;
+            return b.issuedAt.getTime() - a.issuedAt.getTime();
+          });
+          return Promise.resolve(triees[0] ?? null);
+        }),
+      },
+    });
+
+    const certification = createFakeSigningKeyService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.issue("inv-1", "org-1");
+
+    expect(certification.certifyForOrganization).toHaveBeenCalledWith(
+      "org-1",
+      expect.objectContaining({ previousHash: HASH_PRECEDENT }),
+      expect.anything(),
+    );
+  });
+
   it("autorise draft → issued et certifie la facture (chaînage GENESIS pour la 1ère facture de l'org)", async () => {
     const prisma = createFakePrisma({
       invoice: {
