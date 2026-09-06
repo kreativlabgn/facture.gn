@@ -2,13 +2,30 @@ import { NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { ClientPortalService } from "./client-portal.service";
 
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 const USER_ID = "user-1";
 const PHONE = "+224622334455";
 
 function createFakePrisma(overrides: any = {}) {
   const phones = overrides.phones ?? [{ msisdn: PHONE, verifiedAt: new Date() }];
   const allCustomers = overrides.customers ?? [];
-  const prisma: any = {
+  const prisma: any = auClientScope({
     userPhone: {
       // Simule réellement le filtre verifiedAt:{not:null} de la vraie requête —
       // un mock qui renverrait la fixture telle quelle ne prouverait rien sur le
@@ -31,7 +48,11 @@ function createFakePrisma(overrides: any = {}) {
       groupBy: vi.fn().mockResolvedValue(overrides.balances ?? []),
       findMany: vi.fn().mockResolvedValue(overrides.invoices ?? []),
     },
-  };
+    // organizationScopedClient() enveloppe chaque opération dans
+    // $transaction([set_config, requête]). Le faux l'exécute simplement, ce qui
+    // rend l'extension REJOUABLE par le test de scope ci-dessous.
+    $transaction: vi.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
+  });
   return prisma;
 }
 
@@ -129,6 +150,37 @@ describe("ClientPortalService", () => {
         }),
       );
       expect(result).toEqual([{ id: "inv-1" }]);
+    });
+
+    // Seule requête scopée du module. Les faux `$extends` de ce dépôt se
+    // renvoient eux-mêmes, si bien que la VALEUR du scope n'est normalement pas
+    // observable : vérifier que `$extends` a été appelé ne prouve rien sur
+    // l'organisation réellement posée. On rejoue donc ici l'extension capturée —
+    // `$allOperations` exécute le set_config via `$executeRaw` — pour lire
+    // l'identifiant qui y a été injecté. C'est ce qui fait tomber ce test si
+    // `customer.organizationId` est remplacé par une autre valeur dans l'appel à
+    // organizationScopedClient(). (Le comportement du helper lui-même est
+    // couvert séparément par packages/db, rls.spec.ts.)
+    it("pose le scope RLS de l'organisation résolue depuis le client, jamais une autre", async () => {
+      const prisma = createFakePrisma({
+        customer: { id: "cust-1", organizationId: "org-fournisseur", phone: PHONE },
+        phones: [{ msisdn: PHONE, verifiedAt: new Date() }],
+        invoices: [],
+      });
+      const service = new ClientPortalService(prisma);
+
+      await service.listInvoices(USER_ID, "cust-1", {});
+
+      expect(prisma.$extends).toHaveBeenCalledTimes(1);
+      const extension = prisma.$extends.mock.calls[0][0];
+      await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+      const setConfig = prisma.$executeRaw.mock.calls.at(-1)?.[0];
+      expect(setConfig.values).toContain("org-fournisseur");
+      expect(setConfig.values).toContain("app.current_org_id");
+
+      const call = prisma.invoice.findMany.mock.calls[0][0];
+      expect(call.where.organizationId).toBe("org-fournisseur");
     });
 
     it("une facture draft du même client n'apparaît jamais dans le résultat (F13, revue post-fix #1)", async () => {
