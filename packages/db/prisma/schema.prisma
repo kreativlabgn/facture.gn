@@ -18,7 +18,16 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // url       : connexion runtime. En prod (ADR-120) = pooler Supabase en mode
+  //             transaction (port 6543, ?pgbouncer=true → Prisma désactive les
+  //             prepared statements). En local / CI = Postgres nu.
+  // directUrl : connexion directe (port 5432), utilisée UNIQUEMENT par le CLI
+  //             Prisma (`migrate`, `db push`) — jamais par le client applicatif.
+  //             En local / CI, DIRECT_URL = DATABASE_URL (pas de pooler). Doit
+  //             être défini partout où `prisma migrate` tourne : les trois
+  //             .env.example, docker-compose.yml (services API), job CI `build`.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum PreferredLanguage {

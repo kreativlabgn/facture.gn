@@ -1,0 +1,74 @@
+# Fly.io — trust-api (hébergement intérimaire, ADR-120).
+# Cible DAT : Kubernetes OVH Gravelines. Ceci est une passerelle réversible.
+#
+# DÉPLOIEMENT — toujours depuis la RACINE du monorepo (le Dockerfile COPY
+# pnpm-lock.yaml, pnpm-workspace.yaml, packages/db/…, apps/…) :
+#
+#   fly deploy . --config apps/trust-api/fly.toml
+#
+# Le `.` fixe le contexte de build à la racine ; `build.dockerfile` ci-dessous
+# est résolu relativement à ce contexte.
+#
+# CRÉATION (une fois) :        fly apps create facture-gn-trust-api
+# SECRETS (une fois, cf. TRUST_API_SECRETS dans src/common/secrets.ts) :
+#   fly secrets set --config apps/trust-api/fly.toml \
+#     DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-eu-west-3.pooler.supabase.com:6543/postgres?pgbouncer=true' \
+#     DIRECT_URL='postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres' \
+#     JWT_PRIVATE_KEY='-----BEGIN PRIVATE KEY-----…' \
+#     JWT_PUBLIC_KEY='-----BEGIN PUBLIC KEY-----…' \
+#     CERTIFICATION_PRIVATE_KEY=<hex64> \
+#     CERTIFICATION_MASTER_KEY=<hex64> \
+#     MONEY_API_INTERNAL_KEY=<hex32 — MÊME valeur que sur facture-gn-money-api> \
+#     DGI_VERIFICATION_INTERNAL_KEY=<hex32> \
+#     COMMERCIAL_AGENT_GRANT_INTERNAL_KEY=<hex32> \
+#     COMMISSION_BYPASS_REVIEW_INTERNAL_KEY=<hex32> \
+#     DATA_RIGHTS_INTERNAL_KEY=<hex32> \
+#     DATA_RIGHTS_SUBJECT_HASH_PEPPER=<hex32> \
+#     APIP_WEBHOOK_SECRET=<hex32>
+#   # générateurs : openssl rand -hex 32  |  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#
+# MIGRATIONS — premier passage manuel et supervisé (66 migrations, base vierge),
+# JAMAIS auto : voir `[deploy]` plus bas.
+
+app = "facture-gn-trust-api"
+primary_region = "cdg"   # Paris — le plus proche de Conakry chez Fly (puis 'jnb' Johannesburg)
+
+[build]
+  dockerfile = "apps/trust-api/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  # money-api est joint par le réseau privé Fly (6PN) — jamais l'URL publique.
+  MONEY_API_URL = "http://facture-gn-money-api.internal:3001"
+  # Jobs optionnels désarmés (aucune infra dédiée en intérimaire).
+  RETENTION_ENABLED = "false"
+  MERKLE_ANCHOR_ENABLED = "false"
+  OTEL_TRACES_ENABLED = "false"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0   # démo à trafic intermittent — cold start de quelques s accepté
+
+  # /health/ready de trust-api ne dépend que de Postgres (dispo via Supabase).
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health/ready"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"   # NestJS + moteur Prisma ; 256 est juste, 512 confortable
+
+# [deploy]
+#   # NE PAS décommenter avant le premier `db:migrate:deploy` manuel réussi.
+#   # Si activé plus tard : UNIQUEMENT ici (trust-api), JAMAIS aussi sur money-api
+#   # — une seule base partagée, deux `release_command` = course.
+#   # pnpm est présent dans l'image (base stage) ; packages/db + son node_modules
+#   # sont copiés dans le runner. `db:migrate:deploy` lit DIRECT_URL (secret Fly).
+#   release_command = "pnpm --filter @facture-gn/db run db:migrate:deploy"

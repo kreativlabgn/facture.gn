@@ -22,4 +22,8 @@ regexes = [
   '''EXAMPLE1+''',
   '''MIIExAMPLE''',
   '''MIIBExAMPLE''',
+  # Placeholders de format dans les commentaires `fly secrets set` des fly.toml :
+  # en-tête PEM SANS corps, suivi de l'ellipsis « … » — jamais une vraie clé
+  # (une vraie clé a du base64 après les tirets, jamais U+2026).
+  '''-----BEGIN (?:EC |RSA |OPENSSH )?(?:PRIVATE|PUBLIC) KEY-----\x{2026}''',
 ]

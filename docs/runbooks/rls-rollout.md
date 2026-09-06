@@ -167,6 +167,18 @@ signale un bug ou un probing).
 
 - `set_config(key, value, TRUE)` = portée transaction → compatible avec un
   pooler en mode transaction (PgBouncer). Un `SET` de session ne le serait pas.
+- **Sur Supabase (hébergement intérimaire, ADR-120)** : le pooler Supavisor en
+  mode transaction (port 6543) est compatible pour la même raison — c'est
+  `DATABASE_URL` (runtime). Les migrations passent par `DIRECT_URL` (port 5432),
+  hors pooler. Le rôle `postgres` de Supabase a des privilèges élevés implicites
+  (il contourne RLS comme le propriétaire) : l'étape 2 ci-dessus (`CREATE ROLE
+  facture_app` non-propriétaire, sans BYPASSRLS) reste indispensable pour activer
+  réellement le RLS — la créer via l'éditeur SQL Supabase, puis basculer
+  `DATABASE_URL` des deux apps (`fly secrets set`) sur `facture_app`, la connexion
+  passant toujours par le pooler. Les rôles Supabase `anon` / `authenticated` /
+  `service_role` / `authenticator` ne sont **pas** utilisés (ni PostgREST, ni
+  GoTrue — l'IAM est dans trust-api) : aucune policy `auth.uid()`, uniquement les
+  policies `org_isolation` par GUC de session posées par la migration.
 - Chaque opération scopée = une transaction. Surcoût mesurable ; à surveiller sur
   les endpoints à fort volume (`GET /invoices`). Alternative si besoin :
   regrouper plusieurs lectures dans un `$transaction` interactif unique.

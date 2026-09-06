@@ -46,6 +46,9 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/facture_gn_dev?schema=public
+      # schema.prisma déclare `directUrl` — défini ici aussi (identique en local :
+      # pas de pooler). Cf. ADR-120.
+      DIRECT_URL: postgresql://postgres:postgres@postgres:5432/facture_gn_dev?schema=public
       REDIS_URL: redis://redis:6379
       # Lot J3 — job de rétention en opt-in ("true" pour armer). Voir docs/runbooks/retention.md.
       RETENTION_ENABLED: "false"
@@ -67,6 +70,7 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/facture_gn_dev?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@postgres:5432/facture_gn_dev?schema=public
       REDIS_URL: redis://redis:6379
       TRUST_API_URL: http://trust-api:3000
       PORT: 3001
