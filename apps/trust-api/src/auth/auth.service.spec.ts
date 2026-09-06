@@ -1,6 +1,23 @@
-import { UnauthorizedException } from "@nestjs/common";
+import { UnauthorizedException, ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { AuthService } from "./auth.service";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 
 function createFakePrisma(overrides: { existingPhone?: unknown; userPhoneWithUser?: unknown } = {}) {
   const prisma: any = {
@@ -401,7 +418,7 @@ describe("AuthService", () => {
       recoveryRequest?: any;
       updateManyCount?: number;
     } = {}) {
-      const prisma: any = {
+      const prisma: any = auClientScope({
         userPhone: {
           findUnique: vi.fn().mockResolvedValue(opts.phone ?? null),
         },
@@ -413,16 +430,22 @@ describe("AuthService", () => {
           findUnique: vi.fn().mockResolvedValue(opts.membership ?? null),
         },
         accountRecoveryRequest: {
-          findFirst: vi.fn().mockResolvedValue(opts.existingPendingRequest ?? null),
+          // DEUX lectures findFirst distinctes passent désormais ici : la
+          // recherche d'une demande pending déjà ouverte (requestRecovery) et la
+          // lecture de découverte par id (resolveRecovery). Un mock figé
+          // répondrait la même chose aux deux et rendrait les tests faux — on
+          // discrimine donc sur le `where`, ce qui est de toute façon plus fidèle.
+          findFirst: vi.fn().mockImplementation(({ where }: any) =>
+            Promise.resolve(where?.status === "pending" ? opts.existingPendingRequest ?? null : opts.recoveryRequest ?? null),
+          ),
           create: vi.fn().mockResolvedValue({ id: "recovery-1" }),
-          findUniqueOrThrow: vi.fn().mockResolvedValue(opts.recoveryRequest),
           updateMany: vi.fn().mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
         },
         user: {
           update: vi.fn().mockResolvedValue({ id: "user-1" }),
         },
         $transaction: vi.fn((callback: any) => callback(prisma)),
-      };
+      });
       return prisma;
     }
 
@@ -490,6 +513,26 @@ describe("AuthService", () => {
         await expect(
           service.resolveRecovery("recovery-1", "user-2", "approved"),
         ).rejects.toThrow(/owner|admin/);
+      });
+
+      // Régression : ce chemin passait par findUniqueOrThrow, dont la
+      // NotFoundError Prisma n'était interceptée par aucun ExceptionFilter (il
+      // n'y en a aucun dans cette application) — un requestId inconnu remontait
+      // donc en 500, distinguable du 403 d'une demande existante, soit un oracle
+      // d'énumération sur un :id fourni par l'appelant. Les deux cas renvoient
+      // désormais la même ForbiddenException, comme le reste de ce fichier le
+      // fait déjà (message unique de login(), RECOVERY_REQUEST_GENERIC_MESSAGE).
+      it("répond comme un approbateur non habilité sur une demande inexistante — jamais un 500, jamais un oracle", async () => {
+        const prisma = createFakePrismaForRecovery({ recoveryRequest: null });
+        const service = new AuthService(prisma, createFakePasswordService(), createFakeTokenService(), createFakeTokenRevocation() as any, createFakePendingMemberInvite() as any, createFakeClientPortalOtp() as any);
+
+        await expect(
+          service.resolveRecovery("recovery-inconnue", "user-approbateur", "approved"),
+        ).rejects.toThrow(ForbiddenException);
+        await expect(
+          service.resolveRecovery("recovery-inconnue", "user-approbateur", "approved"),
+        ).rejects.toThrow(/owner ou admin/);
+        expect(prisma.accountRecoveryRequest.updateMany).not.toHaveBeenCalled();
       });
 
       it("refuse que le demandeur approuve sa propre demande", async () => {
