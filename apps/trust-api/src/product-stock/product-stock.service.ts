@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 
 // Jamais persisté (voir schema.prisma, ProductStock) — type TypeScript local,
@@ -16,16 +17,30 @@ export class ProductStockService {
   // LA SUCCURSALE ciblée, jamais une confiance aveugle (même discipline que
   // revokeApiKey(), F15). Aucun plancher à zéro — "un stock insuffisant n'a
   // jamais bloqué l'émission d'une facture", même philosophie ici.
-  async recordMovement(branchId: string, productId: string, type: StockMovementType, quantityDelta: number) {
+  async recordMovement(
+    branchId: string,
+    productId: string,
+    type: StockMovementType,
+    quantityDelta: number,
+    organizationId: string,
+  ) {
     this.assertSignConsistency(type, quantityDelta);
 
-    const branch = await this.prisma.branch.findUniqueOrThrow({ where: { id: branchId } });
-    const product = await this.prisma.product.findUniqueOrThrow({ where: { id: productId } });
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const branch = await scoped.branch.findFirstOrThrow({ where: { id: branchId, organizationId } });
+    const product = await scoped.product.findFirstOrThrow({ where: { id: productId, organizationId } });
+    // Contrôle CONSERVÉ malgré les deux lectures scopées : il porte le message
+    // d'erreur (« introuvable pour cette organisation ») et reste la garde réelle
+    // tant que les politiques dorment.
     if (product.organizationId !== branch.organizationId) {
       throw new NotFoundException(`Produit ${productId} introuvable pour cette organisation`);
     }
 
-    return this.prisma.productStock.upsert({
+    // product_stock est sous RLS par INDIRECTION (politique via product_id) :
+    // la table n'a pas de colonne organization_id, et le `where` d'un upsert doit
+    // être unique — impossible d'y injecter le scope. Les deux lectures scopées
+    // ci-dessus sont la barrière.
+    return scoped.productStock.upsert({
       where: { productId_branchId: { productId, branchId } },
       create: { productId, branchId, stockQty: quantityDelta },
       update: { stockQty: { increment: quantityDelta } },
@@ -34,9 +49,12 @@ export class ProductStockService {
 
   // ADR-084 — costPrice jamais dans la projection, même via un include Prisma
   // large : select explicite plutôt qu'un include: { product: true } brut.
-  async listByBranch(branchId: string) {
-    const stocks = await this.prisma.productStock.findMany({
-      where: { branchId },
+  async listByBranch(branchId: string, organizationId: string) {
+    // `product: { organizationId }` est l'équivalent explicite de la double
+    // clause pour une table isolée par indirection : sans lui, un branchId
+    // d'une autre organisation listerait son stock si le GUC venait à manquer.
+    const stocks = await organizationScopedClient(this.prisma, organizationId).productStock.findMany({
+      where: { branchId, product: { organizationId } },
       include: { product: { select: { id: true, name: true } } },
     });
 

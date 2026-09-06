@@ -1,8 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { ProductsService } from "./products.service";
 
 function createFakePrisma(overrides: { existingMatch?: any } = {}) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     // Cross-Story Audit 2026-08-24, finding #3 — create() englobe désormais
     // findFirst+create dans une transaction : callback(prisma) réutilise
     // directement les mêmes mocks product.findFirst/create (tx === prisma ici).
@@ -29,10 +46,13 @@ function createFakePrisma(overrides: { existingMatch?: any } = {}) {
         return Promise.resolve(match);
       }),
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "product-1", ...data })),
+      // setCostPrice() lit le produit (scopé) avant de l'écrire : c'est la
+      // barrière tant que les politiques RLS dorment.
+      findFirstOrThrow: vi.fn().mockResolvedValue({ id: "product-1", organizationId: "org-1", name: "Riz 25kg" }),
       update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
       delete: vi.fn(),
     },
-  };
+  });
   return prisma;
 }
 
@@ -41,7 +61,7 @@ describe("ProductsService.create (E10)", () => {
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    const result = await service.create({ organizationId: "org-1", name: "Riz 25kg" });
+    const result = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
 
     expect(prisma.product.create).toHaveBeenCalledWith({
       data: { organizationId: "org-1", name: "Riz 25kg", possibleDuplicateOf: null },
@@ -53,7 +73,7 @@ describe("ProductsService.create (E10)", () => {
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    await service.create({ organizationId: "org-1", name: "Riz 25kg" });
+    await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
 
     const createCall = prisma.product.create.mock.calls[0][0];
     expect(createCall.data).not.toHaveProperty("costPrice");
@@ -65,7 +85,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" });
+    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
 
     expect(prisma.product.findFirst).toHaveBeenCalledWith({
       where: { organizationId: "org-1", name: { equals: "Riz 25kg", mode: "insensitive" } },
@@ -80,7 +100,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "riz 25kg" });
+    const result: any = await service.create({ organizationId: "org-1", name: "riz 25kg" }, "org-1");
 
     // Preuve directe que CE test exerce bien mode: "insensitive" — sans cette assertion,
     // le test passerait même si le service comparait en sensible à la casse et que le
@@ -95,7 +115,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" });
+    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
 
     expect(result.possibleDuplicateOf).toBeNull();
   });
@@ -106,7 +126,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" });
+    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
 
     expect(prisma.product.create).toHaveBeenCalledWith({
       data: { organizationId: "org-1", name: "Riz 25kg", possibleDuplicateOf: null },
@@ -118,7 +138,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "  Riz 25kg  " });
+    const result: any = await service.create({ organizationId: "org-1", name: "  Riz 25kg  " }, "org-1");
 
     expect(prisma.product.findFirst).toHaveBeenCalledWith({
       where: { organizationId: "org-1", name: { equals: "Riz 25kg", mode: "insensitive" } },
@@ -133,7 +153,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    await service.create({ organizationId: "org-1", name: "Riz 25kg" });
+    await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
 
     expect(prisma.product.update).not.toHaveBeenCalled();
     expect(prisma.product.delete).not.toHaveBeenCalled();
@@ -152,7 +172,14 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const $transaction = vi.fn(async (callback: any) => {
       let releaseLock: (() => void) | undefined;
       const tx: any = {
-        $executeRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
+        $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => {
+          // setOrganizationScope() passe UN seul Prisma.Sql (pas un template
+          // balisé) : ce n'est pas une prise de verrou, on ne simule rien.
+          // Sans ce garde, le verrou se prendrait sur la clé `undefined` et
+          // les deux transactions concurrentes s'interbloqueraient.
+          if (!Array.isArray(strings)) {
+            return 1;
+          }
           const previous = locks.get(key) ?? Promise.resolve();
           let release!: () => void;
           const mine = new Promise<void>((resolve) => {
@@ -199,8 +226,8 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const service = new ProductsService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
-      service.create({ organizationId: "org-1", name: "Riz 25kg" }),
-      service.create({ organizationId: "org-1", name: "Riz 25kg" }),
+      service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1"),
+      service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1"),
     ]);
 
     expect(products).toHaveLength(2);
@@ -220,8 +247,8 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const service = new ProductsService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
-      service.create({ organizationId: "org-1", name: "Riz 25kg" }),
-      service.create({ organizationId: "org-1", name: "Sucre 1kg" }),
+      service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1"),
+      service.create({ organizationId: "org-1", name: "Sucre 1kg" }, "org-1"),
     ]);
 
     expect(products).toHaveLength(2);
@@ -235,7 +262,7 @@ describe("ProductsService.setCostPrice (E6, ADR-084)", () => {
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    const result = await service.setCostPrice("product-1", 15_000n);
+    const result = await service.setCostPrice("product-1", 15_000n, "org-1");
 
     expect(prisma.product.update).toHaveBeenCalledWith({
       where: { id: "product-1" },
@@ -253,9 +280,9 @@ describe("ProductsService.setCostPrice (E6, ADR-084)", () => {
 // product_organization_id_name_idx.
 describe("ProductsService.findAllByOrganization", () => {
   it("liste les produits de l'organisation, triés par nom, paginés avec une limite par défaut", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       product: { findMany: vi.fn().mockResolvedValue([{ id: "product-1" }, { id: "product-2" }]) },
-    };
+    });
     const service = new ProductsService(prisma as any);
 
     const result = await service.findAllByOrganization("org-1", {});
@@ -270,7 +297,7 @@ describe("ProductsService.findAllByOrganization", () => {
   });
 
   it("plafonne take à 100 quel que soit ce que l'appelant demande", async () => {
-    const prisma: any = { product: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma: any = auClientScope({ product: { findMany: vi.fn().mockResolvedValue([]) } });
     const service = new ProductsService(prisma as any);
 
     await service.findAllByOrganization("org-1", { take: 500 });
@@ -279,7 +306,7 @@ describe("ProductsService.findAllByOrganization", () => {
   });
 
   it("respecte take/skip explicitement fournis", async () => {
-    const prisma: any = { product: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma: any = auClientScope({ product: { findMany: vi.fn().mockResolvedValue([]) } });
     const service = new ProductsService(prisma as any);
 
     await service.findAllByOrganization("org-1", { take: 10, skip: 20 });
@@ -296,7 +323,7 @@ describe("ProductsService.findAllByOrganization", () => {
 // demandée par le Backlog que pour les clients, E4).
 describe("ProductsService.findOneWithDuplicate", () => {
   it("inclut duplicateOf {id, name} quand possibleDuplicateOf est renseigné", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       product: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "product-1",
@@ -307,20 +334,22 @@ describe("ProductsService.findOneWithDuplicate", () => {
           duplicateOf: { id: "product-existant", name: "Riz 25kg" },
         }),
       },
-    };
+    });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.findOneWithDuplicate("product-1");
+    const result: any = await service.findOneWithDuplicate("product-1", "org-1");
 
+    // findFirstOrThrow est adossé à findUniqueOrThrow par auClientScope() :
+    // même espion, mais le `where` porte maintenant l'organisation.
     expect(prisma.product.findUniqueOrThrow).toHaveBeenCalledWith({
-      where: { id: "product-1" },
+      where: { id: "product-1", organizationId: "org-1" },
       include: { duplicateOf: { select: { id: true, name: true } } },
     });
     expect(result.duplicateOf).toEqual({ id: "product-existant", name: "Riz 25kg" });
   });
 
   it("laisse duplicateOf null quand possibleDuplicateOf est null (aucun doublon détecté)", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       product: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "product-1",
@@ -331,10 +360,10 @@ describe("ProductsService.findOneWithDuplicate", () => {
           duplicateOf: null,
         }),
       },
-    };
+    });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.findOneWithDuplicate("product-1");
+    const result: any = await service.findOneWithDuplicate("product-1", "org-1");
 
     expect(result.duplicateOf).toBeNull();
     expect(result.costPrice).toBe(5_000n);
