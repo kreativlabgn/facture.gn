@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 
 import type { $Enums, DataRightsRequestOutcome, Prisma, PrismaClient } from "@facture-gn/db";
 
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { CUSTOMER_NAME_TOMBSTONE, isRetainedInvoice, retentionExpiryOf } from "./anonymization";
 import {
@@ -48,6 +49,23 @@ type RetentionInvoiceRow = {
 // le bloc compte `User` n'est JAMAIS renvoyé (hors périmètre J2 + fuite
 // inter-tenant). `organizationId` nul = chemin ops plateforme (clé interne
 // dédiée) → transverse, bloc compte inclus.
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. Ce service est le premier à porter
+// un scope CONDITIONNEL : `organizationId` y est un `string | null`, et cette
+// nullité EST le mode de fonctionnement, pas un cas d'erreur.
+//   • non nul → chemin PME (RolesGuard a vérifié owner/admin) : tout est scopé ;
+//   • nul     → chemin ops plateforme (clé interne dédiée,
+//     DataRightsInternalAuthGuard) : transverse par construction. Un GUC posé là
+//     ferait échouer la raison d'être du chemin — répondre à une demande PDP qui
+//     porte sur un sujet, pas sur une organisation.
+// D'où le motif `organizationId ? organizationScopedClient(...) : this.prisma`,
+// et un setOrganizationScope() lui aussi conditionnel dans les transactions.
+//
+// Reste GLOBAL dans les deux modes :
+//   • `user_phone` (bloc compte) : hors RLS, et lu uniquement par le chemin ops ;
+//   • `data_rights_request` : hors RLS aussi, et c'est nécessaire — ce registre
+//     de responsabilité doit pouvoir enregistrer une demande ops SANS
+//     organisation (sa colonne organization_id est nullable). Le scoper le
+//     rendrait incapable de tracer précisément le chemin le plus sensible.
 @Injectable()
 export class DataRightsService {
   private readonly subjectHashPepper: string;
@@ -79,7 +97,12 @@ export class DataRightsService {
     const subjectPhoneHash = this.subjectHash(canonical);
     const viaOps = params.organizationId === null;
 
-    const customers = await this.prisma.customer.findMany({
+    // Scope conditionnel — voir la carte en tête de classe.
+    const client = params.organizationId
+      ? organizationScopedClient(this.prisma, params.organizationId)
+      : this.prisma;
+
+    const customers = await client.customer.findMany({
       where: {
         phone: canonical,
         ...(params.organizationId ? { organizationId: params.organizationId } : {}),
@@ -133,6 +156,8 @@ export class DataRightsService {
     // ne sont jamais chargés en mémoire.
     let account: SubjectAccountRecord | null = null;
     if (viaOps) {
+      // `user_phone` est hors RLS et ce bloc n'existe QUE sur le chemin ops :
+      // lecture globale à dessein, jamais atteinte par une PME.
       const userPhone = await this.prisma.userPhone.findFirst({
         where: { msisdn: canonical, verifiedAt: { not: null } },
         select: {
@@ -156,6 +181,8 @@ export class DataRightsService {
         : null;
     }
 
+    // Registre hors RLS, transverse par nécessité (voir la carte) : il consigne
+    // aussi bien une demande PME qu'une demande ops sans organisation.
     await this.prisma.dataRightsRequest.create({
       data: {
         kind: "access",
@@ -185,13 +212,24 @@ export class DataRightsService {
    * re-lecture ferme la fenêtre où une anonymisation concurrente (ou une
    * création) commiterait entre la 1ʳᵉ lecture et le verrou.
    */
+  // `organizationId` vient du RolesGuard (@CurrentOrganizationId) : la route
+  // porte @OrganizationIdSource("customer"), le guard a donc DÉJÀ résolu
+  // l'organisation du client ciblé et vérifié que l'appelant en est owner/admin.
+  // Le passer explicitement n'ouvre pas une faille qui existait — il évite que le
+  // service redérive de la donnée ce que l'autorisation a déjà tranché, et permet
+  // la double clause ci-dessous.
   async anonymizeCustomerById(
     customerId: string,
     ctx: { requestedByUserId: string | null; viaOps: boolean },
+    organizationId: string,
   ): Promise<AnonymizationResult> {
     return this.prisma.$transaction(async (tx) => {
-      const stub = await tx.customer.findUnique({
-        where: { id: customerId },
+      // GUC en PREMIÈRE ligne, avant le verrou consultatif : il couvre la lecture
+      // du stub, le verrou, la re-lecture et l'effacement.
+      await setOrganizationScope(tx, organizationId);
+
+      const stub = await tx.customer.findFirst({
+        where: { id: customerId, organizationId },
         select: { organizationId: true, phone: true },
       });
       if (!stub) {
@@ -199,7 +237,7 @@ export class DataRightsService {
       }
 
       await this.lockDedupKey(tx, stub.organizationId, stub.phone);
-      const customer = await this.readCustomerForAnonymization(tx, customerId);
+      const customer = await this.readCustomerForAnonymization(tx, customerId, organizationId);
 
       const applied = await this.applyAnonymization(tx, customer);
 
@@ -238,7 +276,12 @@ export class DataRightsService {
     const subjectPhoneHash = this.subjectHash(canonical);
     const viaOps = params.organizationId === null;
 
-    const matches = await this.prisma.customer.findMany({
+    // Scope conditionnel — voir la carte en tête de classe.
+    const client = params.organizationId
+      ? organizationScopedClient(this.prisma, params.organizationId)
+      : this.prisma;
+
+    const matches = await client.customer.findMany({
       where: {
         phone: canonical,
         ...(params.organizationId ? { organizationId: params.organizationId } : {}),
@@ -247,18 +290,25 @@ export class DataRightsService {
     });
 
     return this.prisma.$transaction(async (tx) => {
+      // GUC conditionnel : posé pour une demande PME, JAMAIS pour une demande ops
+      // — celle-ci porte sur un sujet à travers toutes les organisations, un GUC
+      // la réduirait à une seule et laisserait le reste du sujet non traité.
+      if (params.organizationId) {
+        await setOrganizationScope(tx, params.organizationId);
+      }
+
       const outcomes: AnonymizationApplied["outcome"][] = [];
       const affectedCustomerIds: string[] = [];
       let retentionExpiry: Date | null = null;
 
       for (const { id } of matches) {
-        const stub = await tx.customer.findUnique({
-          where: { id },
+        const stub = await tx.customer.findFirst({
+          where: { id, ...(params.organizationId ? { organizationId: params.organizationId } : {}) },
           select: { organizationId: true, phone: true },
         });
         if (!stub) continue;
         await this.lockDedupKey(tx, stub.organizationId, stub.phone ?? canonical);
-        const customer = await this.readCustomerForAnonymization(tx, id);
+        const customer = await this.readCustomerForAnonymization(tx, id, params.organizationId);
 
         const applied = await this.applyAnonymization(tx, customer);
         outcomes.push(applied.outcome);
@@ -291,12 +341,15 @@ export class DataRightsService {
   private async readCustomerForAnonymization(
     tx: TxClient,
     customerId: string,
+    organizationId: string | null,
   ): Promise<{ id: string; organizationId: string; phone: string | null; anonymizedAt: Date | null; invoices: RetentionInvoiceRow[] }> {
     // Le client a déjà été vu juste avant le verrou (findUnique du stub) — il ne
     // peut pas disparaître (append-only sur invoice, delete customer = seulement
     // merge() qui prendrait le même verrou). findUniqueOrThrow par sécurité.
-    return tx.customer.findUniqueOrThrow({
-      where: { id: customerId },
+    // findFirstOrThrow, jamais findUniqueOrThrow : c'est la seule forme dont le
+    // `where` peut porter la colonne de scope quand elle est connue (chemin PME).
+    return tx.customer.findFirstOrThrow({
+      where: { id: customerId, ...(organizationId ? { organizationId } : {}) },
       select: {
         id: true,
         organizationId: true,
@@ -307,6 +360,8 @@ export class DataRightsService {
     });
   }
 
+  // Le GUC éventuel est déjà posé par l'appelant AVANT ce verrou : l'ordre est
+  // set_config → verrou consultatif → re-lecture → écriture.
   private async lockDedupKey(tx: TxClient, organizationId: string, phone: string | null): Promise<void> {
     // Même clé que CustomersService.create() / importCustomers() (E3) : sérialise
     // l'anonymisation contre une (re)création concurrente sur le même téléphone.

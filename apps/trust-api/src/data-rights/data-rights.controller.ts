@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { DataRightsService } from "./data-rights.service";
 import { dataRightsExportSchema, type DataRightsExportDto } from "./dto/data-rights.dto";
@@ -24,10 +25,14 @@ export class DataRightsController {
   export(
     @Body(new ZodValidationPipe(dataRightsExportSchema)) dto: DataRightsExportDto,
     @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
   ) {
+    // Cette route n'a pas de params.id : RolesGuard résout l'organisation depuis
+    // le CORPS, donc organizationId et dto.organizationId coïncident. On transmet
+    // celle que le guard a effectivement AUTORISÉE, jamais celle qu'il a lue.
     return this.dataRights.exportSubjectData({
       phone: dto.phone,
-      organizationId: dto.organizationId,
+      organizationId,
       requestedByUserId: user.id,
     });
   }
@@ -39,7 +44,15 @@ export class DataRightsController {
   @Post(":id/anonymize")
   @Roles("owner", "admin")
   @OrganizationIdSource("customer")
-  anonymize(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.dataRights.anonymizeCustomerById(id, { requestedByUserId: user.id, viaOps: false });
+  anonymize(
+    @Param("id") id: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.dataRights.anonymizeCustomerById(
+      id,
+      { requestedByUserId: user.id, viaOps: false },
+      organizationId,
+    );
   }
 }
