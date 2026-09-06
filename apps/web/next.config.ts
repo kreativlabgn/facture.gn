@@ -6,6 +6,19 @@ const nextConfig: NextConfig = {
   // scaffold sans rapport avec ce repo, désactivé pour garder l'arborescence propre.
   agentRules: false,
 
+  // Accès au serveur de dev depuis un autre appareil du réseau local (un
+  // téléphone, pour juger la barre d'onglets et la bottom sheet sur un vrai
+  // écran) : Next refuse sinon les requêtes cross-origin vers /_next/*.
+  //
+  // Piloté par DEV_ORIGIN plutôt qu'écrit en dur : une IP de réseau local ne
+  // vaut que pour la machine qui l'a écrite, et n'a rien à faire dans le
+  // dépôt. Vide par défaut — donc aucun effet pour qui ne la définit pas.
+  //
+  //   DEV_ORIGIN=192.168.1.154 pnpm --filter web dev
+  //
+  // Dev uniquement : Next ignore ce champ dans un build de production.
+  allowedDevOrigins: process.env.DEV_ORIGIN ? [process.env.DEV_ORIGIN] : [],
+
   // Security Audit 2026-08-23, finding #15 — aucun header de sécurité HTTP
   // n'était configuré. X-Frame-Options: DENY sur toutes les routes : les pages
   // publiques /login, /pay/[invoiceId] et la vérification publique de facture

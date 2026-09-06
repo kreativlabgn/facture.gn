@@ -49,7 +49,7 @@ export default async function CabinetLayout({ children }: { children: React.Reac
           {practice ? (
             <span className="text-sm text-navy-600">
               <span className="font-semibold text-navy-950">{practice.name}</span>
-              <span className="ml-2 font-mono text-xs uppercase text-navy-400">
+              <span className="ml-2 font-mono text-xs uppercase text-navy-600">
                 {PRACTICE_TYPE_LABELS[practice.type] ?? practice.type} · {practice.role}
               </span>
             </span>

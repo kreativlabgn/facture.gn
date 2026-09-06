@@ -1,0 +1,167 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Garde-fous du Design System facture.gn — appliqués à TOUT `apps/web/src`.
+// Tourne dans le job `build` de la CI (`pnpm turbo test`). Complète la revue
+// manuelle (checklist Chantier B) pour les règles vérifiables statiquement.
+//
+// Règles couvertes :
+//   R-01  — aucun dégradé, sur aucun support.
+//   R-11  — jamais de texte clair sur fond Or de Guinée (contraste 1.8:1).
+//   Tokens — aucune couleur hex en dur : tout passe par globals.css @theme.
+//   AA    — aucun token Navy sous navy-600 utilisé comme couleur de texte.
+//   Typo  — `font-display` jamais en dessous de 12px (charte §Typographie).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SRC = path.resolve(__dirname);
+
+// Fichiers où une couleur hex littérale est légitime (APIs qui exigent une
+// chaîne couleur, pas une classe Tailwind). À garder MINIMAL et justifié.
+const HEX_ALLOWLIST = new Set<string>([
+  path.join(SRC, "app", "layout.tsx"), // viewport.themeColor — API Next.js, exige un hex
+]);
+
+// Le noir et le blanc purs ne sont pas des couleurs de MARQUE — tolérés dans
+// les icônes SVG (stroke/fill) où `currentColor` n'est pas toujours pratique.
+const NON_BRAND_HEX = /^#(?:fff|ffffff|000|000000)$/i;
+
+// Retire les commentaires ligne (// …) et bloc (/* … */) avant de scanner —
+// une doc qui MENTIONNE un hex ou un dégradé n'est pas une violation. Le
+// contenu des commentaires bloc est blanchi caractère par caractère plutôt que
+// supprimé : les sauts de ligne survivent, donc les numéros de ligne rapportés
+// restent ceux du fichier réel.
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " ")).replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+function walk(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) return walk(full);
+    return /\.(tsx?|css)$/.test(name) ? [full] : [];
+  });
+}
+
+const files = walk(SRC).filter((f) => !f.endsWith(".spec.ts") && !f.endsWith(".guardrails.spec.ts"));
+
+function scan(re: RegExp): { file: string; line: number; match: string }[] {
+  const hits: { file: string; line: number; match: string }[] = [];
+  for (const file of files) {
+    const lines = stripComments(readFileSync(file, "utf8")).split("\n");
+    lines.forEach((text, i) => {
+      const m = text.match(re);
+      if (m) hits.push({ file: path.relative(SRC, file), line: i + 1, match: m[0].trim().slice(0, 80) });
+    });
+  }
+  return hits;
+}
+
+describe("Design System — R-01 : aucun dégradé", () => {
+  // Tailwind v4 a renommé les utilitaires de dégradé : `bg-linear-*`,
+  // `bg-radial*`, `bg-conic*` — `bg-gradient-*` n'est plus que l'alias v3
+  // déprécié. Les deux orthographes sont couvertes, sinon la règle ne bloque
+  // que la syntaxe que le projet n'écrit plus. Les stops (`from-`/`via-`/`to-`)
+  // sont rattrapés en début de chaîne comme après une espace.
+  it("aucune utilitaire ou valeur de dégradé Tailwind/CSS", () => {
+    const hits = scan(
+      /\b(?:bg|text|border)-gradient-|\bbg-(?:linear|radial|conic)\b|\bbg-\[(?:linear|radial|conic)-gradient|(?:linear|radial|conic)-gradient\(|\b(?:from|via|to)-\[?#|(?:^|[\s"'`{])(?:from|via|to)-(?:navy|or|good|bad|green|amber|blue|red|grey|surface|white|black)\b/,
+    );
+    expect(hits, `Dégradé(s) détecté(s) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+});
+
+describe("Design System — couleurs par token uniquement", () => {
+  it("aucune valeur hex arbitraire dans une classe Tailwind (-[#…])", () => {
+    const hits = scan(/-\[#[0-9a-fA-F]{3,8}\]/);
+    expect(hits, `Hex arbitraire en classe :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+
+  it("aucune couleur hex de marque en dur hors globals.css (noir/blanc SVG tolérés)", () => {
+    const hits: { file: string; line: number; match: string }[] = [];
+    for (const file of files) {
+      if (file.endsWith("globals.css") || HEX_ALLOWLIST.has(file)) continue;
+      stripComments(readFileSync(file, "utf8"))
+        .split("\n")
+        .forEach((text, i) => {
+          for (const m of text.match(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g) ?? []) {
+            if (!NON_BRAND_HEX.test(m)) {
+              hits.push({ file: path.relative(SRC, file), line: i + 1, match: `${m} — ${text.trim().slice(0, 70)}` });
+            }
+          }
+        });
+    }
+    expect(hits, `Hex de marque en dur (utiliser un token) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+});
+
+describe("Design System — R-11 : jamais de texte clair sur Or de Guinée", () => {
+  // Heuristique même-élément : une classe qui pose un fond Or ET une couleur de
+  // texte claire. Le cas inter-éléments (parent bg-or, enfant text-white) reste
+  // en revue manuelle — impossible à trancher au grep sans faux positifs.
+  it("aucun className ne combine un fond Or et un texte clair", () => {
+    const LIGHT_TEXT = /text-(?:white|grey|surface|navy-(?:50|100|200|400)|good-bg|bad-bg)\b/;
+    const OR_BG = /bg-(?:or|amber|amber-bg|\[#[fF][bB]{2}500\])\b/;
+    const hits: { file: string; line: number; match: string }[] = [];
+    for (const file of files) {
+      stripComments(readFileSync(file, "utf8"))
+        .split("\n")
+        .forEach((text, i) => {
+          // on regarde le contenu entre guillemets sur la ligne (className="…")
+          for (const quoted of text.match(/["'`][^"'`]*["'`]/g) ?? []) {
+            if (OR_BG.test(quoted) && LIGHT_TEXT.test(quoted)) {
+              hits.push({ file: path.relative(SRC, file), line: i + 1, match: quoted.slice(0, 90) });
+            }
+          }
+        });
+    }
+    expect(hits, `Texte clair sur Or (utiliser text-navy-950) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+});
+
+describe("Design System — typographie : plancher du display", () => {
+  // Charte §Typographie : Space Grotesk « jamais en dessous de 12px, sinon
+  // Inter prend le relais ». Une display serrée en capitales à 10px devient
+  // illisible en plein soleil sur un écran d'entrée de gamme — exactement le
+  // contexte d'usage visé (DAT). Sept libellés de formulaire enfreignaient la
+  // règle avant les primitives ; le garde-fou empêche le retour.
+  const DISPLAY_FLOOR_PX = 12;
+
+  it("aucune classe ne combine font-display et une taille sous 12px", () => {
+    const hits: { file: string; line: number; match: string }[] = [];
+    for (const file of files) {
+      stripComments(readFileSync(file, "utf8"))
+        .split("\n")
+        .forEach((text, i) => {
+          for (const quoted of text.match(/["'`][^"'`]*["'`]/g) ?? []) {
+            if (!quoted.includes("font-display")) {
+              continue;
+            }
+            for (const size of quoted.match(/\btext-\[(\d+)px\]/g) ?? []) {
+              const px = Number(size.replace(/\D/g, ""));
+              if (px < DISPLAY_FLOOR_PX) {
+                hits.push({ file: path.relative(SRC, file), line: i + 1, match: quoted.slice(0, 90) });
+              }
+            }
+          }
+        });
+    }
+    expect(hits, `font-display sous ${DISPLAY_FLOOR_PX}px (passer en font-sans) :\n${JSON.stringify(hits, null, 2)}`).toEqual(
+      [],
+    );
+  });
+});
+
+describe("Design System — AA : pas de texte sous le seuil de contraste", () => {
+  // L'échelle Navy sous navy-600 est faite d'opacités faibles : sur blanc,
+  // navy-400 donne 2.8:1 et navy-200 1.6:1 — sous le seuil WCAG AA texte
+  // (4.5:1) et même sous le 3:1 des éléments non textuels. Ces teintes sont
+  // là pour les bordures et les séparateurs ; elles ne portent jamais de
+  // texte, placeholders compris (le 1.4.3 s'y applique aussi). Le token du
+  // texte secondaire est navy-600 — 5.5:1 sur blanc, 5.3:1 sur le fond grey.
+  it("aucun text-navy-* en dessous de navy-600", () => {
+    const hits = scan(/\btext-navy-(?:50|100|200|400)\b/);
+    expect(hits, `Texte sous le seuil AA (utiliser text-navy-600) :\n${JSON.stringify(hits, null, 2)}`).toEqual([]);
+  });
+});

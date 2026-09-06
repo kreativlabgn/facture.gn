@@ -15,12 +15,12 @@ export function InviteMemberForm() {
           type="tel"
           required
           placeholder="+224620000000"
-          className="rounded-lg border border-[#D1D5DB] bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-400 focus:border-2 focus:border-navy-950 focus:outline-none"
+          className="rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 placeholder:text-navy-600 focus:border-2 focus:border-navy-950 focus:outline-none"
         />
       </div>
       {/* Rôle fixé côté serveur à accountant_external — seul choix MVP (ADR-070),
           aucun sélecteur : pas d'option qui échouerait silencieusement. */}
-      <p className="mt-2 text-xs text-navy-400">Rôle : comptable externe (seul rôle disponible pour l&apos;instant)</p>
+      <p className="mt-2 text-xs text-navy-600">Rôle : comptable externe (seul rôle disponible pour l&apos;instant)</p>
       {state?.error ? <p className="mt-3 text-sm text-red-text">{state.error}</p> : null}
       <button
         type="submit"
