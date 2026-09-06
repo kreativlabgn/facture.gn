@@ -11,7 +11,7 @@
 # simple "Dockerfile", qui serait cherché à la racine du contexte.
 #
 # CRÉATION (une fois) :  fly apps create facture-gn-web
-# SECRETS :              voir apps/web/setup-staging-secrets.ps1
+# SECRETS :              voir scripts/setup-staging-secrets.ps1
 #
 # `web` n'a qu'un seul secret réel (TRUST_API_URL, ci-dessous en clair car ce
 # n'en est pas un : c'est une adresse du réseau privé Fly). Tout le reste des

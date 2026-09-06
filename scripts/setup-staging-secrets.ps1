@@ -21,7 +21,7 @@
   Affiche les commandes sans rien envoyer à Fly. À utiliser d'abord.
 
 .EXAMPLE
-  ./setup-staging-secrets.ps1 -SupabaseProjectRef abcdefghijklmnop `
+  ./scripts/setup-staging-secrets.ps1 -SupabaseProjectRef abcdefghijklmnop `
       -SupabasePassword 'mon-mot-de-passe' `
       -JwtPrivateKeyPath .\jwt-private.pem -JwtPublicKeyPath .\jwt-public.pem -DryRun
 #>
