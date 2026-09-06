@@ -296,3 +296,93 @@ describe("PracticesService — lister par type (F12, ADR-078)", () => {
     expect(result).toEqual([{ id: "cga-1", type: "cga", name: "CGA Kaloum" }]);
   });
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Annuaire NIF → organisation (Chantier C). Endpoint d'annuaire : ces tests
+// figent les barrières anti-énumération autant que le comportement nominal.
+// ─────────────────────────────────────────────────────────────────────────────
+function createLookupPrisma(options: { adminOf?: boolean; organization?: unknown } = {}) {
+  const { adminOf = true, organization = { id: "org-1", name: "Boutique Aissatou" } } = options;
+  return {
+    practiceMember: {
+      findFirst: vi.fn().mockResolvedValue(adminOf ? { id: "member-1" } : null),
+    },
+    organization: {
+      findUnique: vi.fn().mockResolvedValue(organization),
+    },
+  } as any;
+}
+
+describe("PracticesService.lookupOrganizationByNif", () => {
+  it("rend l'organisation correspondante à un practice_admin", async () => {
+    const prisma = createLookupPrisma();
+    const service = new PracticesService(prisma);
+
+    await expect(service.lookupOrganizationByNif("123456789", "user-1")).resolves.toEqual({
+      id: "org-1",
+      name: "Boutique Aissatou",
+    });
+  });
+
+  // La correspondance doit être EXACTE : un `contains`/`startsWith` permettrait
+  // de balayer l'espace des NIF par préfixes.
+  it("interroge par correspondance exacte, jamais par préfixe", async () => {
+    const prisma = createLookupPrisma();
+    await new PracticesService(prisma).lookupOrganizationByNif("123456789", "user-1");
+
+    const where = prisma.organization.findUnique.mock.calls[0][0].where;
+    expect(where).toEqual({ nif: "123456789" });
+    expect(JSON.stringify(where)).not.toMatch(/contains|startsWith|endsWith|mode/);
+  });
+
+  // Celui qui cherche n'est pas encore mandaté : il n'a droit qu'à de quoi
+  // identifier son client, rien de fiscal ni de commercial.
+  it("ne sélectionne que l'identifiant et le nom", async () => {
+    const prisma = createLookupPrisma();
+    await new PracticesService(prisma).lookupOrganizationByNif("123456789", "user-1");
+
+    expect(prisma.organization.findUnique.mock.calls[0][0].select).toEqual({ id: true, name: true });
+  });
+
+  it("n'accepte qu'une appartenance ACTIVE de rôle practice_admin", async () => {
+    const prisma = createLookupPrisma();
+    await new PracticesService(prisma).lookupOrganizationByNif("123456789", "user-1");
+
+    expect(prisma.practiceMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "user-1", leftAt: null, role: "practice_admin" },
+      }),
+    );
+  });
+
+  it("refuse un utilisateur qui n'est practice_admin d'aucun cabinet", async () => {
+    const prisma = createLookupPrisma({ adminOf: false });
+    const service = new PracticesService(prisma);
+
+    await expect(service.lookupOrganizationByNif("123456789", "user-1")).rejects.toThrow(
+      /practice_admin/,
+    );
+  });
+
+  // Barrière la plus importante : un utilisateur non autorisé ne doit même pas
+  // déclencher la requête. Sinon le temps de réponse trahirait l'existence du
+  // NIF avant même le contrôle d'accès.
+  it("ne touche pas à la base quand l'accès est refusé", async () => {
+    const prisma = createLookupPrisma({ adminOf: false });
+    await expect(
+      new PracticesService(prisma).lookupOrganizationByNif("123456789", "user-1"),
+    ).rejects.toThrow();
+
+    expect(prisma.organization.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("répond introuvable sur un NIF inconnu, sans dire pourquoi", async () => {
+    const prisma = createLookupPrisma({ organization: null });
+    const service = new PracticesService(prisma);
+
+    await expect(service.lookupOrganizationByNif("999999999", "user-1")).rejects.toThrow(
+      "Aucune organisation ne correspond à ce NIF",
+    );
+  });
+});

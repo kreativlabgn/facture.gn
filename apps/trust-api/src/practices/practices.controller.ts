@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { MandatesService } from "../mandates/mandates.service";
 import { createPracticeSchema, type CreatePracticeDto } from "./dto/create-practice.dto";
 import { inviteMemberSchema, type InviteMemberDto } from "./dto/invite-member.dto";
+import { lookupOrganizationSchema, type LookupOrganizationDto } from "./dto/lookup-organization.dto";
 import {
   invitePracticePendingSchema,
   type InvitePracticePendingDto,
@@ -26,6 +28,26 @@ export class PracticesController {
     private readonly mandatesService: MandatesService,
     private readonly pendingMemberInviteService: PendingMemberInviteService,
   ) {}
+
+  // GET /practices/lookup-organization?nif=… — annuaire du rattachement de
+  // mandat (Chantier C). Déclarée AVANT toute route paramétrée : Nest résout
+  // dans l'ordre de déclaration, et un `:id` placé plus haut capturerait
+  // "lookup-organization" comme identifiant.
+  //
+  // Throttle à 5/min, le plus strict du dépôt (celui de /auth/login). Un
+  // comptable cherche quelques clients par session ; à cette cadence, balayer
+  // l'espace des NIF à 9 chiffres demanderait des siècles. Aucun @Roles() :
+  // practice_admin n'est pas un OrganizationRole, l'autorisation est en ligne
+  // dans le service, comme partout ailleurs dans ce contrôleur.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Get("lookup-organization")
+  lookupOrganization(
+    @Query(new ZodValidationPipe(lookupOrganizationSchema)) query: LookupOrganizationDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.practicesService.lookupOrganizationByNif(query.nif, user.id);
+  }
+
 
   // Aucun rôle requis : une practice n'est PAS scopée à une organisation existante
   // (ADR-068, entité de premier niveau parallèle) — n'importe quel utilisateur
