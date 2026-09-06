@@ -19,5 +19,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/cabinet/:path*"],
+  // Doit rester aligné sur PROTECTED_PREFIXES (lib/route-protection.ts) :
+  // un préfixe absent d'ici n'est JAMAIS gardé, quoi qu'en dise cette liste.
+  // route-protection.spec.ts vérifie l'alignement — /onboarding est arrivé
+  // dans la liste sans arriver ici, et l'écran s'est cru protégé pour rien.
+  matcher: ["/dashboard/:path*", "/cabinet/:path*", "/onboarding/:path*"],
 };

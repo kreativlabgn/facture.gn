@@ -64,6 +64,38 @@ export async function login(msisdn: string, password: string): Promise<LoginResu
   return response.json();
 }
 
+export interface RegisterInput {
+  name: string;
+  msisdn: string;
+  password: string;
+}
+
+export interface RegisterResult {
+  userId: string;
+}
+
+// POST /auth/register ne renvoie QUE { userId } — aucun jeton. Le tunnel
+// d'inscription enchaîne donc sur login() pour obtenir l'accessToken qui
+// signera la création de l'organisation (voir (auth)/register/actions.ts).
+//
+// Le message d'erreur de trust-api est relayé tel quel, jamais reformulé : sur
+// un numéro déjà connu, l'API répond volontairement « Code invalide ou expiré »
+// (anti-énumération, auth.service.ts) — préciser ici « ce numéro a déjà un
+// compte » annulerait cette protection.
+export async function register(input: RegisterInput): Promise<RegisterResult> {
+  const response = await fetch(`${TRUST_API_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Inscription temporairement indisponible", response.status);
+  }
+  return response.json();
+}
+
 // Mirroir de la forme aplatie retournée par GET /organizations
 // (organizations.service.ts:listMine — organisation + role du user connecté).
 export interface OrganizationSummary {
@@ -77,6 +109,37 @@ export async function listMyOrganizations(token: string): Promise<OrganizationSu
   const response = await authenticatedFetch("/organizations", token);
   if (!response.ok) {
     throw new TrustApiError("Impossible de charger les organisations", response.status);
+  }
+  return response.json();
+}
+
+export interface CreateOrganizationInput {
+  name: string;
+  regimeFiscal: string;
+  legalForm: string;
+  nif?: string;
+  etaxNumber?: string;
+  rccm?: string;
+}
+
+// POST /organizations — le créateur devient owner (organizations.service.ts).
+// nif/etaxNumber sont conjoints côté DTO (ADR-035) : on les omet plutôt que de
+// les envoyer vides, une chaîne vide échouerait le .min(1) du schéma.
+export async function createOrganization(
+  token: string,
+  input: CreateOrganizationInput,
+): Promise<OrganizationSummary & { regimeFiscal: string; legalForm: string }> {
+  const response = await authenticatedFetch("/organizations", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    // Le pipe Zod de trust-api renvoie un tableau de messages sur 400 — on
+    // prend le premier plutôt que d'afficher "[object Object]".
+    const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+    throw new TrustApiError(message ?? "Création de l'organisation impossible", response.status);
   }
   return response.json();
 }
