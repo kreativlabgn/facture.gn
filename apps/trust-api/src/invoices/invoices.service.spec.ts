@@ -150,14 +150,19 @@ function createFakePaymentLinkClient(result: any = null) {
 }
 
 function createFakePrismaForCreateDraft(regimeFiscal: string) {
-  return {
+  // createDraft() lit et écrit désormais par le client scopé (l'organisation
+  // vient du DTO) : le faux doit donc porter $extends.
+  const prisma: any = {
     invoice: {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
     },
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal }),
     },
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  return prisma;
 }
 
 describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-033)", () => {
@@ -367,6 +372,10 @@ function createFakePrismaForConvertToInvoice(
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
@@ -406,7 +415,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/proforma/);
+    await expect(service.convertToInvoice("inv-1", "org-1")).rejects.toThrow(/proforma/);
   });
 
   it("refuse de convertir un proforma déjà converti — empêche une double conversion", async () => {
@@ -428,7 +437,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/statut/);
+    await expect(service.convertToInvoice("inv-1", "org-1")).rejects.toThrow(/statut/);
   });
 
   it("crée une nouvelle facture draft et marque le proforma converted avec convertedToInvoiceId", async () => {
@@ -450,13 +459,15 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.documentType).toBe("invoice");
     expect(newInvoice.status).toBe("draft");
     expect(newInvoice.totalTtc).toBe(350_000n);
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", status: "draft" },
+      // organizationId dans le where de l'écriture — seule barrière tant que
+      // RLS dort.
+      where: { id: "inv-1", organizationId: "org-1", status: "draft" },
       data: { status: "converted" },
     });
     expect(prisma.invoice.update).toHaveBeenCalledWith({
@@ -484,13 +495,15 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.documentType).toBe("invoice");
     expect(newInvoice.status).toBe("draft");
     expect(newInvoice.totalTtc).toBe(220_000n);
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", status: "draft" },
+      // organizationId dans le where de l'écriture — seule barrière tant que
+      // RLS dort.
+      where: { id: "inv-1", organizationId: "org-1", status: "draft" },
       data: { status: "converted" },
     });
     expect(prisma.invoice.update).toHaveBeenCalledWith({
@@ -519,7 +532,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.discountPct).toBe(15);
   });
@@ -546,7 +559,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.totalHt).toBe(1_000_000n);
     expect(newInvoice.totalTva).toBe(180_000n);
@@ -576,7 +589,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/conver/);
+    await expect(service.convertToInvoice("inv-1", "org-1")).rejects.toThrow(/conver/);
   });
 });
 
@@ -625,7 +638,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     );
 
     await expect(
-      service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou"),
+      service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou", "org-1"),
     ).rejects.toThrow(/arrhes/);
   });
 
@@ -641,7 +654,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou");
+    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou", "org-1");
 
     expect(event.type).toBe("no_show_forfeited");
     expect(event.amount).toBe(300_000n);
@@ -666,7 +679,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     );
 
     await expect(
-      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou", "org-1"),
     ).rejects.toThrow(/statut/);
   });
 
@@ -684,7 +697,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     );
 
     await expect(
-      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou", "org-1"),
     ).rejects.toThrow(/autre requête/);
   });
 });
@@ -703,7 +716,7 @@ describe("InvoicesService — immutabilité post-émission", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.updateDraft("inv-1", { totalTtc: 999n })).rejects.toThrow(/immuable/);
+    await expect(service.updateDraft("inv-1", { totalTtc: 999n }, "org-1")).rejects.toThrow(/immuable/);
   });
 
   it("autorise la mutation d'une facture encore draft", async () => {
@@ -719,10 +732,11 @@ describe("InvoicesService — immutabilité post-émission", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await service.updateDraft("inv-1", { totalTtc: 999n });
+    await service.updateDraft("inv-1", { totalTtc: 999n }, "org-1");
 
-    expect(prisma.invoice.update).toHaveBeenCalledWith({
-      where: { id: "inv-1" },
+    // updateMany filtré par organisation, et non plus update par id seul.
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", organizationId: "org-1" },
       data: { totalTtc: 999n },
     });
   });
@@ -1069,6 +1083,10 @@ describe("InvoicesService — machine à états", () => {
     const p2028 = Object.assign(new Error("Transaction already closed"), { code: "P2028" });
     const prisma: any = {
       $transaction: vi.fn().mockRejectedValue(p2028),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     };
     const service = new InvoicesService(
       prisma as any,
@@ -1137,6 +1155,9 @@ describe("InvoicesService — machine à états", () => {
           releaseLock();
         }
       }),
+      // $executeRaw est déjà déclaré plus haut (neutre, il ne prend pas le
+      // verrou simulé) — ici seul $extends manquait.
+      $extends: vi.fn(() => prisma),
     };
 
     const numbering = createFakeNumbering();
@@ -1608,7 +1629,8 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
 
 describe("InvoicesService — rattacher un client à la création (C6, ADR-039)", () => {
   function createFakePrismaWithCustomer(customer: any) {
-    return {
+    // createDraft() passe par le client scopé : le faux doit porter $extends.
+    const prisma: any = {
       invoice: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
       },
@@ -1618,7 +1640,10 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
       customer: {
         findUnique: vi.fn().mockResolvedValue(customer),
       },
+      $extends: vi.fn(() => prisma),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    return prisma;
   }
 
   it("crée la facture avec customerId quand le client appartient à la même organisation", async () => {
@@ -1700,7 +1725,8 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
 
 describe("InvoicesService — rattacher une succursale à la création (E1, ADR-037)", () => {
   function createFakePrismaWithBranch(branch: any) {
-    return {
+    // createDraft() passe par le client scopé : le faux doit porter $extends.
+    const prisma: any = {
       invoice: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
       },
@@ -1710,7 +1736,10 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
       branch: {
         findUnique: vi.fn().mockResolvedValue(branch),
       },
+      $extends: vi.fn(() => prisma),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    return prisma;
   }
 
   it("crée la facture avec branchId quand la succursale appartient à la même organisation", async () => {
@@ -2080,6 +2109,9 @@ function createFakePrismaForCreateAssisted(
     fiscalPeriodClosing: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn((callback: any) => callback(prisma)),
     $queryRaw: vi.fn().mockResolvedValue([]),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
     $executeRaw: vi.fn().mockResolvedValue(1),
   };
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
@@ -2297,7 +2329,8 @@ describe("findAllByOrganization", () => {
 
 describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-084)", () => {
   function createFakePrismaWithProducts(products: any[]) {
-    return {
+    // createDraft() passe par le client scopé : le faux doit porter $extends.
+    const prisma: any = {
       invoice: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
       },
@@ -2307,7 +2340,10 @@ describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-
       product: {
         findMany: vi.fn().mockResolvedValue(products),
       },
+      $extends: vi.fn(() => prisma),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    return prisma;
   }
 
   it("snapshotte costPrice du produit référencé dans costPriceAtTime de la ligne", async () => {
@@ -2432,6 +2468,10 @@ function createFakePrismaForSendReminder(invoice: any) {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
@@ -2471,7 +2511,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await service.sendReminder("inv-1", "user-djenabou");
+    await service.sendReminder("inv-1", "user-djenabou", "org-1");
 
     expect(reminderService.send).toHaveBeenCalledWith(
       { phone: "+224622334455", notificationChannel: "sms" },
@@ -2496,7 +2536,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await service.sendReminder("inv-1", "user-djenabou");
+    await service.sendReminder("inv-1", "user-djenabou", "org-1");
 
     expect(reminderService.send).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "pular");
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
@@ -2517,7 +2557,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 
@@ -2533,7 +2573,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
   });
 
   it("rejette (ConflictException) une facture sans client associé", async () => {
@@ -2548,7 +2588,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 
@@ -2567,7 +2607,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 });

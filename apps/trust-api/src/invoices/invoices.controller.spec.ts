@@ -6,9 +6,9 @@ describe("InvoicesController — POST /invoices/:id/convert-to-invoice (C15)", (
     const service = { convertToInvoice: vi.fn().mockResolvedValue({ id: "inv-2", documentType: "invoice" }) };
     const controller = new InvoicesController(service as any, {} as any);
 
-    const result = await controller.convertToInvoice("inv-1");
+    const result = await controller.convertToInvoice("inv-1", "org-1");
 
-    expect(service.convertToInvoice).toHaveBeenCalledWith("inv-1");
+    expect(service.convertToInvoice).toHaveBeenCalledWith("inv-1", "org-1");
     expect(result).toEqual({ id: "inv-2", documentType: "invoice" });
   });
 });
@@ -22,9 +22,10 @@ describe("InvoicesController — POST /invoices/:id/forfeit-deposit (C5)", () =>
       "proforma-1",
       { reason: "no_show_forfeited" },
       { id: "user-djenabou" },
+      "org-1",
     );
 
-    expect(service.forfeitDeposit).toHaveBeenCalledWith("proforma-1", "no_show_forfeited", "user-djenabou");
+    expect(service.forfeitDeposit).toHaveBeenCalledWith("proforma-1", "no_show_forfeited", "user-djenabou", "org-1");
     expect(result).toEqual({ id: "event-1", type: "no_show_forfeited" });
   });
 });
@@ -34,9 +35,9 @@ describe("InvoicesController — POST /invoices/:id/send-reminder (I2)", () => {
     const service = { sendReminder: vi.fn().mockResolvedValue({ id: "inv-1", status: "issued" }) };
     const controller = new InvoicesController(service as any, {} as any);
 
-    const result = await controller.sendReminder("inv-1", { id: "user-djenabou" });
+    const result = await controller.sendReminder("inv-1", { id: "user-djenabou" }, "org-1");
 
-    expect(service.sendReminder).toHaveBeenCalledWith("inv-1", "user-djenabou");
+    expect(service.sendReminder).toHaveBeenCalledWith("inv-1", "user-djenabou", "org-1");
     expect(result).toEqual({ id: "inv-1", status: "issued" });
   });
 });

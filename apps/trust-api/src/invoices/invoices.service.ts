@@ -94,7 +94,12 @@ export class InvoicesService {
   // et le backfill des factures antérieures). Seuls createAssisted() ("agent_terrain")
   // et UssdInvoiceService.emitInvoice() ("ussd") le surchargent aujourd'hui.
   async createDraft(dto: CreateInvoiceDto, channel: EmissionChannel = "pwa") {
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    // L'organisation vient du DTO — aucun paramètre à ajouter. Les clauses
+    // `where` et les contrôles d'appartenance ci-dessous sont CONSERVÉS tels
+    // quels : ils portent les messages d'erreur qui distinguent « introuvable »
+    // de « appartient à une autre organisation », que le scope seul effacerait.
+    const scoped = organizationScopedClient(this.prisma, dto.organizationId);
+    const organization = await scoped.organization.findUniqueOrThrow({
       where: { id: dto.organizationId },
     });
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
@@ -103,7 +108,7 @@ export class InvoicesService {
     // appel inconditionnel (protège les appelants sans client, la grande
     // majorité, d'une dépendance à un modèle Customer qu'ils n'utilisent pas).
     if (dto.customerId) {
-      const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
+      const customer = await scoped.customer.findUnique({ where: { id: dto.customerId } });
       if (!customer || customer.organizationId !== dto.organizationId) {
         throw new ConflictException(
           `Client ${dto.customerId} introuvable pour cette organisation`,
@@ -114,7 +119,7 @@ export class InvoicesService {
     // E1 — même discipline que customerId : requête déclenchée UNIQUEMENT si
     // branchId est fourni, jamais un appel inconditionnel.
     if (dto.branchId) {
-      const branch = await this.prisma.branch.findUnique({ where: { id: dto.branchId } });
+      const branch = await scoped.branch.findUnique({ where: { id: dto.branchId } });
       if (!branch || branch.organizationId !== dto.organizationId) {
         throw new ConflictException(
           `Succursale ${dto.branchId} introuvable pour cette organisation`,
@@ -128,7 +133,7 @@ export class InvoicesService {
     const productIds = [...new Set(dto.lines.map((line) => line.productId).filter((id): id is string => !!id))];
     const products =
       productIds.length > 0
-        ? await this.prisma.product.findMany({
+        ? await scoped.product.findMany({
             where: { id: { in: productIds }, organizationId: dto.organizationId },
           })
         : [];
@@ -147,7 +152,7 @@ export class InvoicesService {
     const totalTtc = totalTtcBrut - (totalTtcBrut * BigInt(discountPct)) / 100n;
     const { totalHt, totalTva } = computeTaxBreakdown(totalTtc, taxRateBps);
 
-    return this.prisma.invoice.create({
+    return scoped.invoice.create({
       data: {
         organizationId: dto.organizationId,
         documentType: dto.documentType,
@@ -214,7 +219,10 @@ export class InvoicesService {
     // directement dans la requête (jamais une AssistedSession révoquée ou expirée
     // ne doit pouvoir autoriser une émission, même si une ligne existe toujours en
     // base pour la traçabilité historique).
-    const session = await this.prisma.assistedSession.findFirst({
+    // assisted_session figure dans les tables sous politique org_isolation :
+    // lecture scopée, avec son filtre explicite conservé. `user` juste au-dessus
+    // reste NON scopé à dessein — une identité est globale, pas une donnée tenant.
+    const session = await organizationScopedClient(this.prisma, dto.organizationId).assistedSession.findFirst({
       where: {
         commercialAgentUserId,
         organizationId: dto.organizationId,
@@ -242,14 +250,24 @@ export class InvoicesService {
   // méthode n'est câblée sur AUCUNE route aujourd'hui, mais rien n'empêchait
   // qu'un futur PATCH /invoices/:id mal branché contourne totalement issue()
   // (poser status:"issued" sans jamais passer par la certification réelle).
-  async updateDraft(invoiceId: string, patch: DraftInvoicePatch) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  // Aucun appelant hors des tests à ce jour (aucune route PATCH). Le scope est
+  // ajouté malgré tout : la migrer plus tard, sous RLS actif, coûterait une
+  // relecture non scopée — le problème même que ce chantier élimine.
+  async updateDraft(invoiceId: string, patch: DraftInvoicePatch, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const invoice = await scoped.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
     if (invoice.status !== "draft") {
       throw new ConflictException(
         "Une facture issued est immuable — toute correction passe par un avoir (credit_note)",
       );
     }
-    return this.prisma.invoice.update({ where: { id: invoiceId }, data: patch });
+    // updateMany plutôt qu'update : le where porte deux champs, et l'écriture
+    // doit être filtrée par organisation comme la lecture.
+    const claimed = await scoped.invoice.updateMany({ where: { id: invoiceId, organizationId }, data: patch });
+    if (claimed.count === 0) {
+      throw new ConflictException(`Facture ${invoiceId} n'a pas pu être modifiée`);
+    }
+    return scoped.invoice.findFirstOrThrow({ where: { id: invoiceId, organizationId } });
   }
 
   async issue(invoiceId: string, organizationId: string) {
@@ -463,7 +481,7 @@ export class InvoicesService {
     // une émission déjà certifiée et committée.
     let invoiceWithLink;
     try {
-      invoiceWithLink = await this.prisma.invoice.update({
+      invoiceWithLink = await organizationScopedClient(this.prisma, organizationId).invoice.update({
         where: { id: invoiceId },
         data: {
           paymentLinkUrl: paymentLink.paymentLinkUrl,
@@ -483,7 +501,9 @@ export class InvoicesService {
     // aucun client rattaché (C6, optionnel) — rien à notifier.
     if (this.notificationService && invoiceWithLink.customerId) {
       try {
-        const customer = await this.prisma.customer.findUnique({ where: { id: invoiceWithLink.customerId } });
+        const customer = await organizationScopedClient(this.prisma, organizationId).customer.findUnique({
+          where: { id: invoiceWithLink.customerId },
+        });
         if (customer) {
           await this.notificationService.notify(
             customer,
@@ -505,9 +525,10 @@ export class InvoicesService {
   // ACTUELLE, jamais depuis les lignes déjà stockées sur le proforma (même si
   // regimeFiscal n'est modifiable nulle part aujourd'hui, cette règle protège contre
   // une dérive silencieuse le jour où un mécanisme de changement existera).
-  async convertToInvoice(proformaId: string) {
-    const proforma = await this.prisma.invoice.findUniqueOrThrow({
-      where: { id: proformaId },
+  async convertToInvoice(proformaId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const proforma = await scoped.invoice.findFirstOrThrow({
+      where: { id: proformaId, organizationId },
       include: { lines: true },
     });
 
@@ -526,20 +547,26 @@ export class InvoicesService {
       );
     }
 
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findUniqueOrThrow({
       where: { id: proforma.organizationId },
     });
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
     const { totalHt, totalTva } = computeTaxBreakdown(proforma.totalTtc, taxRateBps);
 
     return this.prisma.$transaction(async (tx) => {
+      // RLS — première ligne du bloc (le client scopé ouvrirait une transaction
+      // imbriquée par opération).
+      await setOrganizationScope(tx, organizationId);
+
       // Réclame le proforma atomiquement AVANT de créer la facture : sous deux
       // conversions concurrentes (retry réseau plausible sur ce projet — PWA
       // offline-first, réseau mobile instable), seule la transaction qui voit encore
       // status="draft" au moment de l'écriture peut committer — l'autre reçoit
       // count=0 et échoue proprement, jamais deux factures pour un même proforma.
       const claimed = await tx.invoice.updateMany({
-        where: { id: proformaId, status: "draft" },
+        // organizationId dans le where de l'écriture, pas seulement de la
+        // lecture : tant que RLS dort, c'est la seule barrière réelle.
+        where: { id: proformaId, organizationId, status: "draft" },
         data: { status: "converted" },
       });
       if (claimed.count === 0) {
@@ -593,8 +620,10 @@ export class InvoicesService {
     proformaId: string,
     reason: "cancellation_indemnity" | "no_show_forfeited",
     actorId: string,
+    organizationId: string,
   ) {
-    const proforma = await this.prisma.invoice.findUniqueOrThrow({ where: { id: proformaId } });
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const proforma = await scoped.invoice.findFirstOrThrow({ where: { id: proformaId, organizationId } });
 
     if (proforma.documentType !== "proforma") {
       throw new ConflictException(
@@ -611,7 +640,7 @@ export class InvoicesService {
       );
     }
 
-    const deposit = await this.prisma.payment.findFirst({
+    const deposit = await scoped.payment.findFirst({
       where: { invoiceId: proformaId, depositType: "arrhes" },
     });
     if (!deposit) {
@@ -619,6 +648,10 @@ export class InvoicesService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // RLS — première ligne du bloc (le client scopé ouvrirait une transaction
+      // imbriquée par opération).
+      await setOrganizationScope(tx, organizationId);
+
       // Même garde atomique que convertToInvoice() (C15) : sous deux forfaits
       // concurrents, seule la transaction qui voit encore status="draft" au moment
       // de l'écriture peut committer — la vérification ci-dessus a déjà éliminé le
@@ -727,9 +760,9 @@ export class InvoicesService {
   // ici lève une ConflictException claire plutôt qu'un no-op. Aucun throttle
   // anti-spam (même absence de garde que regeneratePaymentLink, "à la
   // demande" ADR-066) — l'humain qui déclenche contrôle déjà la cadence.
-  async sendReminder(invoiceId: string, actorId: string) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({
-      where: { id: invoiceId },
+  async sendReminder(invoiceId: string, actorId: string, organizationId: string) {
+    const invoice = await organizationScopedClient(this.prisma, organizationId).invoice.findFirstOrThrow({
+      where: { id: invoiceId, organizationId },
       include: { customer: true, organization: { select: { preferredLanguage: true } } },
     });
 
@@ -758,6 +791,10 @@ export class InvoicesService {
     );
 
     return this.prisma.$transaction(async (tx) => {
+      // RLS — première ligne du bloc (le client scopé ouvrirait une transaction
+      // imbriquée par opération).
+      await setOrganizationScope(tx, organizationId);
+
       await tx.invoiceEvent.create({
         data: { invoiceId, type: "payment_reminder_sent", actorId },
       });
