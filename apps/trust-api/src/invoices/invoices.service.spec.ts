@@ -1,5 +1,20 @@
 import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+
+// À travers un client scopé, le service n'appelle que findFirst* (règle du
+// runbook RLS : c'est la seule forme dont le `where` peut porter la colonne de
+// scope). Les faux de ce fichier ne déclarent que findUnique* — on adosse l'un
+// à l'autre pour TOUS les modèles, les deux désignant la même lecture, plutôt
+// que de réécrire chaque test. Les assertions sur findUnique* restent valables.
+function alignerFindFirst(prisma: any) {
+  for (const modele of Object.values(prisma)) {
+    if (!modele || typeof modele !== "object") continue;
+    const m = modele as any;
+    if (m.findUniqueOrThrow && !m.findFirstOrThrow) m.findFirstOrThrow = m.findUniqueOrThrow;
+    if (m.findUnique && !m.findFirst) m.findFirst = m.findUnique;
+  }
+}
+
 import { InvoicesService } from "./invoices.service";
 
 function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscalPeriodClosing?: any } = {}) {
@@ -95,10 +110,9 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscal
   // unique. Les faux existants ne déclarent que findUniqueOrThrow — on adosse
   // l'un à l'autre plutôt que de réécrire chaque test, les deux désignant la
   // même lecture. Les assertions sur findUniqueOrThrow restent donc valables.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
 
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -117,9 +131,7 @@ function createFakeScopedPrisma(rows: any[] = []) {
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
   // adosse l'un à l'autre, les deux désignant la même lecture.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -162,6 +174,7 @@ function createFakePrismaForCreateDraft(regimeFiscal: string) {
     $extends: vi.fn(() => prisma),
     $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -380,9 +393,7 @@ function createFakePrismaForConvertToInvoice(
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
   // adosse l'un à l'autre, les deux désignant la même lecture.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -618,9 +629,7 @@ function createFakePrismaForForfeitDeposit(
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
   // adosse l'un à l'autre, les deux désignant la même lecture.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -1292,6 +1301,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const notificationService = createNotificationService();
     const service = new InvoicesService(
       prisma as any,
@@ -1303,7 +1313,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
 
     const result = await service.issue("inv-1", "org-1");
 
-    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1", organizationId: "org-1" } });
     expect(notificationService.notify).toHaveBeenCalledWith(
       { phone: "+224622334455", notificationChannel: "sms" },
       resolvedLink.paymentLinkUrl,
@@ -1322,6 +1332,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const notificationService = createNotificationService();
     const service = new InvoicesService(
       prisma as any,
@@ -1390,6 +1401,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const notificationService = createNotificationService({ notify: vi.fn().mockRejectedValue(new Error("panne")) });
     const service = new InvoicesService(
       prisma as any,
@@ -1407,6 +1419,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -1643,6 +1656,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
       $extends: vi.fn(() => prisma),
       $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    alignerFindFirst(prisma);
     return prisma;
   }
 
@@ -1662,7 +1676,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
       lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
     } as any);
 
-    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1", organizationId: "org-1" } });
     expect(result.customerId).toBe("cust-1");
   });
 
@@ -1739,6 +1753,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
       $extends: vi.fn(() => prisma),
       $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    alignerFindFirst(prisma);
     return prisma;
   }
 
@@ -1758,7 +1773,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
       lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
     } as any);
 
-    expect(prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: "branch-1" } });
+    expect(prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: "branch-1", organizationId: "org-1" } });
     expect(result.branchId).toBe("branch-1");
   });
 
@@ -1856,9 +1871,7 @@ function createFakePrismaForRegeneratePaymentLink(
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
   // adosse l'un à l'autre, les deux désignant la même lecture.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -2117,9 +2130,7 @@ function createFakePrismaForCreateAssisted(
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
   // adosse l'un à l'autre, les deux désignant la même lecture.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -2343,6 +2354,7 @@ describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-
       $extends: vi.fn(() => prisma),
       $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    alignerFindFirst(prisma);
     return prisma;
   }
 
@@ -2476,9 +2488,7 @@ function createFakePrismaForSendReminder(invoice: any) {
   // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
   // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
   // adosse l'un à l'autre, les deux désignant la même lecture.
-  if (prisma.invoice && !prisma.invoice.findFirstOrThrow && prisma.invoice.findUniqueOrThrow) {
-    prisma.invoice.findFirstOrThrow = prisma.invoice.findUniqueOrThrow;
-  }
+  alignerFindFirst(prisma);
   return prisma;
 }
 

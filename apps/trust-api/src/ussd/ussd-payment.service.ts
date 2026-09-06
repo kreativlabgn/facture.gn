@@ -30,7 +30,7 @@ export class UssdPaymentService {
   // même calcul qu'InvoicesService.regeneratePaymentLink()/issue() (ADR-074),
   // jamais un montant deviné ni dupliqué autrement.
   async previewFee(organizationId: string, amountDue: bigint): Promise<bigint> {
-    const organization = await organizationScopedClient(this.prisma, organizationId).organization.findUniqueOrThrow({
+    const organization = await organizationScopedClient(this.prisma, organizationId).organization.findFirstOrThrow({
       where: { id: organizationId },
     });
     return computePlatformFee(amountDue, organization.commercialTier);

@@ -54,7 +54,7 @@ export class MandatesService {
     // Sa politique org_isolation ne teste que app.current_org_id, nul ici, donc
     // la ligne reste visible sous scope cabinet. C'est ce qui permet de vérifier
     // qu'on ne demande pas un mandat sur une organisation inexistante.
-    const organization = await scoped.organization.findUnique({ where: { id: dto.organizationId } });
+    const organization = await scoped.organization.findFirst({ where: { id: dto.organizationId } });
     if (!organization) {
       throw new NotFoundException(`Organisation ${dto.organizationId} introuvable`);
     }
@@ -291,8 +291,8 @@ export class MandatesService {
   async revokeAsOrganization(organizationId: string, mandateId: string, actorUserId: string) {
     const scoped = organizationScopedClient(this.prisma, organizationId);
     // organization_member EST sous org_isolation : lecture scopée.
-    const member = await scoped.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId, userId: actorUserId } },
+    const member = await scoped.organizationMember.findFirst({
+      where: { organizationId, userId: actorUserId },
     });
     if (!member || member.revokedAt || !["owner", "admin"].includes(member.role)) {
       throw new ForbiddenException("Seul un owner ou admin de l'organisation peut révoquer un mandat");

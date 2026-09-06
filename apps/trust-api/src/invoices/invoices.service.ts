@@ -99,7 +99,7 @@ export class InvoicesService {
     // quels : ils portent les messages d'erreur qui distinguent « introuvable »
     // de « appartient à une autre organisation », que le scope seul effacerait.
     const scoped = organizationScopedClient(this.prisma, dto.organizationId);
-    const organization = await scoped.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: dto.organizationId },
     });
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
@@ -108,7 +108,9 @@ export class InvoicesService {
     // appel inconditionnel (protège les appelants sans client, la grande
     // majorité, d'une dépendance à un modèle Customer qu'ils n'utilisent pas).
     if (dto.customerId) {
-      const customer = await scoped.customer.findUnique({ where: { id: dto.customerId } });
+      const customer = await scoped.customer.findFirst({
+        where: { id: dto.customerId, organizationId: dto.organizationId },
+      });
       if (!customer || customer.organizationId !== dto.organizationId) {
         throw new ConflictException(
           `Client ${dto.customerId} introuvable pour cette organisation`,
@@ -119,7 +121,9 @@ export class InvoicesService {
     // E1 — même discipline que customerId : requête déclenchée UNIQUEMENT si
     // branchId est fourni, jamais un appel inconditionnel.
     if (dto.branchId) {
-      const branch = await scoped.branch.findUnique({ where: { id: dto.branchId } });
+      const branch = await scoped.branch.findFirst({
+        where: { id: dto.branchId, organizationId: dto.organizationId },
+      });
       if (!branch || branch.organizationId !== dto.organizationId) {
         throw new ConflictException(
           `Succursale ${dto.branchId} introuvable pour cette organisation`,
@@ -501,8 +505,8 @@ export class InvoicesService {
     // aucun client rattaché (C6, optionnel) — rien à notifier.
     if (this.notificationService && invoiceWithLink.customerId) {
       try {
-        const customer = await organizationScopedClient(this.prisma, organizationId).customer.findUnique({
-          where: { id: invoiceWithLink.customerId },
+        const customer = await organizationScopedClient(this.prisma, organizationId).customer.findFirst({
+          where: { id: invoiceWithLink.customerId, organizationId },
         });
         if (customer) {
           await this.notificationService.notify(
@@ -547,7 +551,7 @@ export class InvoicesService {
       );
     }
 
-    const organization = await scoped.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: proforma.organizationId },
     });
     const taxRateBps = resolveTaxRateBps(organization.regimeFiscal);
@@ -698,7 +702,7 @@ export class InvoicesService {
     // amountDue (jamais totalTtc, C11) : sur une facture partially_paid, le lien doit
     // refléter le solde RESTANT — utiliser totalTtc redemanderait au client un
     // montant déjà partiellement réglé (bug corrigé, C11).
-    const organization = await scoped.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: invoice.organizationId },
     });
     // Majoré de la commission (ADR-074) — même précédent que issue().

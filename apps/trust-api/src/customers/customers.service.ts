@@ -214,7 +214,7 @@ export class CustomersService {
 
     // H1, Grille §2 — "gestion client avancée" (merge doublons + credit_limit)
     // dépend structurellement du rôle approver (ADR-083, Pro+ uniquement).
-    const organization = await scoped.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: canonical.organizationId },
     });
     if (!isAdvancedCustomerManagementAllowed(organization.commercialTier)) {
@@ -254,7 +254,7 @@ export class CustomersService {
     const scoped = organizationScopedClient(this.prisma, organizationId);
     const customer = await scoped.customer.findFirstOrThrow({ where: { id: customerId, organizationId } });
     this.assertNotAnonymized(customer);
-    const organization = await scoped.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: customer.organizationId },
     });
     // H1, Grille §2 — même garde que merge(), "gestion client avancée" Pro+.

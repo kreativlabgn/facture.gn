@@ -20,7 +20,7 @@ export class VelocityTierService {
   // dehors d'assertWithinLimits(), même calcul, aucune duplication.
   async resolveTier(organizationId: string): Promise<VelocityTier> {
     const scoped = organizationScopedClient(this.prisma, organizationId);
-    const organization = await scoped.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const organization = await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
 
     const hasAnomalyFlag = organization.dgiVerifiedAt
       ? // invoice_event est sous RLS par INDIRECTION (politique via invoice_id) :
