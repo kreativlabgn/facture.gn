@@ -491,6 +491,33 @@ export interface PracticeMandateItem {
   organization: { id: string; name: string };
 }
 
+export interface OrganizationLookupResult {
+  id: string;
+  name: string;
+}
+
+// Miroir de GET /practices/lookup-organization (Chantier C) — annuaire du
+// rattachement de mandat. Ne rend QUE l'identifiant et le nom : le backend ne
+// sélectionne rien d'autre, celui qui cherche n'étant pas encore mandaté.
+//
+// 404 et 403 sont distingués parce qu'ils appellent des gestes différents chez
+// le comptable : vérifier le numéro, ou demander l'accès à son administrateur.
+// 429 est relayé tel quel — la route est limitée à 5 recherches par minute.
+export async function lookupOrganizationByNif(token: string, nif: string): Promise<OrganizationLookupResult> {
+  const response = await authenticatedFetch(`/practices/lookup-organization?nif=${encodeURIComponent(nif)}`, token);
+  if (response.status === 404) {
+    throw new TrustApiError("Aucune organisation ne correspond à ce NIF", 404);
+  }
+  if (response.status === 429) {
+    throw new TrustApiError("Trop de recherches — patientez une minute avant de réessayer", 429);
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Recherche indisponible", response.status);
+  }
+  return response.json();
+}
+
 export async function listPracticeMandates(token: string, practiceId: string): Promise<PracticeMandateItem[]> {
   const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/mandates`, token);
   if (!response.ok) {

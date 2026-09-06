@@ -130,4 +130,46 @@ export class PracticesService {
       data: { revenueShareSettlementMode: mode },
     });
   }
+
+  // Annuaire NIF → organisation, pour le rattachement d'un mandat (Chantier C).
+  // Un cabinet connaît le NIF de son client, jamais son UUID interne.
+  //
+  // C'est un endpoint d'ANNUAIRE : mal conçu, il énumère les contribuables
+  // guinéens. Quatre barrières, toutes nécessaires :
+  //
+  //  1. findUnique sur `nif`, colonne @unique — correspondance EXACTE. Jamais
+  //     de `contains`/`startsWith`, qui permettraient de balayer l'espace des
+  //     NIF par préfixes.
+  //  2. `select` réduit à l'id et au nom. Le régime fiscal, le chiffre
+  //     d'affaires déclaré, le palier commercial ou le statut DGI ne
+  //     ressortent pas d'ici — celui qui cherche n'est pas encore mandaté.
+  //  3. Réservé aux practice_admin (garde ci-dessous).
+  //  4. Throttle strict sur la route (voir practices.controller.ts).
+  //
+  // Le garde diffère d'assertPracticeAdmin() : la route ne porte aucun
+  // practiceId — la recherche précède le choix du cabinet dans le formulaire.
+  // On exige donc d'être practice_admin d'AU MOINS un cabinet actif. C'est le
+  // même niveau d'exigence, appliqué à l'utilisateur plutôt qu'au couple
+  // (utilisateur, cabinet).
+  async lookupOrganizationByNif(nif: string, requesterUserId: string) {
+    const adminMembership = await this.prisma.practiceMember.findFirst({
+      where: { userId: requesterUserId, leftAt: null, role: "practice_admin" },
+      select: { id: true },
+    });
+    if (!adminMembership) {
+      throw new ForbiddenException("Seul un practice_admin peut rechercher une organisation par NIF");
+    }
+
+    const organization = await this.prisma.organization.findUnique({
+      where: { nif },
+      select: { id: true, name: true },
+    });
+    if (!organization) {
+      // Message neutre : il ne dit pas si le NIF est inconnu du système ou
+      // simplement non renseigné sur une organisation existante.
+      throw new NotFoundException("Aucune organisation ne correspond à ce NIF");
+    }
+
+    return organization;
+  }
 }

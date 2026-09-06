@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { canManageMandates } from "@/lib/cabinet-nav";
 import { requireSessionToken } from "@/lib/session";
 import { listMyPractices, listPracticeMandates } from "@/lib/trust-api";
 import { RequestMandateForm } from "./RequestMandateForm";
@@ -15,7 +16,9 @@ export default async function CabinetMandatesPage() {
   }
 
   const mandates = await listPracticeMandates(token, practice.id);
-  const canManage = practice.role === "practice_admin";
+  // Même source que la navigation du cabinet — une seule recopie du RBAC
+  // backend (assertPracticeAdmin), pas une comparaison de chaîne par écran.
+  const canManage = canManageMandates(practice.role);
 
   return (
     <div>
