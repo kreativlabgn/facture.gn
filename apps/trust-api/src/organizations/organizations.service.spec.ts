@@ -1,5 +1,23 @@
 import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes sur les arguments inchangées.
+// (La pose effective du set_config est couverte par packages/db rls.spec.ts.)
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { OrganizationsService } from "./organizations.service";
 
 // A3 — partagé par tous les tests de ce fichier (règle des 3, même discipline
@@ -25,7 +43,7 @@ function createFakePendingMemberInviteService() {
 }
 
 function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     organization: {
       create: createImpl ?? vi.fn().mockResolvedValue({ id: "org-1" }),
     },
@@ -33,7 +51,7 @@ function createFakePrisma(createImpl?: ReturnType<typeof vi.fn>) {
       create: vi.fn().mockResolvedValue({ id: "member-1" }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
-  };
+  });
   return prisma;
 }
 
@@ -108,12 +126,12 @@ describe("OrganizationsService", () => {
 });
 
 function createFakePrismaForVerifyDgi(organization: any) {
-  return {
+  return auClientScope({
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(organization),
       update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...organization, ...data })),
     },
-  };
+  });
 }
 
 describe("OrganizationsService — vérification DGI (B2)", () => {
@@ -170,7 +188,7 @@ function createFakePrismaForAssisted(overrides?: { isCommercialAgent?: boolean; 
   let organizationCreateCalls = 0;
   const collisions = overrides?.accountCodeCollisions ?? 0;
 
-  const prisma: any = {
+  const prisma: any = auClientScope({
     user: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "agent-1", isCommercialAgent: overrides?.isCommercialAgent ?? true }),
       create: vi.fn().mockResolvedValue({ id: "merchant-1" }),
@@ -197,7 +215,7 @@ function createFakePrismaForAssisted(overrides?: { isCommercialAgent?: boolean; 
       create: vi.fn().mockResolvedValue({ id: "session-1" }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
-  };
+  });
   return prisma;
 }
 
@@ -305,9 +323,9 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
 
 describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23, finding #8)", () => {
   it("révoque l'AssistedSession active entre l'agent et l'organisation", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-    };
+    });
     const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await service.revokeAssistedSession("org-1", "agent-1");
@@ -319,9 +337,9 @@ describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23,
   });
 
   it("échoue proprement si aucune AssistedSession active ne correspond (déjà révoquée ou jamais existante)", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       assistedSession: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-    };
+    });
     const service = new OrganizationsService(prisma, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
     await expect(service.revokeAssistedSession("org-1", "agent-1")).rejects.toThrow(/Aucune AssistedSession/);
@@ -329,7 +347,7 @@ describe("OrganizationsService.revokeAssistedSession (Security Audit 2026-08-23,
 });
 
 function createFakePrismaForVerifiedPaymentRatio(totalSum: bigint | null, verifiedSum: bigint | null) {
-  return {
+  return auClientScope({
     payment: {
       // aggregate() appelé deux fois : une fois sans filtre method (total), une fois
       // avec method:"payment_link" (vérifié) — on distingue via la présence du filtre.
@@ -337,7 +355,7 @@ function createFakePrismaForVerifiedPaymentRatio(totalSum: bigint | null, verifi
         Promise.resolve({ _sum: { amount: where.method ? verifiedSum : totalSum } }),
       ),
     },
-  };
+  });
 }
 
 describe("OrganizationsService.getVerifiedPaymentRatio (E8, ADR-093)", () => {
@@ -389,7 +407,7 @@ const APIP_DTO = {
 };
 
 function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     organization: {
       create: createImpl ?? vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
@@ -397,7 +415,7 @@ function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>
     // A3 — atomicité création+provisionnement, même précédent que create()/
     // createAssisted() : jamais une organisation sans clé.
     $transaction: vi.fn((callback: any) => callback(prisma)),
-  };
+  });
   return prisma;
 }
 
@@ -470,14 +488,14 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
   describe("listMine", () => {
     it("retourne les organisations dont l'utilisateur est membre actif, avec son rôle sur chacune", async () => {
-      const prisma: any = {
+      const prisma: any = auClientScope({
         organizationMember: {
           findMany: vi.fn().mockResolvedValue([
             { role: "owner", organization: { id: "org-1", name: "Boutique Aissatou" } },
             { role: "cashier", organization: { id: "org-2", name: "Restaurant Le Damier" } },
           ]),
         },
-      };
+      });
       const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.listMine("user-1");
@@ -492,13 +510,13 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
     });
 
     it("ne sélectionne jamais bankAccountDetails/chiffreAffairesBrutDeclare ni la config anti-fraude interne (Quality Audit 2026-08-23, finding #5)", async () => {
-      const prisma: any = {
+      const prisma: any = auClientScope({
         organizationMember: {
           findMany: vi.fn().mockResolvedValue([
             { role: "cashier", organization: { id: "org-1", name: "Boutique Aissatou" } },
           ]),
         },
-      };
+      });
       const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       await service.listMine("user-1");
@@ -529,7 +547,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
         commissionBypassLevel: "level_1_flagged",
         commissionBypassProofThresholdOverrideGnf: null,
       };
-      const prisma: any = {
+      const prisma: any = auClientScope({
         organizationMember: {
           findMany: vi.fn().mockImplementation(({ select }: any) => {
             const orgSelect = select.organization.select;
@@ -539,7 +557,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
             return Promise.resolve([{ role: "cashier", organization: filteredOrganization }]);
           }),
         },
-      };
+      });
       const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.listMine("user-1");
@@ -553,7 +571,7 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
     });
 
     it("ne retourne jamais un membership révoqué (filtré côté requête, pas côté application)", async () => {
-      const prisma: any = { organizationMember: { findMany: vi.fn().mockResolvedValue([]) } };
+      const prisma: any = auClientScope({ organizationMember: { findMany: vi.fn().mockResolvedValue([]) } });
       const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.listMine("user-1");
@@ -567,9 +585,9 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
   describe("findOneDetail", () => {
     it("retourne l'organisation demandée par id", async () => {
-      const prisma: any = {
+      const prisma: any = auClientScope({
         organization: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", name: "Boutique Aissatou" }) },
-      };
+      });
       const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
 
       const result = await service.findOneDetail("org-1");
@@ -581,11 +599,11 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
   describe("listAuditLog — journal d'audit en lecture seule (G4, ADR-097)", () => {
     function createFakePrismaForAuditLog() {
-      return {
+      return auClientScope({
         invoiceEvent: {
           findMany: vi.fn().mockResolvedValue([]),
         },
-      };
+      });
     }
 
     it("scope les événements aux factures de l'organisation demandée", async () => {
@@ -650,7 +668,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
   function createFakePrismaForInvite(
     opts: { userPhone?: any; existingMembership?: any; organization?: any; memberCount?: number } = {},
   ) {
-    return {
+    return auClientScope({
       userPhone: {
         // "userPhone" in opts, jamais ?? : le test "téléphone sans compte" passe
         // explicitement null, qu'un ?? traiterait à tort comme absent (null est
@@ -670,7 +688,7 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(opts.organization ?? { id: "org-1", commercialTier: "pro" }),
       },
-    };
+    });
   }
 
   it("crée un OrganizationMember tax_controller_readonly pour un utilisateur déjà inscrit", async () => {
@@ -743,14 +761,14 @@ describe("OrganizationsService.inviteMember (F14, ADR-104)", () => {
 
 describe("OrganizationsService.inviteMember — restriction admin/approver au owner (Security Audit 2026-08-23, finding #12)", () => {
   function createFakePrismaForInviteRestriction(requesterRole: string | null) {
-    return {
+    return auClientScope({
       userPhone: { findUnique: vi.fn().mockResolvedValue({ userId: "user-invite-1" }) },
       organizationMember: {
         // Distingue la vérification du DEMANDEUR (son propre membership, userId
         // variable selon le test) de celle de L'INVITÉ (toujours "user-invite-1",
         // doit rester null pour ne jamais déclencher le garde "déjà membre").
         findUnique: vi.fn().mockImplementation(({ where }: any) => {
-          const { userId } = where.organizationId_userId;
+          const { userId } = where;
           if (userId === "user-invite-1") {
             return Promise.resolve(null);
           }
@@ -767,7 +785,7 @@ describe("OrganizationsService.inviteMember — restriction admin/approver au ow
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "enterprise" }),
       },
-    };
+    });
   }
 
   it("refuse qu'un admin invite un pair admin", async () => {
@@ -805,7 +823,7 @@ describe("OrganizationsService.inviteMember — restriction admin/approver au ow
     await service.inviteMember("org-1", { msisdn: "+224612345678", role: "cashier" }, "user-admin-requester");
 
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalledWith(
-      expect.objectContaining({ where: { organizationId_userId: { organizationId: "org-1", userId: "user-admin-requester" } } }),
+      expect.objectContaining({ where: { organizationId: "org-1", userId: "user-admin-requester" } }),
     );
   });
 });
@@ -814,7 +832,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
   function createFakePrismaForInvite(
     opts: { organization?: any; memberCount?: number } = {},
   ) {
-    return {
+    return auClientScope({
       userPhone: {
         findUnique: vi.fn().mockResolvedValue({ userId: "user-invite-1" }),
       },
@@ -831,7 +849,7 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(opts.organization ?? { id: "org-1", commercialTier: "pro" }),
       },
-    };
+    });
   }
 
   it("refuse d'assigner inventory_manager en Freemium (nécessite Starter+)", async () => {
@@ -892,12 +910,12 @@ describe("OrganizationsService.inviteMember — palier commercial (H1, Grille §
 
 describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
   function createFakePrismaForUpgrade(organization: any) {
-    return {
+    return auClientScope({
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(organization),
         update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...organization, ...data })),
       },
-    };
+    });
   }
 
   it("change commercialTier vers le palier demandé", async () => {
