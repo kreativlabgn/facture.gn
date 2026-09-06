@@ -204,6 +204,7 @@ export class BankReconciliationService {
         );
         const recovered = await this.paymentsService.recordBankTransferPayment(
           invoiceId,
+          organizationId,
           { amount: transaction.amountCentimes },
           `bank-reconciliation:${transactionId}`,
         );
@@ -222,6 +223,7 @@ export class BankReconciliationService {
     try {
       payment = await this.paymentsService.recordBankTransferPayment(
         invoiceId,
+        organizationId,
         { amount: transaction.amountCentimes },
         `bank-reconciliation:${transactionId}`,
       );

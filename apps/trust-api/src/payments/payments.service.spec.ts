@@ -1,5 +1,24 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose
+// le GUC via `$executeRaw` en tête des transactions interactives. Le vrai client
+// offre les deux ; un faux qui ne les offre pas ne teste pas le service migré, il
+// plante dessus. `$extends` rend le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées ; `$executeRaw` est
+// inerte (la pose réelle du set_config est couverte par packages/db rls.spec.ts).
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { PaymentsService } from "./payments.service";
 
 // null par défaut = aucun lien de paiement généré (cas le plus courant en test
@@ -42,7 +61,7 @@ function createFakePrisma(
   const paymentsByIdempotencyKey = new Map<string, any>();
   let nextPaymentId = 1;
 
-  const prisma: any = {
+  const prisma: any = auClientScope({
     payment: {
       findUnique: vi.fn(({ where }: any) =>
         Promise.resolve(paymentsByIdempotencyKey.get(where.idempotencyKey) ?? null),
@@ -100,7 +119,7 @@ function createFakePrisma(
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "freemium", ...organizationOverrides }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
-  };
+  });
   return prisma;
 }
 
@@ -114,7 +133,7 @@ describe("PaymentsService — encaissement cash", () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-key-1");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-1");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(0n);
@@ -126,7 +145,7 @@ describe("PaymentsService — encaissement cash", () => {
     const prisma = createFakePrisma({ amountDue: 2_000_000n, amountPaid: 500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-key-2");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-2");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(500_000n);
@@ -138,8 +157,8 @@ describe("PaymentsService — encaissement cash", () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 700_000n, method: "cash" as const }, "idem-key-a");
-    await service.recordCashPayment("inv-1", { amount: 300_000n, method: "cash" as const }, "idem-key-b");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 700_000n, method: "cash" as const }, "idem-key-a");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 300_000n, method: "cash" as const }, "idem-key-b");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountPaid).toBe(1_000_000n);
@@ -155,30 +174,31 @@ describe("PaymentsService — encaissement cash", () => {
     const prisma = createFakePrisma({ status: "draft" });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-4")).rejects.toThrow(ConflictException);
+    await expect(service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-4")).rejects.toThrow(ConflictException);
   });
 
   it("refuse un paiement sur une facture voided", async () => {
     const prisma = createFakePrisma({ status: "voided" });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-5")).rejects.toThrow(ConflictException);
+    await expect(service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-5")).rejects.toThrow(ConflictException);
   });
 
   it("refuse un paiement sur une facture introuvable", async () => {
     const prisma = createFakePrisma();
     prisma.invoice.findUnique = vi.fn().mockResolvedValue(null);
+    prisma.invoice.findFirst = prisma.invoice.findUnique; // le service lit par findFirst (règle RLS)
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await expect(service.recordCashPayment("inv-1", cashDto, "idem-key-6")).rejects.toThrow(NotFoundException);
+    await expect(service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-6")).rejects.toThrow(NotFoundException);
   });
 
   it("un replay avec le même idempotencyKey renvoie le paiement déjà créé, ne recrée rien", async () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    const first = await service.recordCashPayment("inv-1", cashDto, "idem-key-replay");
-    const second = await service.recordCashPayment("inv-1", cashDto, "idem-key-replay");
+    const first = await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-replay");
+    const second = await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-replay");
 
     expect(second).toEqual(first);
     const invoice = await prisma.invoice.findUnique();
@@ -197,9 +217,10 @@ describe("PaymentsService — encaissement cash", () => {
       .fn()
       .mockResolvedValueOnce(null) // premier lookup : rien trouvé, on tente de créer
       .mockResolvedValueOnce(existingPayment); // second lookup après l'échec : la course concurrente l'a créé entre-temps
+    prisma.payment.findFirst = prisma.payment.findUnique; // le service lit par findFirst (règle RLS)
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    const result = await service.recordCashPayment("inv-1", cashDto, "idem-key-race");
+    const result = await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-race");
 
     expect(result).toBe(existingPayment);
   });
@@ -208,7 +229,7 @@ describe("PaymentsService — encaissement cash", () => {
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-key-7");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-7");
 
     expect(prisma.payment.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -223,7 +244,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 1_300_000n, method: "cash" as const }, "idem-key-overpaid");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 1_300_000n, method: "cash" as const }, "idem-key-overpaid");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(0n);
@@ -236,7 +257,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 1_000_000n, method: "cash" as const }, "idem-key-exact");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 1_000_000n, method: "cash" as const }, "idem-key-exact");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(0n);
@@ -248,7 +269,7 @@ describe("PaymentsService — trop-perçu cash (C14)", () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 400_000n, method: "cash" as const }, "idem-key-partiel");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 400_000n, method: "cash" as const }, "idem-key-partiel");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(600_000n);
@@ -292,7 +313,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordCashPayment("inv-1", { amount: 150_000_000n, method: "cash" as const }, "idem-proof-1"),
+      service.recordCashPayment("inv-1", "org-1", { amount: 150_000_000n, method: "cash" as const }, "idem-proof-1"),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -302,6 +323,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
 
     const result = await service.recordCashPayment(
       "inv-1",
+      "org-1",
       {
         amount: 150_000_000n,
         method: "cash" as const,
@@ -325,7 +347,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordCashPayment("inv-1", { amount: 60_000_000n, method: "cash" as const }, "idem-proof-3"),
+      service.recordCashPayment("inv-1", "org-1", { amount: 60_000_000n, method: "cash" as const }, "idem-proof-3"),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -335,6 +357,7 @@ describe("PaymentsService — seuil de preuve effectif par organisation (G3, ADR
 
     const result = await service.recordCashPayment(
       "inv-1",
+      "org-1",
       { amount: 50_000_000n, method: "cash" as const },
       "idem-proof-4",
     );
@@ -350,6 +373,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
 
     await service.recordCashPayment(
       "inv-1",
+      "org-1",
       {
         amount: 150_000_000n,
         method: "cash" as const,
@@ -378,7 +402,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
     const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: "client-1" }, 3);
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-loop");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 123_456n, method: "cash" as const }, "idem-key-loop");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: {
@@ -395,7 +419,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
     const prisma = createFakePrisma({ amountDue: 5_000_000n, customerId: null }, 5);
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 123_456n, method: "cash" as const }, "idem-key-no-client");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 123_456n, method: "cash" as const }, "idem-key-no-client");
 
     // Aucun des appels payment.count() (org-wide G3 inclus) ne filtre jamais par
     // customerId — seule la boucle client/montant (G1) le ferait, et n'est jamais
@@ -410,7 +434,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    const result = await service.recordCashPayment("inv-1", cashDto, "idem-key-normal");
+    const result = await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-normal");
 
     expect(result).toBeDefined();
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
@@ -423,6 +447,7 @@ describe("PaymentsService — détection de patterns d'anomalie cash (G1, ADR-03
 
     const result = await service.recordCashPayment(
       "inv-1",
+      "org-1",
       { amount: 123_456n, method: "cash" as const },
       "idem-key-detection-failure",
     );
@@ -456,7 +481,7 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
       customerId: null,
     };
 
-    const prisma: any = {
+    const prisma: any = auClientScope({
       payment: {
         findUnique: vi.fn(() => Promise.resolve(null)),
         create: vi.fn(({ data }: any) => Promise.resolve({ id: "payment-1", ...data })),
@@ -491,7 +516,7 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
           .mockResolvedValue({ id: "org-1", commercialTier: "freemium", commissionBypassProofThresholdOverrideGnf: null }),
       },
       $transaction: vi.fn((callback: any) => callback(prisma)),
-    };
+    });
     return prisma;
   }
 
@@ -504,7 +529,7 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
     });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-drop");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-drop");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -522,7 +547,7 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
     });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-no-drop");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-no-drop");
 
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
@@ -536,7 +561,7 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
     });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-never-converted");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-never-converted");
 
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
@@ -550,7 +575,7 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
     });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-no-prior");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 100_000n, method: "cash" as const }, "idem-ratio-no-prior");
 
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
@@ -570,10 +595,15 @@ function createFakePrismaForDeposit(
   };
   let nextPaymentId = 1;
 
-  const prisma: any = {
+  const prisma: any = auClientScope({
     payment: {
       findUnique: vi.fn().mockResolvedValue(null),
-      findFirst: vi.fn().mockResolvedValue(existingDeposit),
+      // Deux lectures findFirst distinctes passent ici : la clé d'idempotence
+      // (aucun paiement rejoué) et l'arrhes déjà enregistrée. Un mock figé
+      // répondrait la même chose aux deux et rendrait le test faux.
+      findFirst: vi.fn(({ where }: any) =>
+        Promise.resolve(where?.depositType === "arrhes" ? existingDeposit : null),
+      ),
       create: vi.fn().mockImplementation(({ data }: any) =>
         Promise.resolve({ id: `payment-${nextPaymentId++}`, ...data }),
       ),
@@ -591,7 +621,7 @@ function createFakePrismaForDeposit(
         .mockResolvedValue({ id: "org-1", commissionBypassProofThresholdOverrideGnf: null, ...organizationOverrides }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
-  };
+  });
   return prisma;
 }
 
@@ -603,7 +633,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-1"),
+      service.recordDepositPayment("proforma-1", "org-1", depositDto, "idem-deposit-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -612,7 +642,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-quote"),
+      service.recordDepositPayment("proforma-1", "org-1", depositDto, "idem-deposit-quote"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -621,7 +651,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-2"),
+      service.recordDepositPayment("proforma-1", "org-1", depositDto, "idem-deposit-2"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -629,7 +659,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const prisma = createFakePrismaForDeposit();
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    const payment = await service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-3");
+    const payment = await service.recordDepositPayment("proforma-1", "org-1", depositDto, "idem-deposit-3");
 
     expect(payment.depositType).toBe("arrhes");
     expect(payment.method).toBe("cash");
@@ -641,7 +671,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-4"),
+      service.recordDepositPayment("proforma-1", "org-1", depositDto, "idem-deposit-4"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -650,7 +680,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordDepositPayment("proforma-1", { amount: 150_000_000n }, "idem-deposit-proof"),
+      service.recordDepositPayment("proforma-1", "org-1", { amount: 150_000_000n }, "idem-deposit-proof"),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -669,7 +699,7 @@ describe("PaymentsService — arrhes sur proforma (C5, ADR-034)", () => {
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordDepositPayment("proforma-1", depositDto, "idem-deposit-race"),
+      service.recordDepositPayment("proforma-1", "org-1", depositDto, "idem-deposit-race"),
     ).rejects.toThrow(ConflictException);
   });
 });
@@ -739,6 +769,7 @@ describe("PaymentsService — confirmation de paiement provider (C2 Phase 2b, ap
   it("refuse un paiement sur une facture introuvable", async () => {
     const prisma = createFakePrisma();
     prisma.invoice.findUnique = vi.fn().mockResolvedValue(null);
+    prisma.invoice.findFirst = prisma.invoice.findUnique; // le service lit par findFirst (règle RLS)
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(service.recordProviderPayment("inv-1", providerDto)).rejects.toThrow(NotFoundException);
@@ -750,7 +781,7 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-1");
+    await service.recordBankTransferPayment("inv-1", "org-1", { amount: 1_500_000n }, "idem-bt-1");
 
     const invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(0n);
@@ -768,7 +799,7 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
     await expect(
-      service.recordBankTransferPayment("inv-1", { amount: 1_300_000n }, "idem-bt-2"),
+      service.recordBankTransferPayment("inv-1", "org-1", { amount: 1_300_000n }, "idem-bt-2"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -776,8 +807,8 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
     const prisma = createFakePrisma({ amountDue: 1_500_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    const first = await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-replay");
-    const second = await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-bt-replay");
+    const first = await service.recordBankTransferPayment("inv-1", "org-1", { amount: 1_500_000n }, "idem-bt-replay");
+    const second = await service.recordBankTransferPayment("inv-1", "org-1", { amount: 1_500_000n }, "idem-bt-replay");
 
     expect(second).toEqual(first);
     const invoice = await prisma.invoice.findUnique();
@@ -788,7 +819,7 @@ describe("PaymentsService — encaissement par virement bancaire (C3, ADR-052)",
     const prisma = createFakePrisma({ amountDue: 150_000_000n });
     const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordBankTransferPayment("inv-1", { amount: 150_000_000n }, "idem-bt-3");
+    await service.recordBankTransferPayment("inv-1", "org-1", { amount: 150_000_000n }, "idem-bt-3");
 
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
@@ -806,7 +837,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-relink-1");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-relink-1");
 
     // 500 000 + commission freemium 2,1% (10 500) = 510 500 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
@@ -814,7 +845,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     );
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "inv-1", status: "partially_paid" },
+        where: { id: "inv-1", organizationId: "org-1", status: "partially_paid" },
         data: expect.objectContaining({
           paymentLinkUrl: "https://pay.facture.gn/solde-restant",
           paymentLinkId: "djomy-ref-solde",
@@ -828,7 +859,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-relink-2");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-relink-2");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -842,7 +873,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-relink-3");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-relink-3");
 
     expect(paymentLinkClient.tryGenerate).not.toHaveBeenCalled();
   });
@@ -852,7 +883,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     const paymentLinkClient = createFakePaymentLinkClient(null);
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    const payment = await service.recordCashPayment("inv-1", cashDto, "idem-relink-4");
+    const payment = await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-relink-4");
 
     expect(payment).toBeDefined();
     const invoice = await prisma.invoice.findUnique();
@@ -864,7 +895,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     const paymentLinkClient = createFakePaymentLinkClient(relinkResult);
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordBankTransferPayment("inv-1", { amount: 1_500_000n }, "idem-relink-5");
+    await service.recordBankTransferPayment("inv-1", "org-1", { amount: 1_500_000n }, "idem-relink-5");
 
     // 500 000 + commission freemium 2,1% (10 500) = 510 500 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
@@ -884,7 +915,7 @@ describe("PaymentsService — nouveau lien pour le solde restant après paiement
     };
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", cashDto, "idem-relink-race");
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-relink-race");
 
     // updateMany n'a rien appliqué (count: 0, le statut n'est plus partially_paid)
     // et l'InvoiceEvent n'a jamais été écrit — jamais une trace d'audit mensongère.
@@ -921,12 +952,12 @@ describe("PaymentsService — mixer les modes de paiement sur une même facture 
     const paymentLinkClient = createFakePaymentLinkClient();
     const service = new PaymentsService(prisma as any, paymentLinkClient as any, createFakeCommissionBypassEscalation() as any);
 
-    await service.recordCashPayment("inv-1", { amount: 500_000n, method: "cash" as const }, "idem-mix-cash");
+    await service.recordCashPayment("inv-1", "org-1", { amount: 500_000n, method: "cash" as const }, "idem-mix-cash");
     let invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(1_000_000n);
     expect(invoice.status).toBe("partially_paid");
 
-    await service.recordBankTransferPayment("inv-1", { amount: 500_000n }, "idem-mix-bt");
+    await service.recordBankTransferPayment("inv-1", "org-1", { amount: 500_000n }, "idem-mix-bt");
     invoice = await prisma.invoice.findUnique();
     expect(invoice.amountDue).toBe(500_000n);
     expect(invoice.status).toBe("partially_paid");

@@ -291,6 +291,7 @@ describe("BankReconciliationService.confirmMatch", () => {
 
     expect(payments.recordBankTransferPayment).toHaveBeenCalledWith(
       "inv-1",
+      ORG,
       { amount: 1_500_000n },
       `bank-reconciliation:${txId}`,
     );
