@@ -69,7 +69,11 @@ export class CustomersService {
   async create(dto: CreateCustomerDto) {
     return this.prisma.$transaction(async (tx) => {
       if (dto.phone) {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${dto.organizationId}:${dto.phone}`}))`;
+        // $executeRaw et non $queryRaw : pg_advisory_xact_lock() renvoie void, et
+        // $queryRaw tente de désérialiser les colonnes du résultat — « Failed to
+        // deserialize column of type 'void' », donc un 500 systématique. Même
+        // raison que le set_config() de packages/db/src/rls.ts.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${dto.organizationId}:${dto.phone}`}))`;
       }
 
       const existingMatch = dto.phone
