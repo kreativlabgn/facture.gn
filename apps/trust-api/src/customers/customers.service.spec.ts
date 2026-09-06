@@ -1,11 +1,49 @@
 import { ForbiddenException } from "@nestjs/common";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Tous les faux prisma de ce fichier passent par ici : organizationScopedClient()
+// appelle `$extends`, et setOrganizationScope() appelle `$executeRaw` dans les
+// transactions interactives. Le vrai client porte les deux ; un faux qui ne les
+// porte pas ne teste pas le service migré, il plante dessus.
+//
+// `$extends` rend le client LUI-MÊME : les mocks de modèle restent partagés,
+// ce qui garde lisibles les assertions existantes sur les arguments. La
+// discrimination scopé/non-scopé, elle, est couverte côté invoices.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  // Les méthodes migrées appellent findFirstOrThrow : leur `where` porte deux
+  // champs ({ id, organizationId }), ce qui n'est plus une clé unique. On adosse
+  // l'un à l'autre sur chaque modèle du faux — les deux désignent la même
+  // lecture, et les assertions existantes sur findUniqueOrThrow restent valables.
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (modele && typeof modele === "object" && modele.findUniqueOrThrow && !modele.findFirstOrThrow) {
+      modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    }
+    if (modele && typeof modele === "object" && modele.findUnique && !modele.findFirst) {
+      modele.findFirst = modele.findUnique;
+    }
+    // Les écritures migrées passent d'update/delete (par id, clé unique) à
+    // updateMany/deleteMany, seules capables de porter le filtre organisation.
+    // Ajoutés uniquement là où une écriture était DÉJÀ prévue : on ne fabrique
+    // pas de méthode sur un faux dont le rôle est de prouver qu'on n'écrit pas.
+    if (modele && typeof modele === "object" && modele.update && !modele.updateMany) {
+      modele.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    }
+    if (modele && typeof modele === "object" && modele.delete && !modele.deleteMany) {
+      modele.deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    }
+  }
+  return prisma;
+}
 import { CustomersService } from "./customers.service";
 
 function createFakePrisma(
   overrides: { customer?: any; invoice?: any; publicBuyerAccount?: any } = {},
 ) {
-  const prisma: any = {
+  const prisma: any = auClientScope({
     // Cross-Story Audit 2026-08-24, finding #3 — create() englobe désormais
     // findFirst+create dans une transaction ; ce helper générique (utilisé par
     // create()/findOneWithBalance()/flagPublicEntity()) doit donc lui aussi
@@ -46,8 +84,8 @@ function createFakePrisma(
       findUnique: vi.fn().mockResolvedValue({ id: "pba-1", name: "Ministère des Finances" }),
       ...overrides.publicBuyerAccount,
     },
-  };
-  return prisma;
+  });
+  return auClientScope(prisma);
 }
 
 describe("CustomersService — création (C6, ADR-039)", () => {
@@ -87,7 +125,7 @@ describe("CustomersService — création (C6, ADR-039)", () => {
 describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-038)", () => {
   function createFakePrismaForCreate(opts: { existingMatch?: any } = {}) {
     let createCallCount = 0;
-    const prisma: any = {
+    const prisma: any = auClientScope({
       // Cross-Story Audit 2026-08-24, finding #3 — create() englobe désormais
       // findFirst+create dans une transaction : callback(prisma) réutilise
       // directement les mêmes mocks customer.findFirst/create (tx === prisma
@@ -124,8 +162,8 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
         update: vi.fn(),
         delete: vi.fn(),
       },
-    };
-    return prisma;
+    });
+    return auClientScope(prisma);
   }
 
   it("pose possibleDuplicateOf quand le téléphone matche un client déjà en base de l'organisation", async () => {
@@ -205,7 +243,11 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
     // Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) — aucun
     // téléphone, rien à sérialiser : le verrou n'a de sens que pour la clé de
     // dédoublonnage (organizationId+phone), jamais posé quand elle n'existe pas.
-    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    // $executeRaw sert maintenant DEUX choses : le verrou consultatif et le
+    // set_config du scope RLS. L'assertion porte donc sur le SQL, pas sur le
+    // nombre d'appels — le scope, lui, est posé à chaque transaction.
+    const sqlPosé = prisma.$executeRaw.mock.calls.map((appel: any[]) => String(appel[0]?.[0] ?? appel[0]));
+    expect(sqlPosé.some((sql: string) => sql.includes("pg_advisory_xact_lock"))).toBe(false);
     expect(prisma.customer.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ possibleDuplicateOf: null }),
     });
@@ -227,6 +269,13 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
       let releaseLock: (() => void) | undefined;
       const tx: any = {
         $executeRaw: vi.fn(async (_strings: TemplateStringsArray, key: string) => {
+          // setOrganizationScope() passe par le MÊME $executeRaw, mais avec un
+          // objet Prisma.Sql en argument unique — jamais un template balisé.
+          // Sans cette distinction, poser le scope RLS prendrait le verrou
+          // consultatif sur la clé `undefined` et sérialiserait tout.
+          if (key === undefined) {
+            return 1;
+          }
           const previous = locks.get(key) ?? Promise.resolve();
           let release!: () => void;
           const mine = new Promise<void>((resolve) => {
@@ -268,7 +317,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
   // signal E3 est maintenant posé de façon fiable sous course réelle.
   it("Cross-Story Audit 2026-08-24, finding #3 — sous deux create() réellement concurrents du même téléphone, le verrou consultatif sérialise et pose correctement le signal chez le second", async () => {
     const { $transaction, customers } = createFakeAdvisoryLockPrisma();
-    const prisma: any = { $transaction };
+    const prisma: any = auClientScope({ $transaction });
     const service = new CustomersService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
@@ -294,7 +343,7 @@ describe("CustomersService — dédoublonnage à la création unitaire (E3, ADR-
 
   it("Cross-Story Audit 2026-08-24, finding #3 (verrou consultatif) — deux create() concurrents pour des téléphones DIFFÉRENTS ne se bloquent jamais l'un l'autre", async () => {
     const { $transaction, customers } = createFakeAdvisoryLockPrisma();
-    const prisma: any = { $transaction };
+    const prisma: any = auClientScope({ $transaction });
     const service = new CustomersService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
@@ -318,7 +367,7 @@ describe("CustomersService — solde calculé à la volée (C6, ADR-039)", () =>
     });
     const service = new CustomersService(prisma as any);
 
-    const result = await service.findOneWithBalance("cust-1");
+    const result = await service.findOneWithBalance("cust-1", "org-1");
 
     expect(result.runningBalance).toBe(0n);
   });
@@ -329,10 +378,10 @@ describe("CustomersService — solde calculé à la volée (C6, ADR-039)", () =>
     });
     const service = new CustomersService(prisma as any);
 
-    const result = await service.findOneWithBalance("cust-1");
+    const result = await service.findOneWithBalance("cust-1", "org-1");
 
     expect(prisma.invoice.aggregate).toHaveBeenCalledWith({
-      where: { customerId: "cust-1", status: { in: ["issued", "partially_paid"] } },
+      where: { customerId: "cust-1", organizationId: "org-1", status: { in: ["issued", "partially_paid"] } },
       _sum: { amountDue: true },
     });
     expect(result.runningBalance).toBe(750_000n);
@@ -354,10 +403,10 @@ describe("CustomersService — écran détail, résolution du nom du doublon can
     });
     const service = new CustomersService(prisma as any);
 
-    const result: any = await service.findOneWithBalance("cust-1");
+    const result: any = await service.findOneWithBalance("cust-1", "org-1");
 
     expect(prisma.customer.findUniqueOrThrow).toHaveBeenCalledWith({
-      where: { id: "cust-1" },
+      where: { id: "cust-1", organizationId: "org-1" },
       include: { duplicateOf: { select: { id: true, name: true } } },
     });
     expect(result.duplicateOf).toEqual({ id: "cust-existant", name: "Boutique Fanta" });
@@ -377,7 +426,7 @@ describe("CustomersService — écran détail, résolution du nom du doublon can
     });
     const service = new CustomersService(prisma as any);
 
-    const result: any = await service.findOneWithBalance("cust-1");
+    const result: any = await service.findOneWithBalance("cust-1", "org-1");
 
     expect(result.duplicateOf).toBeNull();
   });
@@ -385,14 +434,17 @@ describe("CustomersService — écran détail, résolution du nom du doublon can
 
 describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
   function createFakePrismaForMerge(canonical: any, duplicate: any, organization?: any) {
-    const tx = {
+    const tx = auClientScope({
       invoice: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
       customer: {
         delete: vi.fn().mockResolvedValue(duplicate),
+        // merge() supprime désormais par deleteMany : un delete par id seul ne
+        // peut pas porter le filtre organisation.
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: vi.fn().mockResolvedValue(canonical),
       },
-    };
-    return {
+    });
+    return auClientScope({
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(canonical),
         findUnique: vi.fn().mockResolvedValue(duplicate),
@@ -402,7 +454,7 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
       },
       $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
       __tx: tx,
-    };
+    });
   }
 
   it("réassigne toutes les factures du doublon vers le canonique puis supprime le doublon", async () => {
@@ -411,10 +463,10 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     const prisma = createFakePrismaForMerge(canonical, duplicate);
     const service = new CustomersService(prisma as any);
 
-    await service.merge("cust-1", "cust-2");
+    await service.merge("cust-1", "cust-2", "org-1");
 
     expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith({
-      where: { customerId: "cust-2" },
+      where: { customerId: "cust-2", organizationId: "org-1" },
       data: { customerId: "cust-1" },
     });
     expect(prisma.__tx.customer.delete).toHaveBeenCalledWith({ where: { id: "cust-2" } });
@@ -426,7 +478,7 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     const prisma = createFakePrismaForMerge(canonical, duplicate);
     const service = new CustomersService(prisma as any);
 
-    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(/introuvable pour cette organisation/);
+    await expect(service.merge("cust-1", "cust-2", "org-1")).rejects.toThrow(/introuvable pour cette organisation/);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -435,7 +487,7 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     const prisma = createFakePrismaForMerge(canonical, canonical);
     const service = new CustomersService(prisma as any);
 
-    await expect(service.merge("cust-1", "cust-1")).rejects.toThrow(/lui-même/);
+    await expect(service.merge("cust-1", "cust-1", "org-1")).rejects.toThrow(/lui-même/);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -444,7 +496,7 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     const prisma = createFakePrismaForMerge(canonical, null);
     const service = new CustomersService(prisma as any);
 
-    await expect(service.merge("cust-1", "cust-inconnu")).rejects.toThrow(/introuvable pour cette organisation/);
+    await expect(service.merge("cust-1", "cust-inconnu", "org-1")).rejects.toThrow(/introuvable pour cette organisation/);
   });
 
   it("rejette la fusion en Freemium (gestion client avancée réservée Pro+, H1)", async () => {
@@ -453,7 +505,7 @@ describe("CustomersService — fusion de doublons (E4, ADR-038)", () => {
     const prisma = createFakePrismaForMerge(canonical, duplicate, { id: "org-1", commercialTier: "freemium" });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(ForbiddenException);
+    await expect(service.merge("cust-1", "cust-2", "org-1")).rejects.toThrow(ForbiddenException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
@@ -464,7 +516,7 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
   // Invoice.validatedByAdministration en plus du customer), même pattern que
   // createFakePrismaForMerge() ci-dessus.
   function createFakePrismaForFlag(overrides: { publicBuyerAccount?: any } = {}) {
-    const tx = {
+    const tx = auClientScope({
       customer: {
         update: vi.fn().mockResolvedValue({
           id: "cust-1",
@@ -472,10 +524,18 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
           isPublicEntity: true,
           publicBuyerAccountId: "pba-1",
         }),
+        // flagPublicEntity() écrit par updateMany (filtre organisation) puis
+        // relit la ligne : un updateMany ne rend qu'un compteur.
+        findFirstOrThrow: vi.fn().mockResolvedValue({
+          id: "cust-1",
+          organizationId: "org-1",
+          isPublicEntity: true,
+          publicBuyerAccountId: "pba-1",
+        }),
       },
       invoice: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-    };
-    return {
+    });
+    return auClientScope({
       publicBuyerAccount: {
         findUnique: vi.fn().mockResolvedValue({ id: "pba-1", name: "Ministère des Finances" }),
         ...overrides.publicBuyerAccount,
@@ -487,14 +547,14 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
       },
       $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
       __tx: tx,
-    };
+    });
   }
 
   it("pose isPublicEntity=true et publicBuyerAccountId sur un client existant", async () => {
     const prisma = createFakePrismaForFlag();
     const service = new CustomersService(prisma as any);
 
-    const result = await service.flagPublicEntity("cust-1", "pba-1");
+    const result = await service.flagPublicEntity("cust-1", "pba-1", "org-1");
 
     expect(prisma.publicBuyerAccount.findUnique).toHaveBeenCalledWith({ where: { id: "pba-1" } });
     expect(prisma.__tx.customer.update).toHaveBeenCalledWith({
@@ -509,10 +569,10 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
     const prisma = createFakePrismaForFlag();
     const service = new CustomersService(prisma as any);
 
-    await service.flagPublicEntity("cust-1", "pba-1");
+    await service.flagPublicEntity("cust-1", "pba-1", "org-1");
 
     expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith({
-      where: { customerId: "cust-1", validatedByAdministration: true },
+      where: { customerId: "cust-1", organizationId: "org-1", validatedByAdministration: true },
       data: { validatedByAdministration: false },
     });
   });
@@ -521,7 +581,7 @@ describe("CustomersService — marquage entité publique (F16, ADR-105)", () => 
     const prisma = createFakePrismaForFlag({ publicBuyerAccount: { findUnique: vi.fn().mockResolvedValue(null) } });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.flagPublicEntity("cust-1", "pba-inconnu")).rejects.toThrow(/introuvable/);
+    await expect(service.flagPublicEntity("cust-1", "pba-inconnu", "org-1")).rejects.toThrow(/introuvable/);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
@@ -531,7 +591,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
     customer?: any;
     organization?: any;
   } = {}) {
-    return {
+    return auClientScope({
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(
           opts.customer ?? { id: "cust-1", organizationId: "org-1", creditLimit: 1_000_000n },
@@ -546,14 +606,14 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
       creditLimitChangeRequest: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "clcr-1", status: "pending", ...data })),
       },
-    };
+    });
   }
 
   it("applique la hausse immédiatement quand elle reste sous le seuil configuré de l'organisation", async () => {
     const prisma = createFakePrismaForCreditLimit();
     const service = new CustomersService(prisma as any);
 
-    const result: any = await service.proposeCreditLimit("cust-1", 2_500_000n, "user-1");
+    const result: any = await service.proposeCreditLimit("cust-1", 2_500_000n, "user-1", "org-1");
 
     expect(prisma.customer.update).toHaveBeenCalledWith({
       where: { id: "cust-1" },
@@ -567,7 +627,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
     const prisma = createFakePrismaForCreditLimit();
     const service = new CustomersService(prisma as any);
 
-    const result: any = await service.proposeCreditLimit("cust-1", 5_000_000n, "user-1");
+    const result: any = await service.proposeCreditLimit("cust-1", 5_000_000n, "user-1", "org-1");
 
     expect(prisma.customer.update).not.toHaveBeenCalled();
     expect(prisma.creditLimitChangeRequest.create).toHaveBeenCalledWith({
@@ -586,7 +646,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
     const prisma = createFakePrismaForCreditLimit();
     const service = new CustomersService(prisma as any);
 
-    const result: any = await service.proposeCreditLimit("cust-1", 100_000n, "user-1");
+    const result: any = await service.proposeCreditLimit("cust-1", 100_000n, "user-1", "org-1");
 
     expect(prisma.customer.update).toHaveBeenCalledWith({
       where: { id: "cust-1" },
@@ -603,7 +663,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
     const service = new CustomersService(prisma as any);
 
     // Hausse de 1_000_000n → 12_000_000n = +11_000_000n, au-delà du défaut (10_000_000n).
-    const result: any = await service.proposeCreditLimit("cust-1", 12_000_000n, "user-1");
+    const result: any = await service.proposeCreditLimit("cust-1", 12_000_000n, "user-1", "org-1");
 
     expect(prisma.customer.update).not.toHaveBeenCalled();
     expect(prisma.creditLimitChangeRequest.create).toHaveBeenCalled();
@@ -616,7 +676,7 @@ describe("CustomersService — proposeCreditLimit (E5, ADR-083)", () => {
     });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.proposeCreditLimit("cust-1", 2_500_000n, "user-1")).rejects.toThrow(ForbiddenException);
+    await expect(service.proposeCreditLimit("cust-1", 2_500_000n, "user-1", "org-1")).rejects.toThrow(ForbiddenException);
     expect(prisma.customer.update).not.toHaveBeenCalled();
     expect(prisma.creditLimitChangeRequest.create).not.toHaveBeenCalled();
   });
@@ -628,7 +688,7 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     updateManyCount?: number;
     customer?: any;
   } = {}) {
-    const tx = {
+    const tx = auClientScope({
       creditLimitChangeRequest: {
         updateMany: vi.fn().mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
       },
@@ -640,8 +700,8 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
           opts.customer ?? { id: "cust-1", anonymizedAt: null },
         ),
       },
-    };
-    return {
+    });
+    return auClientScope({
       creditLimitChangeRequest: {
         findUniqueOrThrow: vi.fn().mockResolvedValue(
           opts.request ?? {
@@ -656,17 +716,17 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
       },
       $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
       __tx: tx,
-    };
+    });
   }
 
   it("applique creditLimit au montant demandé et passe le statut à approved", async () => {
     const prisma = createFakePrismaForResolve();
     const service = new CustomersService(prisma as any);
 
-    await service.resolveCreditLimitRequest("clcr-1", "user-2", "approved");
+    await service.resolveCreditLimitRequest("clcr-1", "user-2", "approved", "org-1");
 
     expect(prisma.__tx.creditLimitChangeRequest.updateMany).toHaveBeenCalledWith({
-      where: { id: "clcr-1", status: "pending" },
+      where: { id: "clcr-1", organizationId: "org-1", status: "pending" },
       data: { status: "approved", resolvedAt: expect.any(Date), resolvedByUserId: "user-2" },
     });
     expect(prisma.__tx.customer.update).toHaveBeenCalledWith({
@@ -679,10 +739,10 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     const prisma = createFakePrismaForResolve();
     const service = new CustomersService(prisma as any);
 
-    await service.resolveCreditLimitRequest("clcr-1", "user-2", "rejected");
+    await service.resolveCreditLimitRequest("clcr-1", "user-2", "rejected", "org-1");
 
     expect(prisma.__tx.creditLimitChangeRequest.updateMany).toHaveBeenCalledWith({
-      where: { id: "clcr-1", status: "pending" },
+      where: { id: "clcr-1", organizationId: "org-1", status: "pending" },
       data: { status: "rejected", resolvedAt: expect.any(Date), resolvedByUserId: "user-2" },
     });
     expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
@@ -701,7 +761,7 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.resolveCreditLimitRequest("clcr-1", "user-1", "approved")).rejects.toThrow(/propre demande/);
+    await expect(service.resolveCreditLimitRequest("clcr-1", "user-1", "approved", "org-1")).rejects.toThrow(/propre demande/);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -709,7 +769,7 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     const prisma = createFakePrismaForResolve({ updateManyCount: 0 });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.resolveCreditLimitRequest("clcr-1", "user-2", "approved")).rejects.toThrow(/résolue/);
+    await expect(service.resolveCreditLimitRequest("clcr-1", "user-2", "approved", "org-1")).rejects.toThrow(/résolue/);
     expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
   });
 
@@ -719,7 +779,7 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.resolveCreditLimitRequest("clcr-1", "user-2", "approved")).rejects.toThrow(/anonymisé/i);
+    await expect(service.resolveCreditLimitRequest("clcr-1", "user-2", "approved", "org-1")).rejects.toThrow(/anonymisé/i);
     expect(prisma.__tx.customer.update).not.toHaveBeenCalled();
   });
 
@@ -729,7 +789,7 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
     });
     const service = new CustomersService(prisma as any);
 
-    await service.resolveCreditLimitRequest("clcr-1", "user-2", "rejected");
+    await service.resolveCreditLimitRequest("clcr-1", "user-2", "rejected", "org-1");
 
     expect(prisma.__tx.creditLimitChangeRequest.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "rejected" }) }),
@@ -740,7 +800,7 @@ describe("CustomersService — resolveCreditLimitRequest (E5, ADR-083)", () => {
 describe("CustomersService — importCustomers (E9, ADR-100)", () => {
   function createFakePrismaForImport(opts: { existingCustomers?: any[] } = {}) {
     let createCallCount = 0;
-    return {
+    return auClientScope({
       customer: {
         findMany: vi.fn().mockResolvedValue(opts.existingCustomers ?? []),
         create: vi.fn().mockImplementation(({ data }: any) => {
@@ -748,7 +808,7 @@ describe("CustomersService — importCustomers (E9, ADR-100)", () => {
           return Promise.resolve({ id: `cust-new-${createCallCount}`, ...data });
         }),
       },
-    };
+    });
   }
 
   it("crée toutes les lignes d'un lot valide sans doublon, possibleDuplicateOf null partout", async () => {
@@ -840,9 +900,9 @@ describe("CustomersService — importCustomers (E9, ADR-100)", () => {
 
 describe("findAllByOrganization", () => {
   it("liste les clients de l'organisation, paginés avec une limite par défaut", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       customer: { findMany: vi.fn().mockResolvedValue([{ id: "cust-1" }, { id: "cust-2" }]) },
-    };
+    });
     const service = new CustomersService(prisma as any);
 
     const result = await service.findAllByOrganization("org-1", {});
@@ -857,7 +917,7 @@ describe("findAllByOrganization", () => {
   });
 
   it("plafonne take à 100 quel que soit ce que le client demande", async () => {
-    const prisma: any = { customer: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma: any = auClientScope({ customer: { findMany: vi.fn().mockResolvedValue([]) } });
     const service = new CustomersService(prisma as any);
 
     await service.findAllByOrganization("org-1", { take: 500 });
@@ -868,14 +928,14 @@ describe("findAllByOrganization", () => {
 
 describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
   it("le dédoublonnage unitaire ignore les lignes anonymisées (anonymizedAt: null dans le where)", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       $transaction: vi.fn((cb: any) => cb(prisma)),
       $executeRaw: vi.fn().mockResolvedValue(1),
       customer: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cust-new", ...data })),
       },
-    };
+    });
     const service = new CustomersService(prisma as any);
 
     await service.create({ organizationId: "org-1", name: "Aïcha", phone: "+224620001122" } as any);
@@ -886,12 +946,12 @@ describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
   });
 
   it("le dédoublonnage à l'import ignore les lignes anonymisées", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       customer: {
         findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cust-x", ...data })),
       },
-    };
+    });
     const service = new CustomersService(prisma as any);
 
     await service.importCustomers("org-1", [{ name: "Sory", phone: "+224622334455" }]);
@@ -902,48 +962,48 @@ describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
   });
 
   it("merge() refuse un client canonique anonymisé", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: new Date() }),
         findUnique: vi.fn().mockResolvedValue({ id: "cust-2", organizationId: "org-1", anonymizedAt: null }),
       },
       $transaction: vi.fn(),
-    };
+    });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(/anonymisé/i);
+    await expect(service.merge("cust-1", "cust-2", "org-1")).rejects.toThrow(/anonymisé/i);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("merge() refuse un doublon anonymisé", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: null }),
         findUnique: vi.fn().mockResolvedValue({ id: "cust-2", organizationId: "org-1", anonymizedAt: new Date() }),
       },
       $transaction: vi.fn(),
-    };
+    });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.merge("cust-1", "cust-2")).rejects.toThrow(/anonymisé/i);
+    await expect(service.merge("cust-1", "cust-2", "org-1")).rejects.toThrow(/anonymisé/i);
   });
 
   it("flagPublicEntity() refuse un client anonymisé", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-1", anonymizedAt: new Date() }),
       },
       publicBuyerAccount: { findUnique: vi.fn().mockResolvedValue({ id: "pba-1" }) },
       $transaction: vi.fn(),
-    };
+    });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.flagPublicEntity("cust-1", "pba-1")).rejects.toThrow(/anonymisé/i);
+    await expect(service.flagPublicEntity("cust-1", "pba-1", "org-1")).rejects.toThrow(/anonymisé/i);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("proposeCreditLimit() refuse un client anonymisé", async () => {
-    const prisma: any = {
+    const prisma: any = auClientScope({
       customer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "cust-1",
@@ -955,9 +1015,9 @@ describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
       organization: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }),
       },
-    };
+    });
     const service = new CustomersService(prisma as any);
 
-    await expect(service.proposeCreditLimit("cust-1", 2_000_000n, "user-1")).rejects.toThrow(/anonymisé/i);
+    await expect(service.proposeCreditLimit("cust-1", 2_000_000n, "user-1", "org-1")).rejects.toThrow(/anonymisé/i);
   });
 });
