@@ -1,8 +1,9 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { InvoiceEventType, type CommercialTier, type PrismaClient } from "@facture-gn/db";
 import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { isUniqueConstraintViolation } from "../common/prisma-errors";
+import { ReferralsService } from "../referrals/referrals.service";
+import { isUniqueConstraintViolation, isUniqueViolation } from "../common/prisma-errors";
 import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
 import { OrganizationSigningKeyService } from "../certification/organization-signing-key.service";
 import { PendingMemberInviteService } from "../pending-member-invites/pending-member-invite.service";
@@ -71,8 +72,10 @@ const IDENTIFIANTS_ETAT = [
 
 type CollisionIdentifiant = (typeof IDENTIFIANTS_ETAT)[number];
 
-function collisionIdentifiantEtat(error: unknown): CollisionIdentifiant | null {
-  return IDENTIFIANTS_ETAT.find((identifiant) => isUniqueConstraintViolation(error, identifiant.colonne)) ?? null;
+interface IdentifiantsSoumis {
+  nif?: string | null;
+  rccm?: string | null;
+  etaxNumber?: string | null;
 }
 
 @Injectable()
@@ -83,6 +86,12 @@ export class OrganizationsService {
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly signingKeyService: OrganizationSigningKeyService,
     private readonly pendingMemberInvite: PendingMemberInviteService,
+    // Parrainage — EN DERNIÈRE POSITION et @Optional(), même précédent que
+    // InvoicesService : les tests de ce fichier construisent le service
+    // positionnellement, l'insérer plus haut décalerait tous leurs arguments.
+    // Absent, la conversion est simplement sautée. En application complète,
+    // ReferralsModule étant @Global(), le service est injecté.
+    @Optional() private readonly referrals?: ReferralsService,
   ) {}
 
   // Le créateur devient owner dans la même transaction — aucune organisation ne
@@ -93,6 +102,64 @@ export class OrganizationsService {
   // app.current_org_id sur un id inventé ferait échouer le WITH CHECK de la
   // politique org_isolation. Les deux GUC restent nuls → branche dormante du
   // prédicat, l'INSERT passe, y compris après l'étape 2 (facture_app).
+  // Quel identifiant d'État a cédé ? Sous RLS, Postgres ne le dit pas : il
+  // supprime le DETAIL de la violation d'unicité parce que la ligne en conflit
+  // appartient à une autre organisation, invisible au rôle courant. Prisma rend
+  // donc target: null (voir prisma-errors.ts). On le retrouve en RELISANT les
+  // trois valeurs soumises — sans quoi le message nommerait toujours le NIF,
+  // même quand c'est le RCCM qui est pris.
+  //
+  // LECTURES NON SCOPÉES, et c'est le fond du sujet : ces index sont GLOBAUX.
+  // L'organisation qui détient déjà l'identifiant appartient par définition à
+  // quelqu'un d'autre — scopées, ces lectures ne trouveraient rien et on
+  // renverrait un 500 là où l'utilisateur attend « ce NIF est déjà pris ».
+  // Aucune donnée ne fuit : on ne rend que le NOM DU CHAMP, jamais l'identité
+  // du détenteur.
+  //
+  // Rend null si aucune des trois valeurs n'est prise : la collision portait
+  // alors sur autre chose (account_code), et l'appelant relaie l'erreur.
+  private async collisionIdentifiantEtat(
+    error: unknown,
+    soumis: IdentifiantsSoumis,
+  ): Promise<CollisionIdentifiant | null> {
+    if (!isUniqueViolation(error)) {
+      return null;
+    }
+
+    const valeurs: Record<string, string | null | undefined> = {
+      nif: soumis.nif,
+      rccm: soumis.rccm,
+      etax_number: soumis.etaxNumber,
+    };
+
+    // Chemin nominal hors RLS (superutilisateur, ou un Prisma futur qui saurait
+    // nommer la colonne autrement) : on croit ce que dit l'erreur, sans relire.
+    const target = (error as { meta?: { target?: unknown } }).meta?.target;
+    if (Array.isArray(target)) {
+      return IDENTIFIANTS_ETAT.find((i) => target.includes(i.colonne)) ?? null;
+    }
+
+    for (const identifiant of IDENTIFIANTS_ETAT) {
+      const valeur = valeurs[identifiant.colonne];
+      if (!valeur) {
+        continue;
+      }
+      const prise = await this.prisma.organization.findFirst({
+        where:
+          identifiant.colonne === "nif"
+            ? { nif: valeur }
+            : identifiant.colonne === "rccm"
+              ? { rccm: valeur }
+              : { etaxNumber: valeur },
+        select: { id: true },
+      });
+      if (prise) {
+        return identifiant;
+      }
+    }
+    return null;
+  }
+
   async create(dto: CreateOrganizationDto, creatorUserId: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -118,7 +185,7 @@ export class OrganizationsService {
       // Les trois identifiants sont désormais uniques, pas seulement le NIF :
       // sans ce balayage, une collision sur le RCCM ou le numéro eTax
       // remonterait en 500 alors que le NIF, lui, rend un 409 propre.
-      const collision = collisionIdentifiantEtat(error);
+      const collision = await this.collisionIdentifiantEtat(error, dto);
       if (collision) {
         throw new ConflictException(`Une organisation avec ce ${collision.libelle} existe déjà`);
       }
@@ -250,7 +317,7 @@ export class OrganizationsService {
         // s'est déjà inscrite ailleurs), jamais une panne. Sans ceci elle
         // remontait en 500 — y compris pour le NIF, qui était pourtant déjà
         // unique avant ce chantier.
-        const collision = collisionIdentifiantEtat(error);
+        const collision = await this.collisionIdentifiantEtat(error, dto);
         if (collision) {
           throw new ConflictException(`Une organisation avec ce ${collision.libelle} existe déjà`);
         }
@@ -558,10 +625,18 @@ export class OrganizationsService {
   async upgradeCommercialTier(organizationId: string, tier: CommercialTier) {
     const scoped = organizationScopedClient(this.prisma, organizationId);
     await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
-    return scoped.organization.update({
+    const modifiee = await scoped.organization.update({
       where: { id: organizationId },
       data: { commercialTier: tier },
     });
+
+    // Parrainage : passer à un palier payant déclenche les primes, une seule
+    // fois (idempotence par le statut du rattachement). convertirSiEligible()
+    // NE LÈVE JAMAIS — une prime qui échoue ne doit pas défaire un changement
+    // de palier déjà acquis, qui est ce que l'utilisateur a demandé.
+    await this.referrals?.convertirSiEligible(organizationId, tier);
+
+    return modifiee;
   }
 
   // Modification de l'identité légale (nom, forme, régime, NIF, eTax, RCCM).
@@ -625,7 +700,7 @@ export class OrganizationsService {
     } catch (error) {
       // Les trois identifiants d'État sont uniques GLOBALEMENT (20260907040000) :
       // une collision doit rendre un 409 lisible, jamais le P2002 brut.
-      const collision = collisionIdentifiantEtat(error);
+      const collision = await this.collisionIdentifiantEtat(error, dto);
       if (collision) {
         throw new ConflictException(`Une organisation avec ce ${collision.libelle} existe déjà`);
       }
