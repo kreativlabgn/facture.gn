@@ -49,6 +49,17 @@ enum PreferredLanguage {
   soussou
 }
 
+// Minuscules, comme tous les enums de ce schéma (RegimeFiscal, InvoiceStatus…).
+enum DeviceStatus {
+  // Jeton émis, terminal pas encore présenté.
+  pending
+  // Enrôlé : imeiOrSerial et publicKey connus, jeton consommé.
+  active
+  // Coupé — perte, vol, remplacement. Jamais supprimé : la traçabilité des
+  // factures déjà émises par ce terminal doit rester lisible.
+  revoked
+}
+
 enum BranchType {
   boutique
   entrepot
@@ -313,6 +324,8 @@ model User {
   publicBuyerAccountMemberships PublicBuyerAccountMember[]
   apiKeysCreated                ApiKey[]                   @relation("ApiKeyCreator")
   apiKeysRevoked                ApiKey[]                   @relation("ApiKeyRevoker")
+  devicesProvisioned            Device[]                   @relation("DeviceProvisioner")
+  devicesRevoked                Device[]                   @relation("DeviceRevoker")
   pendingMemberInvitesSent      PendingMemberInvite[]      @relation("PendingMemberInviteInviter")
   pendingMemberInvitesResolved  PendingMemberInvite[]      @relation("PendingMemberInviteResolvedUser")
   fiscalPeriodClosingsMade      FiscalPeriodClosing[]
@@ -598,6 +611,7 @@ model Organization {
   pendingMemberInvites  PendingMemberInvite[]
   fiscalPeriodClosings  FiscalPeriodClosing[]
   bankTransactions      BankTransaction[]
+  devices               Device[]
 
   @@map("organization")
 }
@@ -750,6 +764,59 @@ model InvoiceSequence {
 // E1, ADR-037 — "branch sous organization, number jamais par branche" :
 // InvoiceSequence reste clé par [organizationId, year] uniquement, jamais par
 // branche — aucun changement requis là, cet invariant est déjà natif.
+// Enrôlement matériel — terminaux physiques (caisses, smartphones) émettant des
+// factures certifiées.
+//
+// DEUX SECRETS DE NATURE OPPOSÉE, à ne jamais confondre :
+//   • `enrollmentTokenHash` — secret que la PLATEFORME émet et que le terminal
+//     présente une fois pour s'enrôler. Haché (argon2id), jamais stocké en clair :
+//     même discipline qu'ApiKey.keyHash, et pour la même raison — une fuite de la
+//     table ne doit pas permettre d'enrôler un terminal pirate.
+//   • `publicKey` — clé PUBLIQUE de l'enclave du terminal. Publique par nature :
+//     stockée telle quelle, c'est elle qui permettra de vérifier ce que le
+//     terminal signe. La clé privée ne quitte jamais l'enclave et n'est donc
+//     JAMAIS reçue ni stockée ici.
+//
+// `imeiOrSerial` est @unique GLOBALEMENT, pas par organisation : un terminal
+// physique n'existe qu'une fois au monde. Deux organisations ne peuvent pas
+// enrôler le même appareil — c'est précisément ce qu'on veut empêcher (revente,
+// vol, double émission). Conséquence assumée : l'unicité se heurte au RLS à
+// l'insertion (voir DevicesService.enroll pour le traitement du conflit).
+model Device {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  // Nullable : un terminal peut être enrôlé au niveau de l'organisation avant
+  // d'être affecté à une succursale précise.
+  branchId       String?      @map("branch_id")
+  label          String
+  imeiOrSerial   String       @unique @map("imei_or_serial")
+  // Clé publique de l'enclave, en clair (Text) — voir l'en-tête du modèle.
+  publicKey      String?      @map("public_key")
+  status         DeviceStatus @default(pending)
+
+  // Jeton d'association à usage unique : haché, à durée de vie courte, consommé
+  // au premier enrôlement réussi (consumedAt) — jamais rejouable.
+  enrollmentTokenHash String    @map("enrollment_token_hash")
+  tokenExpiresAt      DateTime  @map("token_expires_at")
+  tokenConsumedAt     DateTime? @map("token_consumed_at")
+
+  provisionedByUserId String    @map("provisioned_by_user_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  enrolledAt          DateTime? @map("enrolled_at")
+  revokedAt           DateTime? @map("revoked_at")
+  revokedByUserId     String?   @map("revoked_by_user_id")
+
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  branch            Branch?      @relation(fields: [branchId], references: [id])
+  provisionedByUser User         @relation("DeviceProvisioner", fields: [provisionedByUserId], references: [id])
+  revokedByUser     User?        @relation("DeviceRevoker", fields: [revokedByUserId], references: [id])
+
+  // Le tunnel d'enrôlement cherche par empreinte de jeton, jamais par id.
+  @@index([enrollmentTokenHash])
+  @@index([organizationId, status])
+  @@map("device")
+}
+
 model Branch {
   id             String     @id @default(uuid())
   organizationId String     @map("organization_id")
@@ -762,6 +829,7 @@ model Branch {
   invoices           Invoice[]
   productStocks      ProductStock[]
   recurringTemplates RecurringInvoiceTemplate[]
+  devices            Device[]
 
   @@map("branch")
 }
