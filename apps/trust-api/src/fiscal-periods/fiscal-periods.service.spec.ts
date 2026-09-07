@@ -2,6 +2,26 @@ import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { FiscalPeriodsService } from "./fiscal-periods.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw`. Le vrai client offre les deux ; un faux qui ne les offre
+// pas ne teste pas le service migré, il plante dessus. `$extends` rend le client
+// LUI-MÊME pour que les mocks restent partagés. `$transaction` bi-forme : la forme
+// tableau est celle qu'emploie makeScopedOperation(), ce qui rend l'extension
+// rejouable — indispensable pour épingler la VALEUR du client scopé.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 const CURRENT_YEAR = new Date().getUTCFullYear();
 const CLOSABLE_YEAR = CURRENT_YEAR - 1;
 
@@ -11,7 +31,7 @@ function fakePrisma(overrides: {
   createImpl?: (args: unknown) => unknown;
   closings?: unknown[];
 } = {}) {
-  const prisma = {
+  const prisma: any = auClientScope({
     invoice: {
       aggregate: vi.fn().mockResolvedValue(
         overrides.aggregate ?? {
@@ -29,12 +49,46 @@ function fakePrisma(overrides: {
       ),
       findMany: vi.fn().mockResolvedValue(overrides.closings ?? []),
     },
-    $transaction: vi.fn((cb: (tx: unknown) => unknown) => cb(prisma)),
-  };
+    // Bi-forme : le callback interactif du service ET la forme tableau
+    // qu'emploie makeScopedOperation(), qui rend l'extension rejouable.
+    $transaction: vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma))),
+    $executeRaw: vi.fn().mockResolvedValue(1),
+  });
   return prisma;
 }
 
 describe("FiscalPeriodsService.close", () => {
+  // DOUBLE ÉPINGLAGE. Le GUC transactionnel (setOrganizationScope, posé par
+  // close()) et le client scopé (organizationScopedClient, utilisé par
+  // listByOrganization()) sont deux constructions distinctes : une assertion sur
+  // l'une ne couvre pas l'autre. Les faux `$extends` se renvoyant eux-mêmes, la
+  // valeur du client scopé n'est observable qu'en rejouant l'extension capturée.
+  it("pose app.current_org_id en tête de la transaction de clôture", async () => {
+    const prisma = fakePrisma();
+    const service = new FiscalPeriodsService(prisma as never);
+
+    await service.close("org-a-proteger", CLOSABLE_YEAR, "user-1");
+
+    const setConfig = (prisma as any).$executeRaw.mock.calls[0]?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+  });
+
+  it("pose le même scope sur le CLIENT SCOPÉ de la lecture des clôtures", async () => {
+    const prisma = fakePrisma();
+    const service = new FiscalPeriodsService(prisma as never);
+
+    await service.listByOrganization("org-a-proteger");
+
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+  });
+
+
   it("refuse de clôturer une année future", async () => {
     const service = new FiscalPeriodsService(fakePrisma() as never);
     await expect(service.close("org-1", CURRENT_YEAR + 1, "user-1")).rejects.toBeInstanceOf(ConflictException);

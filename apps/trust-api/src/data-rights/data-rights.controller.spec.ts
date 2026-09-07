@@ -21,6 +21,7 @@ describe("DataRightsController (chemin PME)", () => {
     await controller.export(
       { organizationId: "11111111-1111-1111-1111-111111111111", phone: "+224620001122" },
       { id: "usr-7" } as never,
+      "11111111-1111-1111-1111-111111111111",
     );
 
     expect(service.exportSubjectData).toHaveBeenCalledWith({
@@ -42,12 +43,13 @@ describe("DataRightsController (chemin PME)", () => {
     const service = { anonymizeCustomerById: vi.fn().mockResolvedValue({ outcome: "completed" }) };
     const controller = new DataRightsController(service as never);
 
-    await controller.anonymize("cus-1", { id: "usr-7" } as never);
+    await controller.anonymize("cus-1", { id: "usr-7" } as never, "org-1");
 
-    expect(service.anonymizeCustomerById).toHaveBeenCalledWith("cus-1", {
-      requestedByUserId: "usr-7",
-      viaOps: false,
-    });
+    expect(service.anonymizeCustomerById).toHaveBeenCalledWith(
+      "cus-1",
+      { requestedByUserId: "usr-7", viaOps: false },
+      "org-1",
+    );
   });
 });
 

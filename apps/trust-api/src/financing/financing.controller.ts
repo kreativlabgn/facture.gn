@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { chooseFinancingSchema, type ChooseFinancingDto } from "./dto/choose-financing.dto";
 import { FinancingService } from "./financing.service";
@@ -18,8 +19,8 @@ export class FinancingController {
 
   @Get("options")
   @Roles("owner", "admin")
-  getOptions(@Param("id") invoiceId: string) {
-    return this.financingService.getFinancingOptions(invoiceId);
+  getOptions(@Param("id") invoiceId: string, @CurrentOrganizationId() organizationId: string) {
+    return this.financingService.getFinancingOptions(invoiceId, organizationId);
   }
 
   @Post()
@@ -28,7 +29,8 @@ export class FinancingController {
     @Param("id") invoiceId: string,
     @Body(new ZodValidationPipe(chooseFinancingSchema)) dto: ChooseFinancingDto,
     @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
   ) {
-    return this.financingService.chooseFinancing(invoiceId, dto, user.id);
+    return this.financingService.chooseFinancing(invoiceId, dto, user.id, organizationId);
   }
 }

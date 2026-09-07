@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { untdidTypeCode } from "../invoices/untdid";
 import { legalMentionsFor } from "./legal-mentions";
@@ -47,9 +48,13 @@ export function b2gReferencesFrom(invoice: {
 export class RenderingService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
-  async renderInvoicePdf(invoiceId: string): Promise<RenderedPdf> {
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id: invoiceId },
+  // RLS (ADR-111 étape 1) — `organizationId` vient du RolesGuard de la route
+  // appelante (GET /invoices/:id/pdf et GET /invoices/:id/payments/:paymentId/receipt,
+  // toutes deux @Roles() avec la résolution "invoice" par défaut). Le moteur de
+  // rendu lui-même est plateforme, mais les données qu'il lit ne le sont pas.
+  async renderInvoicePdf(invoiceId: string, organizationId: string): Promise<RenderedPdf> {
+    const invoice = await organizationScopedClient(this.prisma, organizationId).invoice.findFirst({
+      where: { id: invoiceId, organizationId },
       include: { organization: true, customer: true, lines: true },
     });
     if (!invoice) {
@@ -98,16 +103,24 @@ export class RenderingService {
     };
   }
 
-  async renderReceiptPdf(invoiceId: string, paymentId: string): Promise<RenderedPdf> {
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id: invoiceId },
+  async renderReceiptPdf(
+    invoiceId: string,
+    paymentId: string,
+    organizationId: string,
+  ): Promise<RenderedPdf> {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const invoice = await scoped.invoice.findFirst({
+      where: { id: invoiceId, organizationId },
       include: { organization: true },
     });
     if (!invoice) {
       throw new NotFoundException(`Facture ${invoiceId} introuvable`);
     }
 
-    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    // `payment` est sous RLS par indirection (via invoice_id) : le `where` ne
+    // peut pas porter la colonne de scope, le contrôle d'appartenance à CETTE
+    // facture ci-dessous reste donc la barrière — il l'était déjà.
+    const payment = await scoped.payment.findFirst({ where: { id: paymentId } });
     // IDOR : RolesGuard a vérifié l'organisation via l':id facture, jamais que le
     // paiement appartient à CETTE facture. Un 404 (pas un 403) : on ne révèle pas
     // l'existence d'un paiement d'une autre facture.

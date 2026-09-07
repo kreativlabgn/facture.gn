@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OUTSTANDING_INVOICE_STATUSES } from "../invoices/invoice-status";
 
@@ -18,6 +19,34 @@ export interface ClientPortalOrganizationSummary {
 // OrganizationMember, l'autorisation est entièrement inline, basée sur la
 // correspondance Customer.phone ∈ numéros vérifiés de l'appelant (résolu
 // ailleurs, ClientPortalAuthService). Contrôleur : voir client-portal.controller.ts.
+//
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. Aucune route de ClientPortalController
+// ni de ClientPortalAuthController ne porte @Roles() : RolesGuard n'y résout
+// jamais d'organisation, @CurrentOrganizationId() y lèverait sur chacune. Les
+// contrôleurs restent donc inchangés, comme dans le module auth.
+//
+// Ce module est CROSS-ORGANISATION par construction : un acheteur est client de
+// plusieurs PME et le portail existe précisément pour les lui présenter côte à
+// côte. Distinction importante par rapport aux modules précédents — ici certaines
+// lectures ne sont pas « non scopables faute de scope connu », elles sont
+// « à ne JAMAIS scoper, sous peine de casser la fonctionnalité » :
+//   • listOrganizations() en entier : les trois requêtes (numéros vérifiés,
+//     clients correspondants, soldes agrégés) balaient délibérément toutes les
+//     organisations. Un GUC posé là ne renverrait qu'une seule PME.
+//   • ClientPortalOtpService.resolveLocale() : consensus de langue calculé sur
+//     TOUTES les organisations rattachées au numéro.
+//
+// Restent globaux pour la raison habituelle (table hors RLS, ou découverte du
+// scope) : `user` et `user_phone` (identité), `client_portal_otp` (ni colonne
+// organization_id ni politique — clé fonctionnelle : le msisdn), et le
+// `customer.findUnique({ id })` de listInvoices(), d'où SORT l'organisation.
+//
+// Est SCOPÉE : la seule requête du module qui s'exécute une fois l'organisation
+// connue — la liste des factures d'un client, dans listInvoices().
+//
+// Aucune transaction post-découverte dans ce module : le seul $transaction
+// (ClientPortalAuthService.resolveOrCreateUser) crée un User hors de toute
+// organisation. Aucun setOrganizationScope() n'avait donc lieu d'être posé.
 @Injectable()
 export class ClientPortalService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -28,6 +57,10 @@ export class ClientPortalService {
   // UssdAuthService/AuthService). Un seul groupBy pour le solde dû de TOUS les
   // clients trouvés (pas un aggregate par organisation en boucle — Quality Audit
   // 2026-08-23, même leçon N+1 déjà corrigée sur RevenueShareService.generate()).
+  // NON SCOPÉE de bout en bout, et c'est la RAISON D'ÊTRE de la méthode :
+  // elle doit voir toutes les organisations où ce numéro est client. Poser un
+  // GUC ici ne renverrait qu'une PME — ce ne serait pas un durcissement, ce
+  // serait une régression fonctionnelle.
   async listOrganizations(userId: string): Promise<ClientPortalOrganizationSummary[]> {
     const verifiedPhones = await this.prisma.userPhone.findMany({
       where: { userId, verifiedAt: { not: null } },
@@ -70,6 +103,11 @@ export class ClientPortalService {
   // RolesGuard : 404, pas 403, sur une ressource dont on ne veut jamais prouver
   // l'existence à qui n'y a pas droit).
   async listInvoices(userId: string, customerId: string, pagination: { take?: number; skip?: number }) {
+    // Lecture de DÉCOUVERTE, non scopée à dessein : l'organisation du client
+    // n'est connue qu'après cette ligne, elle en sort. findUnique + garde
+    // explicite (jamais un findUniqueOrThrow nu) — cette application n'a aucun
+    // ExceptionFilter, un *OrThrow non gardé remonterait en 500 au lieu du 404
+    // anti-énumération voulu ici. Ce module appliquait déjà cette discipline.
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) {
       throw new NotFoundException(`Client ${customerId} introuvable`);
@@ -86,7 +124,9 @@ export class ClientPortalService {
     const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
     const skip = pagination.skip ?? 0;
 
-    return this.prisma.invoice.findMany({
+    // L'organisation est désormais connue ET l'appartenance du client à
+    // l'appelant est prouvée : seule requête scopée du module.
+    return organizationScopedClient(this.prisma, customer.organizationId).invoice.findMany({
       where: {
         customerId: customer.id,
         organizationId: customer.organizationId,

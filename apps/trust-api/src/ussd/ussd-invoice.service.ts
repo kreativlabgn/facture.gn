@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { InvoiceCadre, OrganizationRole, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { InvoicesService } from "../invoices/invoices.service";
@@ -47,12 +48,13 @@ export class UssdInvoiceService {
       return undefined;
     }
 
-    const existing = await this.prisma.customer.findFirst({ where: { organizationId, phone } });
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const existing = await scoped.customer.findFirst({ where: { organizationId, phone } });
     if (existing) {
       return existing.id;
     }
 
-    const created = await this.prisma.customer.create({ data: { organizationId, name: phone, phone } });
+    const created = await scoped.customer.create({ data: { organizationId, name: phone, phone } });
     return created.id;
   }
 
@@ -89,7 +91,10 @@ export class UssdInvoiceService {
       // Lot D — canal *620#. Posé ici, jamais dans le DTO.
       "ussd",
     );
-    return this.invoicesService.issue(draft.id);
+    // Hors HTTP : aucun RolesGuard ne tourne ici, donc aucune organisation
+    // n'est résolue pour nous. Elle vient du paramètre d'emitInvoice(), lui-même
+    // issu de la session USSD authentifiée — c'est la source de scope de ce flux.
+    return this.invoicesService.issue(draft.id, organizationId);
   }
 
   // K3, §2.6.1 Spec USSD, décision 1 du plan — Option 6 sélectionne parmi les
@@ -100,7 +105,7 @@ export class UssdInvoiceService {
   // profondeur limitée"). Plafonné comme les autres listes USSD (canal texte
   // contraint) — une PME a rarement plus de quelques administrations clientes.
   async listPublicEntityCustomers(organizationId: string) {
-    return this.prisma.customer.findMany({
+    return organizationScopedClient(this.prisma, organizationId).customer.findMany({
       where: { organizationId, isPublicEntity: true },
       orderBy: { createdAt: "asc" },
       take: MAX_RESULTS,

@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { z } from "zod";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { InvoicesService } from "../invoices/invoices.service";
 import type { CreateRecurringTemplateDto } from "./dto/create-recurring-template.dto";
@@ -30,12 +31,17 @@ export class RecurringTemplatesService {
   // facturation (générée fraîchement à chaque appel de generate(), voir
   // InvoicesService.createDraft()) : c'est uniquement une référence de
   // comparaison pour détecter une dérive et déclencher regime_change.
+  // RLS (ADR-111 étape 1) — `recurring_invoice_template` porte organization_id
+  // en direct (org_isolation). Aucune transaction dans ce module : create() est
+  // une lecture puis une écriture, generate() délègue l'atomicité à
+  // InvoicesService.createDraft(), qui pose déjà son propre scope.
   async create(organizationId: string, dto: CreateRecurringTemplateDto) {
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: organizationId },
     });
 
-    return this.prisma.recurringInvoiceTemplate.create({
+    return scoped.recurringInvoiceTemplate.create({
       data: {
         organizationId,
         customerId: dto.customerId,
@@ -55,9 +61,14 @@ export class RecurringTemplatesService {
   // I1, ADR-056 — createDraft() (jamais dupliqué) recalcule le taux/régime
   // fiscal frais à chaque appel (C4) : "jamais figé sur le template" est
   // structurellement garanti sans rien construire de spécial ici.
-  async generate(templateId: string, requesterUserId: string) {
-    const template = await this.prisma.recurringInvoiceTemplate.findUniqueOrThrow({
-      where: { id: templateId },
+  // `organizationId` vient du RolesGuard : la route porte
+  // @OrganizationIdSource("recurring-template"), le guard a donc déjà résolu
+  // l'organisation du modèle et vérifié l'appartenance — pas d'oracle sur le
+  // *OrThrow ci-dessous, un id inconnu n'atteint jamais le service.
+  async generate(templateId: string, requesterUserId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const template = await scoped.recurringInvoiceTemplate.findFirstOrThrow({
+      where: { id: templateId, organizationId },
     });
 
     // Garde contre une double génération pour la même période — pas une
@@ -72,7 +83,7 @@ export class RecurringTemplatesService {
       }
     }
 
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: template.organizationId },
     });
 
@@ -112,7 +123,7 @@ export class RecurringTemplatesService {
     // ADR-056 — "alerte, jamais un mur silencieux" : jamais bloquant, seulement
     // une trace de revue sur la facture nouvellement générée.
     if (template.lastKnownRegimeFiscal && template.lastKnownRegimeFiscal !== organization.regimeFiscal) {
-      await this.prisma.invoiceEvent.create({
+      await scoped.invoiceEvent.create({
         data: {
           invoiceId: invoice.id,
           type: "regime_change",
@@ -122,7 +133,9 @@ export class RecurringTemplatesService {
       });
     }
 
-    await this.prisma.recurringInvoiceTemplate.update({
+    // `update` exige un `where` unique : la lecture scopée du modèle en tête de
+    // méthode est la barrière.
+    await scoped.recurringInvoiceTemplate.update({
       where: { id: templateId },
       data: { lastGeneratedAt: new Date(), lastKnownRegimeFiscal: organization.regimeFiscal },
     });

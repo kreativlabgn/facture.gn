@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
+
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { RenderingService } from "../rendering/rendering.service";
 import { createInvoiceSchema, type CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { listInvoicesQuerySchema, type ListInvoicesQueryDto } from "./dto/list-invoices-query.dto";
@@ -70,8 +72,8 @@ export class InvoicesController {
   // (lecture seule des factures) — jamais sur customers/audit-log/trust-score
   // ni sur FEC_ELIGIBLE_ROLES (export fiscal, hors périmètre d'un proche).
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
-  findOne(@Param("id") id: string) {
-    return this.invoicesService.findOne(id);
+  findOne(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.findOne(id, organizationId);
   }
 
   // Lot A — PDF de la facture certifiée. Même trio de rôles que GET /invoices/:id
@@ -79,8 +81,11 @@ export class InvoicesController {
   // params.id. 409 si la facture n'est pas encore émise (RenderingService).
   @Get(":id/pdf")
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
-  async downloadPdf(@Param("id") id: string): Promise<StreamableFile> {
-    const { pdf, filename } = await this.renderingService.renderInvoicePdf(id);
+  async downloadPdf(
+    @Param("id") id: string,
+    @CurrentOrganizationId() organizationId: string,
+  ): Promise<StreamableFile> {
+    const { pdf, filename } = await this.renderingService.renderInvoicePdf(id, organizationId);
     return new StreamableFile(pdf, {
       type: "application/pdf",
       disposition: `attachment; filename="${filename}"`,
@@ -89,22 +94,22 @@ export class InvoicesController {
 
   @Post(":id/issue")
   @Roles("owner", "admin", "cashier")
-  issue(@Param("id") id: string) {
-    return this.invoicesService.issue(id);
+  issue(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.issue(id, organizationId);
   }
 
   @Post(":id/void")
   @Roles("owner", "admin")
-  void(@Param("id") id: string) {
-    return this.invoicesService.void(id);
+  void(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.void(id, organizationId);
   }
 
   // Même trio que /issue (owner/admin/cashier) — portée similaire, transforme un
   // document en facture réellement facturable (C15).
   @Post(":id/convert-to-invoice")
   @Roles("owner", "admin", "cashier")
-  convertToInvoice(@Param("id") id: string) {
-    return this.invoicesService.convertToInvoice(id);
+  convertToInvoice(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.invoicesService.convertToInvoice(id, organizationId);
   }
 
   // Même trio que /issue et /convert-to-invoice — action conséquente déclenchée par
@@ -115,22 +120,31 @@ export class InvoicesController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(forfeitDepositSchema)) dto: ForfeitDepositDto,
     @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
   ) {
-    return this.invoicesService.forfeitDeposit(id, dto.reason, user.id);
+    return this.invoicesService.forfeitDeposit(id, dto.reason, user.id, organizationId);
   }
 
   // Même trio que /issue et /convert-to-invoice — régénération à la demande
   // (C18, ADR-066).
   @Post(":id/regenerate-payment-link")
   @Roles("owner", "admin", "cashier")
-  regeneratePaymentLink(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.invoicesService.regeneratePaymentLink(id, user.id);
+  regeneratePaymentLink(
+    @Param("id") id: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.invoicesService.regeneratePaymentLink(id, user.id, organizationId);
   }
 
   // Même trio que /regenerate-payment-link — action de relance à la demande (I2).
   @Post(":id/send-reminder")
   @Roles("owner", "admin", "cashier")
-  sendReminder(@Param("id") id: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.invoicesService.sendReminder(id, user.id);
+  sendReminder(
+    @Param("id") id: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.invoicesService.sendReminder(id, user.id, organizationId);
   }
 }

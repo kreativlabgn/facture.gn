@@ -1,18 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes sur les arguments inchangées.
+// (La pose effective du set_config est couverte par packages/db rls.spec.ts.)
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { UssdPaymentService } from "./ussd-payment.service";
 
 const ORG_ID = "org-1";
 const NUMBER = "FG-2026-000001";
 
 function createFakePrisma(overrides: { invoice?: any; organization?: any } = {}) {
-  return {
+  return auClientScope({
     invoice: {
       findFirst: vi.fn().mockResolvedValue(overrides.invoice ?? null),
     },
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(overrides.organization ?? { id: ORG_ID, commercialTier: "freemium" }),
     },
-  };
+  });
 }
 
 function createFakeInvoicesService() {
@@ -59,8 +77,8 @@ describe("UssdPaymentService — confirmation (délègue à C18)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new UssdPaymentService(createFakePrisma() as any, invoicesService as any);
 
-    await service.confirmPayment("inv-1", "user-1");
+    await service.confirmPayment("inv-1", "user-1", "org-1");
 
-    expect(invoicesService.regeneratePaymentLink).toHaveBeenCalledWith("inv-1", "user-1");
+    expect(invoicesService.regeneratePaymentLink).toHaveBeenCalledWith("inv-1", "user-1", "org-1");
   });
 });

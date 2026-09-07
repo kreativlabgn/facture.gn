@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InvoiceEventType, type CommercialTier, type PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { isRoleAllowedForTier, maxMembersForTier } from "../common/plan-features-grid";
@@ -67,6 +68,12 @@ export class OrganizationsService {
 
   // Le créateur devient owner dans la même transaction — aucune organisation ne
   // doit exister sans au moins un membre pouvant en gérer les accès.
+  //
+  // RLS (ADR-111 étape 1) — AUCUN scope posé ici, à dessein : l'organisation
+  // n'existe pas encore, son id n'est connu qu'après le create(). Poser
+  // app.current_org_id sur un id inventé ferait échouer le WITH CHECK de la
+  // politique org_isolation. Les deux GUC restent nuls → branche dormante du
+  // prédicat, l'INSERT passe, y compris après l'étape 2 (facture_app).
   async create(dto: CreateOrganizationDto, creatorUserId: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -100,7 +107,8 @@ export class OrganizationsService {
   // déclencher ceci (voir DgiVerificationAuthGuard) : une organisation ne peut pas
   // s'auto-certifier vérifiée DGI, ça viderait la vérification de son sens.
   async verifyDgi(organizationId: string) {
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: organizationId },
     });
 
@@ -114,7 +122,7 @@ export class OrganizationsService {
       return organization;
     }
 
-    const verified = await this.prisma.organization.update({
+    const verified = await scoped.organization.update({
       where: { id: organizationId },
       data: { dgiVerificationStatus: "verified", dgiVerifiedAt: new Date() },
     });
@@ -138,12 +146,20 @@ export class OrganizationsService {
   // registrationSource=agent_terrain (ADR-107) : avant correctif, retombait
   // silencieusement sur le défaut "organic" du schema — organisations mal étiquetées.
   async createAssisted(commercialAgentUserId: string, dto: CreateAssistedOrganizationDto) {
+    // `user` est HORS RLS (identité plateforme) et l'agent terrain n'appartient
+    // à AUCUNE organisation — AssistedSession est le seul lien. Lecture globale
+    // à dessein.
     const agent = await this.prisma.user.findUniqueOrThrow({ where: { id: commercialAgentUserId } });
     if (!agent.isCommercialAgent) {
       throw new ForbiddenException("Seul un agent terrain peut créer une organisation en inscription assistée");
     }
 
     if (dto.msisdn) {
+      // Contrôle d'unicité GLOBALE de l'annuaire : la question est « ce numéro
+      // a-t-il DÉJÀ un compte, où que ce soit ». Scoper cette lecture la rendrait
+      // aveugle aux comptes des autres organisations et laisserait créer un
+      // doublon — même piège que le NIF dans createFromApip() ci-dessous.
+      // `user_phone` est de toute façon hors RLS (identité partagée).
       const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
       if (existingPhone) {
         throw new ConflictException(`Un compte existe déjà pour le numéro ${dto.msisdn}`);
@@ -155,6 +171,10 @@ export class OrganizationsService {
     // collision est rare mais possible, jamais un 500 brut pour l'agent terrain.
     for (let attempt = 1; attempt <= MAX_ACCOUNT_CODE_ATTEMPTS; attempt++) {
       try {
+        // RLS — aucun scope posé (même raison que create() : l'organisation naît
+        // ici). Un setOrganizationScope() posé APRÈS le create() serait pire que
+        // rien : resolveForNewUser() résout des PendingMemberInvite émises par
+        // d'AUTRES organisations pour ce marchand, que le scope masquerait.
         return await this.prisma.$transaction(async (tx) => {
           const organization = await tx.organization.create({
             data: {
@@ -217,12 +237,16 @@ export class OrganizationsService {
   // 0%) pour une organisation sans historique — 0% laisserait croire à un mauvais
   // historique plutôt qu'à une absence de données.
   async getVerifiedPaymentRatio(organizationId: string) {
+    // `payment` est sous RLS par INDIRECTION (politique via invoice_id) : le
+    // scope org s'y applique, et `invoice: { organizationId }` reste la garde
+    // explicite tant que les politiques dorment.
+    const scoped = organizationScopedClient(this.prisma, organizationId);
     const [total, verified] = await Promise.all([
-      this.prisma.payment.aggregate({
+      scoped.payment.aggregate({
         _sum: { amount: true },
         where: { invoice: { organizationId }, depositType: null },
       }),
-      this.prisma.payment.aggregate({
+      scoped.payment.aggregate({
         _sum: { amount: true },
         where: { invoice: { organizationId }, depositType: null, method: "payment_link" },
       }),
@@ -250,6 +274,7 @@ export class OrganizationsService {
   // entrée → même résultat, jamais une erreur), sans nouvelle infrastructure.
   async createFromApip(dto: CreateFromApipDto) {
     try {
+      // RLS — aucun scope posé (même raison que create()/createAssisted()).
       return await this.prisma.$transaction(async (tx) => {
         const organization = await tx.organization.create({
           data: {
@@ -272,6 +297,13 @@ export class OrganizationsService {
       });
     } catch (error) {
       if (isUniqueConstraintViolation(error, "nif")) {
+        // NE JAMAIS SCOPER CETTE LECTURE. C'est une recherche d'unicité
+        // GLOBALE sur le NIF : on vient précisément de percuter la contrainte
+        // unique, donc l'organisation existante appartient par définition à
+        // quelqu'un d'autre que le scope courant (il n'y en a d'ailleurs aucun
+        // ici — webhook APIP signé, pas de requête organisationnelle). Scopée,
+        // elle ne trouverait rien et lèverait à la place de rendre la
+        // sémantique idempotente attendue par la redélivraison (ADR-016).
         return this.prisma.organization.findUniqueOrThrow({ where: { nif: dto.nif } });
       }
       throw error;
@@ -293,6 +325,11 @@ export class OrganizationsService {
   // commissionBypassProofThresholdOverrideGnf — configuration financière/anti-
   // fraude interne, même niveau de sensibilité, jamais un simple collaborateur.
   async listMine(userId: string) {
+    // NON SCOPÉE à dessein : c'est LA requête de découverte du scope — « à
+    // quelles organisations cet utilisateur appartient-il ». Aucune
+    // organisation courante n'existe encore à ce stade (route sans @Roles()),
+    // et un scope quelconque réduirait la réponse à cette seule organisation.
+    // Même famille que le contrôle de NIF et l'annuaire téléphone ci-dessus.
     const memberships = await this.prisma.organizationMember.findMany({
       where: { userId, revokedAt: null },
       select: {
@@ -326,7 +363,15 @@ export class OrganizationsService {
   // (E8, organizations.controller.ts:64) : ces deux routes exposent des champs
   // de sensibilité comparable (bankAccountDetails, chiffreAffairesBrutDeclare).
   async findOneDetail(organizationId: string) {
-    return this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    // RÈGLE — à travers un client scopé : findFirst*, jamais findUnique*.
+    // Tant que les politiques dorment, le `where` est la seule barrière réelle,
+    // et findFirst est la seule forme qui puisse toujours y porter la colonne
+    // de scope (findUnique n'accepte qu'une clé unique). L'appliquer sans
+    // exception rend l'audit greppable, au lieu d'un jugement site par site
+    // sur « cette clé unique contient-elle déjà organizationId ? ».
+    return organizationScopedClient(this.prisma, organizationId).organization.findFirstOrThrow({
+      where: { id: organizationId },
+    });
   }
 
   // G4, ADR-097 — auditor (ou owner/admin) : lecture seule stricte, aucune
@@ -350,7 +395,13 @@ export class OrganizationsService {
       where.type = { in: matchingTypes };
     }
 
-    return this.prisma.invoiceEvent.findMany({ where, orderBy: { createdAt: "desc" }, take, skip });
+    // invoice_event : sous RLS par indirection (politique via invoice_id).
+    return organizationScopedClient(this.prisma, organizationId).invoiceEvent.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take,
+      skip,
+    });
   }
 
   // F14, ADR-104 — première story à construire un mécanisme d'invitation au
@@ -360,6 +411,7 @@ export class OrganizationsService {
   // L'invité doit déjà avoir un compte facture.gn — inviter un utilisateur sans
   // compte est un mécanisme distinct (F10/ADR-096), hors scope ici.
   async inviteMember(organizationId: string, dto: InviteOrganizationMemberDto, requesterUserId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
     // Security Audit 2026-08-23, finding #12 — @Roles("owner","admin") sur la
     // route (RolesGuard) autorise un simple admin à appeler cet endpoint, mais
     // seul le owner peut inviter un pair admin ou approver (rôle de contrôle
@@ -367,15 +419,15 @@ export class OrganizationsService {
     // décision produit actée, pas seulement une restriction technique. Vérifié
     // avant tout le reste (moins coûteux, échoue au plus tôt).
     if (dto.role === "admin" || dto.role === "approver") {
-      const requesterMembership = await this.prisma.organizationMember.findUnique({
-        where: { organizationId_userId: { organizationId, userId: requesterUserId } },
+      const requesterMembership = await scoped.organizationMember.findFirst({
+        where: { organizationId, userId: requesterUserId },
       });
       if (requesterMembership?.role !== "owner") {
         throw new ForbiddenException(`Seul le owner peut inviter un membre avec le rôle ${dto.role}`);
       }
     }
 
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const organization = await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
     // H1, Grille §2 — vérifié avant le comptage des collaborateurs (moins
     // coûteux) : un rôle non débloqué par le palier ne doit jamais consommer
     // le quota de collaborateurs pour rien.
@@ -387,7 +439,7 @@ export class OrganizationsService {
 
     const maxMembers = maxMembersForTier(organization.commercialTier);
     if (maxMembers !== null) {
-      const activeMemberCount = await this.prisma.organizationMember.count({
+      const activeMemberCount = await scoped.organizationMember.count({
         where: { organizationId, revokedAt: null },
       });
       if (activeMemberCount >= maxMembers) {
@@ -397,6 +449,9 @@ export class OrganizationsService {
       }
     }
 
+    // Annuaire GLOBAL, non scopé à dessein (voir createAssisted()) : la
+    // question est « ce numéro a-t-il un compte facture.gn », pas « dans cette
+    // organisation ». `user_phone` est hors RLS.
     const userPhone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
     if (!userPhone) {
       throw new NotFoundException(`Compte introuvable pour le numéro ${dto.msisdn}`);
@@ -406,15 +461,15 @@ export class OrganizationsService {
     // comme PracticeMember, seulement revokedAt) : une ligne existante, même
     // révoquée, bloque toute nouvelle invitation — pas de réactivation
     // silencieuse (voir PLAN "Alternatives écartées").
-    const existingMembership = await this.prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId, userId: userPhone.userId } },
+    const existingMembership = await scoped.organizationMember.findFirst({
+      where: { organizationId, userId: userPhone.userId },
     });
     if (existingMembership) {
       throw new ConflictException(`Cet utilisateur est déjà membre de l'organisation ${organizationId}`);
     }
 
     try {
-      return await this.prisma.organizationMember.create({
+      return await scoped.organizationMember.create({
         data: { organizationId, userId: userPhone.userId, role: dto.role },
       });
     } catch (error) {
@@ -437,8 +492,9 @@ export class OrganizationsService {
   // réel pour l'abonnement (aucune infrastructure de facturation récurrente
   // dans ce repo, même limite déjà acceptée pour H4/K4/K5).
   async upgradeCommercialTier(organizationId: string, tier: CommercialTier) {
-    await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
-    return this.prisma.organization.update({
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
+    return scoped.organization.update({
       where: { id: organizationId },
       data: { commercialTier: tier },
     });
@@ -468,7 +524,7 @@ export class OrganizationsService {
   // (jamais update inconditionnel) : une révocation concurrente ou une session déjà
   // expirée ne doit jamais réémettre un revokedAt "gagnant" trompeur.
   async revokeAssistedSession(organizationId: string, commercialAgentUserId: string) {
-    const claimed = await this.prisma.assistedSession.updateMany({
+    const claimed = await organizationScopedClient(this.prisma, organizationId).assistedSession.updateMany({
       where: { organizationId, commercialAgentUserId, revokedAt: null },
       data: { revokedAt: new Date() },
     });

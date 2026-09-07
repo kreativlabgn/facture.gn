@@ -10,6 +10,41 @@ import { assertPracticeAdmin } from "../common/rbac/practice-access";
 import type { CreatePracticeDto } from "./dto/create-practice.dto";
 import type { InviteMemberDto } from "./dto/invite-member.dto";
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. Constat vérifié le 2026-09-06 :
+// AUCUN accès de ce service n'est scopable, et ce n'est pas un report.
+//
+// 1. `professional_practice` et `practice_member` sont HORS RLS. Ni l'une ni
+//    l'autre n'apparaît dans un `ENABLE ROW LEVEL SECURITY` des migrations, et
+//    aucune politique ne les vise. Il n'existe PAS de politique
+//    `practice_isolation` : la migration 20260905120000 explique explicitement
+//    pourquoi une seconde politique serait INCORRECTE (sous PostgreSQL, deux
+//    politiques permissives sont OU-ées — une politique cabinet dormante
+//    renverrait TRUE pour toutes les lignes dès qu'une requête ne pose que
+//    app.current_org_id, neutralisant le filtre organisation). Le scope cabinet
+//    passe donc par le prédicat COMBINÉ des tables métier (mandate, invoice,
+//    customer…), jamais par une politique propre aux tables du cabinet.
+//    Conséquence : appeler practiceScopedClient() ici poserait un GUC qu'aucune
+//    politique ne lit — inopérant, et trompeur pour qui relira ce fichier.
+//
+// 2. `user_phone` est hors RLS lui aussi (identité partagée).
+//
+// 3. La SEULE table sous RLS touchée ici est `organization`, via
+//    lookupOrganizationByNif() — et cette lecture doit rester GLOBALE : c'est
+//    l'annuaire NIF, interrogé par un cabinet qui n'est pas encore mandaté sur
+//    l'organisation cherchée. La scoper la rendrait aveugle, donc inutile. Ses
+//    quatre barrières (correspondance exacte, select réduit, practice_admin,
+//    throttle) sont documentées sur la méthode elle-même.
+//
+// Aucun setPracticeScope() dans create() non plus : sa transaction ne touche que
+// les deux tables hors RLS ci-dessus, et la practice n'existe pas avant son
+// propre create() (même œuf-et-poule qu'OrganizationsService.create()).
+//
+// À ARBITRER POUR L'ÉTAPE 2 (hors périmètre de l'étape 1, aucune migration ici) :
+// laisser `practice_member` hors RLS signifie qu'après la bascule vers
+// facture_app (NOBYPASSRLS), la composition de TOUS les cabinets restera lisible
+// par n'importe quel chemin applicatif qui atteint cette table. C'est peut-être
+// voulu (annuaire partagé, comme `user`), mais ça n'a jamais été tranché
+// explicitement — voir docs/runbooks/rls-rollout.md.
 @Injectable()
 export class PracticesService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -151,6 +186,13 @@ export class PracticesService {
   // On exige donc d'être practice_admin d'AU MOINS un cabinet actif. C'est le
   // même niveau d'exigence, appliqué à l'utilisateur plutôt qu'au couple
   // (utilisateur, cabinet).
+  //
+  // RLS — `organization` EST sous RLS, mais cette lecture reste GLOBALE à
+  // dessein : le cabinet qui cherche n'est pas encore mandaté sur l'organisation
+  // qu'il cherche, un scope la lui masquerait et viderait l'annuaire de son sens.
+  // Même famille que OrganizationsService.createFromApip() et
+  // AuthService.requestRecovery() — le NIF est le point d'entrée d'un annuaire,
+  // jamais une donnée déjà scopée.
   async lookupOrganizationByNif(nif: string, requesterUserId: string) {
     const adminMembership = await this.prisma.practiceMember.findFirst({
       where: { userId: requesterUserId, leftAt: null, role: "practice_admin" },

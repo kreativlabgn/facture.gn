@@ -31,6 +31,12 @@ function generateOtpCode(): string {
 // portail (résolution/création de User, émission du token scope:"client_portal") ;
 // ce service-ci ne connaît que le stockage/la vérification/la consommation de
 // l'OTP lui-même.
+// RLS (ADR-111 étape 1) — CE SERVICE RESTE ENTIÈREMENT NON SCOPÉ. `client_portal_otp`
+// n'a ni colonne organization_id ni politique org_isolation : sa clé
+// fonctionnelle est le msisdn, un OTP n'appartient à aucune organisation. Et
+// resolveLocale() interroge délibérément les clients de TOUTES les
+// organisations rattachées au numéro (voir son commentaire). Voir la carte
+// complète en tête de ClientPortalService.
 @Injectable()
 export class ClientPortalOtpService {
   private readonly logger = new Logger(ClientPortalOtpService.name);

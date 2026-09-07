@@ -55,8 +55,20 @@ function createFakePrisma(opts: { invoices?: Row[] } = {}) {
         if (!row) return Promise.reject(new Error("not found"));
         return Promise.resolve(row);
       }),
-      findFirst: vi.fn(({ where }: any) => {
+      // Honore la DOUBLE CLAUSE, pas seulement l'id : c'est ce qui rend le test
+      // discriminant si organizationId venait à disparaître du `where`.
+      findFirstOrThrow: vi.fn(({ where }: any) => {
         const row = txById.get(where.id);
+        if (!row || (where.organizationId && row.organizationId !== where.organizationId)) {
+          return Promise.reject(new Error("not found"));
+        }
+        return Promise.resolve(row);
+      }),
+      // Deux lectures findFirst distinctes passent ici : par id (confirmMatch)
+      // et par empreinte (relecture du doublon dans importTransactions). Les deux
+      // honorent la clause d'organisation.
+      findFirst: vi.fn(({ where }: any) => {
+        const row = where.id ? txById.get(where.id) : txByFingerprint.get(where.fingerprint);
         if (!row || (where.organizationId && row.organizationId !== where.organizationId)) {
           return Promise.resolve(null);
         }
@@ -98,8 +110,26 @@ function createFakePrisma(opts: { invoices?: Row[] } = {}) {
         const inv = (opts.invoices ?? []).find((i) => i.id === where.id);
         return Promise.resolve(inv ? { organizationId: inv.organizationId ?? ORG, ...inv } : null);
       }),
+      // confirmMatch() lit la facture par double clause : le faux applique
+      // RÉELLEMENT le filtre d'organisation, sans quoi le test d'IDOR
+      // (« facture d'une autre organisation ») ne prouverait plus rien.
+      findFirst: vi.fn(({ where }: any) => {
+        const inv = (opts.invoices ?? []).find((i) => i.id === where.id);
+        if (!inv) return Promise.resolve(null);
+        const organizationId = inv.organizationId ?? ORG;
+        if (where.organizationId && organizationId !== where.organizationId) {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve({ organizationId, ...inv });
+      }),
     },
+    // organizationScopedClient() appelle $extends ; il rend le client LUI-MÊME,
+    // pour que les mocks à état mutable ci-dessus restent partagés.
+    $extends: vi.fn(),
+    $executeRaw: vi.fn().mockResolvedValue(1),
+    $transaction: vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma))),
   };
+  prisma.$extends.mockReturnValue(prisma);
   return prisma;
 }
 
@@ -263,6 +293,25 @@ describe("BankReconciliationService.listTransactions", () => {
 });
 
 describe("BankReconciliationService.confirmMatch", () => {
+  // Les faux `$extends` de ce dépôt se renvoient eux-mêmes : la VALEUR du scope
+  // n'est pas observable directement. On rejoue donc l'extension capturée —
+  // `$allOperations` exécute le set_config via `$executeRaw` — pour lire
+  // l'organisation qui y a été injectée.
+  it("pose le scope RLS de l'organisation appelante, jamais une autre", async () => {
+    const prisma = createFakePrisma();
+    const service = new BankReconciliationService(prisma, createFakePayments());
+
+    await service.listTransactions(ORG, {} as any);
+
+    const extension = prisma.$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = prisma.$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain(ORG);
+  });
+
+
   const invoices = [{ id: "inv-1", organizationId: ORG }];
 
   async function seedUnmatched(prisma: any) {
@@ -291,6 +340,7 @@ describe("BankReconciliationService.confirmMatch", () => {
 
     expect(payments.recordBankTransferPayment).toHaveBeenCalledWith(
       "inv-1",
+      ORG,
       { amount: 1_500_000n },
       `bank-reconciliation:${txId}`,
     );

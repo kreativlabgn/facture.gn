@@ -1,9 +1,18 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import type { CreateRefundDto } from "./dto/create-refund.dto";
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. `refund`, `credit_note` et
+// `invoice_event` sont toutes trois sous org_isolation par INDIRECTION (politique
+// via invoice_id) : aucune ne porte de colonne organization_id. La clause
+// explicite prend donc la forme `invoice: { organizationId }` — c'est
+// l'équivalent de la double clause pour ce type de table.
+// `organizationId` vient du RolesGuard : la route porte
+// @OrganizationIdSource("credit-note"), le guard a donc déjà résolu
+// l'organisation de l'avoir et vérifié l'appartenance de l'appelant.
 @Injectable()
 export class RefundsService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -19,13 +28,28 @@ export class RefundsService {
   // PaymentsService (Payment.idempotencyKey) : sans lui, deux requêtes concurrentes
   // (double clic, retry réseau) passaient toutes deux la garde anti-sur-remboursement
   // ci-dessous avant qu'aucune n'ait committé, produisant un sur-remboursement réel.
-  async create(creditNoteId: string, dto: CreateRefundDto, actorId: string, idempotencyKey: string) {
-    const existing = await this.prisma.refund.findUnique({ where: { idempotencyKey } });
+  async create(
+    creditNoteId: string,
+    dto: CreateRefundDto,
+    actorId: string,
+    idempotencyKey: string,
+    organizationId: string,
+  ) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+
+    const existing = await scoped.refund.findFirst({
+      where: { idempotencyKey, invoice: { organizationId } },
+    });
     if (existing) {
       return existing;
     }
 
-    const creditNote = await this.prisma.creditNote.findUniqueOrThrow({ where: { id: creditNoteId } });
+    // Pas d'oracle malgré le *OrThrow : RolesGuard a déjà résolu cet avoir via
+    // @OrganizationIdSource("credit-note") (findUnique + 404 explicite) avant
+    // d'entrer dans le service — un id inconnu n'atteint jamais cette ligne.
+    const creditNote = await scoped.creditNote.findFirstOrThrow({
+      where: { id: creditNoteId, invoice: { organizationId } },
+    });
 
     // Garde anti-sur-remboursement — même précédent que la garde anti-sur-crédit
     // de CreditNoteLine (C7), scopée ici à un seul avoir (pas de groupBy requis).
@@ -36,9 +60,9 @@ export class RefundsService {
     // remboursements DISTINCTS (idempotencyKey différentes) soumis en vraie
     // concurrence — hors scope de ce correctif (même limite assumée par
     // CreditNoteLine/C7, jugée acceptable par 2 revues précédentes).
-    const alreadyRefunded = await this.prisma.refund.aggregate({
+    const alreadyRefunded = await scoped.refund.aggregate({
       _sum: { amount: true },
-      where: { creditNoteId, status: { not: "failed" } },
+      where: { creditNoteId, status: { not: "failed" }, invoice: { organizationId } },
     });
     const remaining = creditNote.amount - (alreadyRefunded._sum.amount ?? 0n);
     if (dto.amount > remaining) {
@@ -51,6 +75,10 @@ export class RefundsService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // GUC en première ligne : il couvre la création du remboursement et sa
+        // trace d'audit.
+        await setOrganizationScope(tx, organizationId);
+
         const refund = await tx.refund.create({
           data: {
             creditNoteId,
@@ -79,7 +107,9 @@ export class RefundsService {
       // parallèle, toutes deux passent le lookup initial avant que l'une des deux ne
       // committe — même pattern que PaymentsService.resolveIdempotencyRace().
       if (isUniqueConstraintViolation(error, "idempotency_key")) {
-        const winner = await this.prisma.refund.findUnique({ where: { idempotencyKey } });
+        const winner = await scoped.refund.findFirst({
+          where: { idempotencyKey, invoice: { organizationId } },
+        });
         if (winner) {
           return winner;
         }

@@ -66,6 +66,12 @@ export class ClientPortalAuthService {
   // rejette déjà un msisdn existant avec ConflictException). Une invitation
   // reçue par quelqu'un qui commence par le portail client doit d'abord passer
   // par une inscription PWA classique pour être résolue.
+  // RLS — non scopée à dessein : `user` et `user_phone` sont hors des
+  // politiques (identité, partagée entre organisations), et cette méthode
+  // s'exécute AVANT toute organisation — elle sert justement à établir
+  // l'identité que ClientPortalService utilisera ensuite pour les découvrir.
+  // Le $transaction ci-dessous ne touche qu'à ces deux tables : aucun
+  // setOrganizationScope() à poser.
   private async resolveOrCreateUser(msisdn: string): Promise<string> {
     const existingPhone = await this.prisma.userPhone.findUnique({ where: { msisdn } });
     if (existingPhone) {

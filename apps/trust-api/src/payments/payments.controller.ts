@@ -12,6 +12,7 @@ import {
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { Public } from "../auth/public.decorator";
 import { InternalAuthGuard } from "../common/internal-auth.guard";
 import { RenderingService } from "../rendering/rendering.service";
@@ -48,8 +49,9 @@ export class PaymentsController {
   async downloadReceipt(
     @Param("id") invoiceId: string,
     @Param("paymentId") paymentId: string,
+    @CurrentOrganizationId() organizationId: string,
   ): Promise<StreamableFile> {
-    const { pdf, filename } = await this.renderingService.renderReceiptPdf(invoiceId, paymentId);
+    const { pdf, filename } = await this.renderingService.renderReceiptPdf(invoiceId, paymentId, organizationId);
     return new StreamableFile(pdf, {
       type: "application/pdf",
       disposition: `attachment; filename="${filename}"`,
@@ -62,6 +64,7 @@ export class PaymentsController {
   @Roles("owner", "admin", "cashier", "field_agent", "delivery_driver")
   create(
     @Param("id") invoiceId: string,
+    @CurrentOrganizationId() organizationId: string,
     @Body(new ZodValidationPipe(createPaymentSchema)) dto: CreatePaymentDto,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
   ) {
@@ -70,7 +73,7 @@ export class PaymentsController {
         `En-tête ${IDEMPOTENCY_KEY_HEADER} manquant ou invalide (UUID v4 attendu, ADR-016)`,
       );
     }
-    return this.paymentsService.recordCashPayment(invoiceId, dto, idempotencyKey);
+    return this.paymentsService.recordCashPayment(invoiceId, organizationId, dto, idempotencyKey);
   }
 
   // Arrhes (C5, ADR-034) — mêmes rôles que la création de facture au comptoir,
@@ -79,6 +82,7 @@ export class PaymentsController {
   @Roles("owner", "admin", "cashier", "field_agent", "delivery_driver")
   createDeposit(
     @Param("id") invoiceId: string,
+    @CurrentOrganizationId() organizationId: string,
     @Body(new ZodValidationPipe(recordDepositSchema)) dto: RecordDepositDto,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
   ) {
@@ -87,7 +91,7 @@ export class PaymentsController {
         `En-tête ${IDEMPOTENCY_KEY_HEADER} manquant ou invalide (UUID v4 attendu, ADR-016)`,
       );
     }
-    return this.paymentsService.recordDepositPayment(invoiceId, dto, idempotencyKey);
+    return this.paymentsService.recordDepositPayment(invoiceId, organizationId, dto, idempotencyKey);
   }
 
   // Virement bancaire (C3, ADR-052) — mêmes rôles et même garde Idempotency-Key
@@ -97,6 +101,7 @@ export class PaymentsController {
   @Roles("owner", "admin", "cashier", "field_agent", "delivery_driver")
   createBankTransfer(
     @Param("id") invoiceId: string,
+    @CurrentOrganizationId() organizationId: string,
     @Body(new ZodValidationPipe(createBankTransferPaymentSchema)) dto: CreateBankTransferPaymentDto,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
   ) {
@@ -105,12 +110,16 @@ export class PaymentsController {
         `En-tête ${IDEMPOTENCY_KEY_HEADER} manquant ou invalide (UUID v4 attendu, ADR-016)`,
       );
     }
-    return this.paymentsService.recordBankTransferPayment(invoiceId, dto, idempotencyKey);
+    return this.paymentsService.recordBankTransferPayment(invoiceId, organizationId, dto, idempotencyKey);
   }
 
   // Appel machine-à-machine exclusif (money-api, après confirmation webhook,
   // C2 Phase 2b) — jamais un rôle humain : @Public() court-circuite JwtAuthGuard,
   // RolesGuard est un no-op sans @Roles(), InternalAuthGuard est le seul vrai garde.
+  //
+  // Pas de @CurrentOrganizationId() ici, contrairement aux trois routes
+  // ci-dessus : sans @Roles(), RolesGuard n'a résolu aucune organisation et le
+  // décorateur lèverait. Le service la découvre depuis la facture.
   @Post("provider-confirmation")
   @Public()
   @ApiSecurity("internal-api-key")

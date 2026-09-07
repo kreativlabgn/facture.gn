@@ -13,6 +13,9 @@ import { PRISMA_CLIENT } from "../common/prisma.module";
 export class TokenRevocationService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
 
+  // RLS — `revoked_token` est HORS des politiques (liste noire de jti JWT :
+  // aucune colonne organization_id, la donnée n'appartient à aucune
+  // organisation). Ces deux accès restent globaux par nature.
   async revoke(jti: string, expiresAt: Date): Promise<void> {
     await this.prisma.revokedToken.upsert({
       where: { jti },

@@ -9,9 +9,9 @@ describe("PaymentsController — GET /invoices/:id/payments/:paymentId/receipt (
     };
     const controller = new PaymentsController({} as any, rendering as any);
 
-    const result = await controller.downloadReceipt("inv-1", "pay-1");
+    const result = await controller.downloadReceipt("inv-1", "pay-1", "org-1");
 
-    expect(rendering.renderReceiptPdf).toHaveBeenCalledWith("inv-1", "pay-1");
+    expect(rendering.renderReceiptPdf).toHaveBeenCalledWith("inv-1", "pay-1", "org-1");
     const headers = result.getHeaders();
     expect(headers.type).toBe("application/pdf");
     expect(headers.disposition).toContain("attachment");

@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { ApiKeyEnvironment, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { PASSWORD_SERVICE } from "../auth/auth.tokens";
 import type { PasswordService } from "../auth/password.service";
@@ -22,7 +23,9 @@ export class ApiKeysService {
     const { secret, keySuffix } = generateApiKeySecret(environment);
     const keyHash = await this.passwordService.hash(secret);
 
-    const apiKey = await this.prisma.apiKey.create({
+    // Aucune transaction ici : une création de clé n'invalide rien (les clés
+    // coexistent jusqu'à révocation explicite), donc pas de setOrganizationScope().
+    const apiKey = await organizationScopedClient(this.prisma, organizationId).apiKey.create({
       data: { organizationId, environment, keyHash, keySuffix, createdByUserId: requestedByUserId },
     });
 
@@ -32,7 +35,7 @@ export class ApiKeysService {
   // Jamais keyHash dans la réponse — label masqué reconstruit depuis
   // environment + keySuffix, même format que le schéma openapi ApiKey.
   async listApiKeys(organizationId: string) {
-    const apiKeys = await this.prisma.apiKey.findMany({
+    const apiKeys = await organizationScopedClient(this.prisma, organizationId).apiKey.findMany({
       where: { organizationId, revokedAt: null },
       orderBy: { createdAt: "desc" },
     });
@@ -46,21 +49,28 @@ export class ApiKeysService {
     }));
   }
 
-  // IDOR — organizationId JAMAIS déduit de apiKeyId seul : vérifié explicitement
-  // contre l'organisation ciblée par l'URL, même discipline que
-  // CustomersService.merge() (E4). NotFoundException générique dans les deux cas
-  // (clé d'une autre organisation vs clé inexistante) : ne révèle jamais si une
-  // clé existe ailleurs.
+  // IDOR — organizationId JAMAIS déduit de apiKeyId seul : la double clause
+  // `where: { id, organizationId }` porte désormais cette vérification, là où un
+  // findUniqueOrThrow suivi d'une comparaison applicative la portait avant. Les
+  // deux cas (clé d'une autre organisation, clé inexistante) deviennent
+  // littéralement indistinguables — c'était déjà l'intention documentée ici, mais
+  // findUniqueOrThrow lançait une NotFoundError Prisma non interceptée sur le
+  // second cas (aucun ExceptionFilter dans cette application, vérifié) : un 500
+  // au lieu du 404 annoncé. Le findFirst nullable + le throw explicite ci-dessous
+  // rendent enfin les deux réponses identiques.
   async revokeApiKey(organizationId: string, apiKeyId: string, revokedByUserId: string) {
-    const apiKey = await this.prisma.apiKey.findUniqueOrThrow({ where: { id: apiKeyId } });
-    if (apiKey.organizationId !== organizationId) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const apiKey = await scoped.apiKey.findFirst({ where: { id: apiKeyId, organizationId } });
+    if (!apiKey) {
       throw new NotFoundException(`Clé API ${apiKeyId} introuvable pour cette organisation`);
     }
     if (apiKey.revokedAt) {
       throw new ConflictException(`Clé API ${apiKeyId} déjà révoquée`);
     }
 
-    return this.prisma.apiKey.update({
+    // update() exige un `where` unique et ne peut pas porter la colonne de
+    // scope : la lecture scopée ci-dessus est la barrière.
+    return scoped.apiKey.update({
       where: { id: apiKeyId },
       data: { revokedAt: new Date(), revokedByUserId },
     });

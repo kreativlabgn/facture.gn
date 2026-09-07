@@ -68,6 +68,14 @@ export class RetentionService {
     return summary;
   }
 
+  // RLS (ADR-111 étape 1) — À NE JAMAIS SCOPER. Cette purge est un traitement
+  // PLATEFORME : elle supprime les lignes expirées de TOUTES les organisations.
+  // Un GUC n'en purgerait qu'une seule et laisserait indéfiniment grossir les
+  // autres — ce ne serait pas un durcissement, ce serait une panne silencieuse
+  // de la rétention. Même catégorie que l'ancrage Merkle.
+  // Deux des quatre tables visées sont d'ailleurs hors RLS (client_portal_otp,
+  // revoked_token) ; les deux autres (ussd_session, pending_member_invite) y
+  // sont, mais la purge les traverse délibérément.
   private rules(now: Date): PurgeRule[] {
     const olderThan = (graceMs: number) => ({ lt: new Date(now.getTime() - graceMs) });
 

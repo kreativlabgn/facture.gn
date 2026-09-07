@@ -2,6 +2,24 @@ import { ConflictException, NotFoundException } from "@nestjs/common";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrganizationSigningKeyService } from "./organization-signing-key.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw` en tête de la transaction de rotate(). Le vrai client
+// offre les deux ; un faux qui ne les offre pas ne teste pas le service migré, il
+// plante dessus. `$extends` rend le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 const MASTER_KEY_HEX = "a".repeat(64);
 
 function createFakePrisma(overrides: { signingKey?: any } = {}) {
@@ -16,8 +34,8 @@ function createFakePrisma(overrides: { signingKey?: any } = {}) {
       ...overrides.signingKey,
     },
   };
-  prisma.$transaction = vi.fn((cb: any) => cb(prisma));
-  return prisma;
+  prisma.$transaction = vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  return auClientScope(prisma);
 }
 
 describe("OrganizationSigningKeyService", () => {
@@ -182,6 +200,23 @@ describe("OrganizationSigningKeyService", () => {
   });
 
   describe("rotate (E3, ADR-114)", () => {
+    // La transaction de rotate() porte tout le cycle de vie de la clé PRIVÉE :
+    // lecture de la courante, retrait, création de la neuve. Le GUC doit donc
+    // être posé, et sur la BONNE organisation. Les faux `$extends` se renvoyant
+    // eux-mêmes, la valeur du scope n'est pas observable directement : on lit
+    // l'argument réellement passé à setOrganizationScope() via $executeRaw.
+    it("pose app.current_org_id en première ligne de la transaction de rotation", async () => {
+      const prisma = createFakePrisma();
+      const service = new OrganizationSigningKeyService(prisma as any);
+
+      await service.rotate("org-a-proteger");
+
+      const setConfig = prisma.$executeRaw.mock.calls[0]?.[0];
+      expect(setConfig.values).toContain("app.current_org_id");
+      expect(setConfig.values).toContain("org-a-proteger");
+    });
+
+
     it("retire la clé active et en provisionne une nouvelle (publicKey différent)", async () => {
       const prisma = createFakePrisma();
       const service = new OrganizationSigningKeyService(prisma as any);
@@ -249,7 +284,8 @@ describe("OrganizationSigningKeyService", () => {
           }),
         },
       };
-      prisma.$transaction = (cb: any) => cb(prisma);
+      prisma.$transaction = (arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma));
+      auClientScope(prisma);
       const service = new OrganizationSigningKeyService(prisma as any);
 
       const r1 = await service.revoke("org-1");

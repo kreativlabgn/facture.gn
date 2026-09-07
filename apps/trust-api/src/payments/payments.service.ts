@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { InvoiceStatus, Prisma, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PaymentLinkClient } from "../money-client/payment-link-client";
@@ -34,18 +35,23 @@ export class PaymentsService {
     private readonly commissionBypassEscalation: CommissionBypassEscalationService,
   ) {}
 
-  async recordCashPayment(invoiceId: string, dto: CreatePaymentDto, idempotencyKey: string) {
-    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+  async recordCashPayment(
+    invoiceId: string,
+    organizationId: string,
+    dto: CreatePaymentDto,
+    idempotencyKey: string,
+  ) {
+    const existing = await this.findByIdempotencyKey(organizationId, idempotencyKey);
     if (existing) {
       return existing;
     }
 
     // allowOverpayment: true — trop-perçu cash uniquement (C14, backlog explicite),
     // jamais pour recordProviderPayment() (lien généré pour un montant exact).
-    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amount, true);
+    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, organizationId, dto.amount, true);
     await this.assertCashProofRequirement(invoice.organizationId, dto);
 
-    const payment = await this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
+    const payment = await this.createPaymentAndApply(invoiceId, organizationId, idempotencyKey, dto.amount, {
       amount: dto.amount,
       amountCollected: dto.amount,
       platformFeeAmount: 0n,
@@ -58,7 +64,7 @@ export class PaymentsService {
     });
 
     await this.detectAndRecordCashAnomaly(invoice, dto.amount);
-    await this.regenerateLinkForRemainingBalance(invoiceId);
+    await this.regenerateLinkForRemainingBalance(invoiceId, organizationId);
 
     return payment;
   }
@@ -82,21 +88,27 @@ export class PaymentsService {
   // invoice.amountDue exact l'est (ci-dessous), donc le mécanisme trop-perçu C14
   // (overpaymentAmount) ne peut structurellement pas s'activer par erreur —
   // ADR-059 "montant certifié jamais pollué" reste intact.
+  //
+  // RLS (ADR-111 étape 1) — SEUL chemin du module sans RolesGuard (@Public() +
+  // InternalAuthGuard) : aucune organisation n'est résolue pour nous, on la
+  // DÉCOUVRE depuis la facture avant de poser le moindre GUC. Tout ce qui suit
+  // cette résolution est scopé comme les chemins humains.
   async recordProviderPayment(invoiceId: string, dto: ConfirmProviderPaymentDto) {
+    const organizationId = await this.resolveOrganizationIdFromInvoice(invoiceId);
     const idempotencyKey = dto.providerRef;
-    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+    const existing = await this.findByIdempotencyKey(organizationId, idempotencyKey);
     if (existing) {
       return existing;
     }
 
-    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, dto.amountGnf, true);
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const invoice = await this.getPayableInvoiceOrThrow(invoiceId, organizationId, dto.amountGnf, true);
+    const organization = await organizationScopedClient(this.prisma, organizationId).organization.findFirstOrThrow({
       where: { id: invoice.organizationId },
     });
     const netAmount = invoice.amountDue;
     const platformFeeAmount = computePlatformFee(netAmount, organization.commercialTier);
 
-    return this.createPaymentAndApply(invoiceId, idempotencyKey, netAmount, {
+    return this.createPaymentAndApply(invoiceId, organizationId, idempotencyKey, netAmount, {
       amount: netAmount,
       amountCollected: dto.amountGnf,
       platformFeeAmount,
@@ -113,15 +125,20 @@ export class PaymentsService {
   // justifierait cette gestion. Aucune preuve requise (contrairement au cash,
   // C1) : le relevé bancaire de l'organisation est déjà la preuve. Aucune
   // détection d'anomalie (G1) : ce moteur reste strictement cash-only.
-  async recordBankTransferPayment(invoiceId: string, dto: CreateBankTransferPaymentDto, idempotencyKey: string) {
-    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+  async recordBankTransferPayment(
+    invoiceId: string,
+    organizationId: string,
+    dto: CreateBankTransferPaymentDto,
+    idempotencyKey: string,
+  ) {
+    const existing = await this.findByIdempotencyKey(organizationId, idempotencyKey);
     if (existing) {
       return existing;
     }
 
-    await this.getPayableInvoiceOrThrow(invoiceId, dto.amount);
+    await this.getPayableInvoiceOrThrow(invoiceId, organizationId, dto.amount);
 
-    const payment = await this.createPaymentAndApply(invoiceId, idempotencyKey, dto.amount, {
+    const payment = await this.createPaymentAndApply(invoiceId, organizationId, idempotencyKey, dto.amount, {
       amount: dto.amount,
       amountCollected: dto.amount,
       platformFeeAmount: 0n,
@@ -129,7 +146,7 @@ export class PaymentsService {
       method: "bank_transfer",
     });
 
-    await this.regenerateLinkForRemainingBalance(invoiceId);
+    await this.regenerateLinkForRemainingBalance(invoiceId, organizationId);
 
     return payment;
   }
@@ -137,13 +154,19 @@ export class PaymentsService {
   // ADR-064 : un proforma n'accepte QUE des arrhes, jamais un paiement normal —
   // jamais appliqué à Invoice.amountPaid/amountDue (l'arrhes est un dépôt de
   // sécurité indépendant du solde de la facture, pas un règlement partiel).
-  async recordDepositPayment(proformaId: string, dto: RecordDepositDto, idempotencyKey: string) {
-    const existing = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+  async recordDepositPayment(
+    proformaId: string,
+    organizationId: string,
+    dto: RecordDepositDto,
+    idempotencyKey: string,
+  ) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const existing = await this.findByIdempotencyKey(organizationId, idempotencyKey);
     if (existing) {
       return existing;
     }
 
-    const proforma = await this.prisma.invoice.findUnique({ where: { id: proformaId } });
+    const proforma = await scoped.invoice.findFirst({ where: { id: proformaId, organizationId } });
     if (!proforma) {
       throw new NotFoundException(`Facture ${proformaId} introuvable`);
     }
@@ -158,7 +181,7 @@ export class PaymentsService {
       );
     }
 
-    const existingDeposit = await this.prisma.payment.findFirst({
+    const existingDeposit = await scoped.payment.findFirst({
       where: { invoiceId: proformaId, depositType: "arrhes" },
     });
     if (existingDeposit) {
@@ -168,7 +191,7 @@ export class PaymentsService {
     await this.assertCashProofRequirement(proforma.organizationId, dto);
 
     try {
-      return await this.prisma.payment.create({
+      return await scoped.payment.create({
         data: {
           invoiceId: proformaId,
           status: "completed",
@@ -196,12 +219,44 @@ export class PaymentsService {
       if (isUniqueConstraintViolation(error, "invoice_id")) {
         throw new ConflictException(`Proforma ${proformaId} a déjà une arrhes enregistrée`);
       }
-      return this.resolveIdempotencyRace(error, idempotencyKey);
+      return this.resolveIdempotencyRace(error, idempotencyKey, organizationId);
     }
   }
 
-  private async getPayableInvoiceOrThrow(invoiceId: string, amount: bigint, allowOverpayment = false) {
-    const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+  // `payment` n'a pas d'organization_id : sa politique RLS passe par invoice_id
+  // (voir la migration, liste des « tables indirectes »). Le `where` ne peut donc
+  // PAS porter la colonne de scope — le GUC est ici la seule barrière, et elle ne
+  // mordra qu'à l'étape 2. Centralisé pour que ce fait se lise en un seul endroit.
+  private async findByIdempotencyKey(organizationId: string, idempotencyKey: string) {
+    return organizationScopedClient(this.prisma, organizationId).payment.findFirst({
+      where: { idempotencyKey },
+    });
+  }
+
+  // Résolution du scope pour le SEUL appelant qui n'en a pas (webhook money-api).
+  // Lecture NON scopée à dessein : c'est précisément le scope qu'on cherche —
+  // le scoper serait l'œuf et la poule. L'autorisation vient d'InternalAuthGuard,
+  // jamais de cette lecture. select minimal : rien d'autre n'est exposé.
+  private async resolveOrganizationIdFromInvoice(invoiceId: string): Promise<string> {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId },
+      select: { organizationId: true },
+    });
+    if (!invoice) {
+      throw new NotFoundException(`Facture ${invoiceId} introuvable`);
+    }
+    return invoice.organizationId;
+  }
+
+  private async getPayableInvoiceOrThrow(
+    invoiceId: string,
+    organizationId: string,
+    amount: bigint,
+    allowOverpayment = false,
+  ) {
+    const invoice = await organizationScopedClient(this.prisma, organizationId).invoice.findFirst({
+      where: { id: invoiceId, organizationId },
+    });
     if (!invoice) {
       throw new NotFoundException(`Facture ${invoiceId} introuvable`);
     }
@@ -238,7 +293,9 @@ export class PaymentsService {
       proofSignature?: string;
     },
   ) {
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const organization = await organizationScopedClient(this.prisma, organizationId).organization.findFirstOrThrow({
+      where: { id: organizationId },
+    });
     const effectiveThresholdGnfCentimes =
       organization.commissionBypassProofThresholdOverrideGnf ?? CASH_PROOF_THRESHOLD_GNF_CENTIMES;
 
@@ -259,12 +316,18 @@ export class PaymentsService {
 
   private async createPaymentAndApply(
     invoiceId: string,
+    organizationId: string,
     idempotencyKey: string,
     amount: bigint,
     paymentData: Omit<Prisma.PaymentUncheckedCreateInput, "invoiceId" | "status" | "idempotencyKey">,
   ) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Transaction interactive : le client scopé ne convient pas ici (chaque
+        // opération y ouvrirait sa propre transaction). Le GUC est posé en
+        // PREMIÈRE ligne, il couvre tout le reste du bloc — création du paiement
+        // ET application à la facture.
+        await setOrganizationScope(tx, organizationId);
         const payment = await tx.payment.create({
           data: {
             invoiceId,
@@ -279,7 +342,7 @@ export class PaymentsService {
         return payment;
       });
     } catch (error) {
-      return this.resolveIdempotencyRace(error, idempotencyKey);
+      return this.resolveIdempotencyRace(error, idempotencyKey, organizationId);
     }
   }
 
@@ -296,12 +359,13 @@ export class PaymentsService {
     amount: bigint,
   ) {
     try {
+      const scoped = organizationScopedClient(this.prisma, invoice.organizationId);
       let sameAmountRecentCount = 1; // ce paiement inclus
 
       // Sans customerId, aucune boucle attribuable à un client identifié —
       // limitation documentée (Invoice.customerId n'a pas de modèle Customer associé).
       if (invoice.customerId) {
-        sameAmountRecentCount = await this.prisma.payment.count({
+        sameAmountRecentCount = await scoped.payment.count({
           where: {
             method: "cash",
             amount,
@@ -314,7 +378,7 @@ export class PaymentsService {
       // G3, ADR-091 — seuil effectif de l'organisation (même résolution
       // qu'assertCashProofRequirement, volontairement dupliquée : les deux
       // méthodes restent découplées, voir blueprint Décision C).
-      const organization = await this.prisma.organization.findUniqueOrThrow({
+      const organization = await scoped.organization.findFirstOrThrow({
         where: { id: invoice.organizationId },
       });
       const effectiveProofThreshold =
@@ -331,7 +395,7 @@ export class PaymentsService {
         // donc déjà dans la fenêtre) — même précédent que sameAmountRecentCount
         // au-dessus ("ce paiement inclus", G1) : le seuil de récurrence (3) reste
         // cohérent avec cette convention déjà établie.
-        sameOrgSubThresholdRecentCount = await this.prisma.payment.count({
+        sameOrgSubThresholdRecentCount = await scoped.payment.count({
           where: {
             method: "cash",
             amount: { gte: bandFloor, lt: effectiveProofThreshold },
@@ -375,7 +439,7 @@ export class PaymentsService {
         return;
       }
 
-      await this.prisma.invoiceEvent.create({
+      await scoped.invoiceEvent.create({
         data: {
           invoiceId: invoice.id,
           type: "suspicious_cash_pattern_detected",
@@ -401,13 +465,16 @@ export class PaymentsService {
     windowStart: Date,
     windowEnd: Date,
   ): Promise<number | null> {
-    const total = await this.prisma.payment.count({
+    // `invoice: { organizationId }` conservé : payment est sous RLS par
+    // indirection, cette jointure EST la garde explicite tant que le GUC dort.
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const total = await scoped.payment.count({
       where: { invoice: { organizationId }, collectedAt: { gte: windowStart, lt: windowEnd } },
     });
     if (total === 0) {
       return null;
     }
-    const nonCash = await this.prisma.payment.count({
+    const nonCash = await scoped.payment.count({
       where: {
         invoice: { organizationId },
         collectedAt: { gte: windowStart, lt: windowEnd },
@@ -425,16 +492,17 @@ export class PaymentsService {
   // RÉELLEMENT restant, pas le total original. Volontairement PAS appelée depuis
   // recordProviderPayment() : un paiement partiel via lien déjà en cours est un
   // cas marginal, régénérer juste après un webhook de confirmation serait redondant.
-  private async regenerateLinkForRemainingBalance(invoiceId: string) {
+  private async regenerateLinkForRemainingBalance(invoiceId: string, organizationId: string) {
     try {
-      const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+      const scoped = organizationScopedClient(this.prisma, organizationId);
+      const invoice = await scoped.invoice.findFirst({ where: { id: invoiceId, organizationId } });
       if (!invoice || invoice.status !== "partially_paid") {
         return;
       }
 
       // Majoré de la commission (ADR-074) — même précédent que issue()/
       // regeneratePaymentLink() (invoices.service.ts).
-      const organization = await this.prisma.organization.findUniqueOrThrow({
+      const organization = await scoped.organization.findFirstOrThrow({
         where: { id: invoice.organizationId },
       });
       const platformFee = computePlatformFee(invoice.amountDue, organization.commercialTier);
@@ -457,8 +525,11 @@ export class PaymentsService {
       // pour un montant qui n'est déjà plus dû, jamais une trace d'audit mensongère
       // (revue résilience, C11).
       await this.prisma.$transaction(async (tx) => {
+        // Même discipline que createPaymentAndApply() : GUC en première ligne,
+        // il couvre la revendication ET la trace d'audit.
+        await setOrganizationScope(tx, organizationId);
         const claimed = await tx.invoice.updateMany({
-          where: { id: invoiceId, status: "partially_paid" },
+          where: { id: invoiceId, organizationId, status: "partially_paid" },
           data: {
             paymentLinkUrl: paymentLink.paymentLinkUrl,
             paymentLinkId: paymentLink.providerRef,
@@ -484,9 +555,9 @@ export class PaymentsService {
   // committe — la contrainte unique DB tranche, on renvoie le paiement gagnant
   // plutôt qu'un 500 brut sur la requête perdante. Partagé entre createPaymentAndApply()
   // et recordDepositPayment() — un seul endroit à maintenir pour ce comportement.
-  private async resolveIdempotencyRace(error: unknown, idempotencyKey: string) {
+  private async resolveIdempotencyRace(error: unknown, idempotencyKey: string, organizationId: string) {
     if (isUniqueConstraintViolation(error, "idempotency_key")) {
-      const winner = await this.prisma.payment.findUnique({ where: { idempotencyKey } });
+      const winner = await this.findByIdempotencyKey(organizationId, idempotencyKey);
       if (winner) {
         return winner;
       }
@@ -501,6 +572,12 @@ export class PaymentsService {
   // silencieusement écraser l'effet de l'autre sur amountPaid/amountDue. Partagée
   // entre recordCashPayment() et recordProviderPayment() — un seul endroit à
   // maintenir pour ce comportement (bug corrigé une fois, C1).
+  //
+  // RLS — appelée UNIQUEMENT depuis createPaymentAndApply(), dont la transaction
+  // pose le GUC en première ligne : ces update() en héritent. Ils restent des
+  // update() (pas des updateMany() scopés) parce que le code lit la ligne
+  // retournée pour décider du statut — la facture a de toute façon été lue
+  // scopée par getPayableInvoiceOrThrow() avant d'arriver ici.
   private async applyPaymentToInvoice(tx: Prisma.TransactionClient, invoiceId: string, amount: bigint) {
     const updatedInvoice = await tx.invoice.update({
       where: { id: invoiceId },

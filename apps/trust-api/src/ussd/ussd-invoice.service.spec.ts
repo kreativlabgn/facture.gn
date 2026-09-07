@@ -1,4 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes sur les arguments inchangées.
+// (La pose effective du set_config est couverte par packages/db rls.spec.ts.)
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { UssdInvoiceService } from "./ussd-invoice.service";
 
 const USER_ID = "user-1";
@@ -6,13 +24,13 @@ const ORG_ID = "org-1";
 const PHONE = "+224622334455";
 
 function createFakePrisma(overrides: { customer?: any; findManyResult?: any[] } = {}) {
-  return {
+  return auClientScope({
     customer: {
       findFirst: vi.fn().mockResolvedValue(overrides.customer ?? null),
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "customer-1", ...data })),
       findMany: vi.fn().mockResolvedValue(overrides.findManyResult ?? []),
     },
-  };
+  });
 }
 
 // Revue post-fix #3 — un fake Prisma qui APPLIQUE réellement le filtrage
@@ -23,7 +41,7 @@ function createFakePrisma(overrides: { customer?: any; findManyResult?: any[] } 
 // la FORME du where passerait même si organizationId était oublié dans le
 // code du service.
 function createScopedCustomerFakePrisma(customers: any[]) {
-  return {
+  return auClientScope({
     customer: {
       findFirst: vi.fn(),
       create: vi.fn(),
@@ -41,7 +59,7 @@ function createScopedCustomerFakePrisma(customers: any[]) {
         return Promise.resolve(result);
       }),
     },
-  };
+  });
 }
 
 function createFakeOrganizationsService(memberships: any[] = []) {
@@ -145,7 +163,7 @@ describe("UssdInvoiceService — émission (D1, §2.4 Spec USSD)", () => {
       // Lot D — canal 'ussd' posé côté serveur, jamais déduit d'un DTO.
       "ussd",
     );
-    expect(invoicesService.issue).toHaveBeenCalledWith("inv-1");
+    expect(invoicesService.issue).toHaveBeenCalledWith("inv-1", ORG_ID);
     expect(result.number).toBe("FG-2026-000001");
   });
 

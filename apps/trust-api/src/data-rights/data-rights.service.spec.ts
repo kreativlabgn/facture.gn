@@ -43,8 +43,13 @@ function build(over: Partial<Record<string, any>> = {}) {
     customer: { findMany: vi.fn().mockResolvedValue([customerRow()]) },
     userPhone: { findFirst: vi.fn().mockResolvedValue(null) },
     dataRightsRequest: { create: vi.fn((args: any) => Promise.resolve({ id: "drr-1", ...args.data })) },
+    // Le chemin PME passe par organizationScopedClient(), qui appelle $extends ;
+    // il rend le client LUI-MÊME pour que les mocks restent partagés.
+    $extends: vi.fn(),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     ...over,
   };
+  prisma.$extends.mockReturnValue(prisma);
   const service = new DataRightsService(prisma as never);
   return { service, prisma };
 }
@@ -234,7 +239,18 @@ function buildAnon(
     $transaction: vi.fn((cb: any) => cb(tx)),
     customer: { findMany: vi.fn().mockResolvedValue([{ id: customer.id }]) },
     dataRightsRequest: tx.dataRightsRequest,
+    // organizationScopedClient() appelle $extends ; il rend le client LUI-MÊME.
+    $extends: vi.fn(),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  prisma.$extends.mockReturnValue(prisma);
+
+  // Le service lit désormais par findFirst/findFirstOrThrow (double clause).
+  // On les adosse aux mocks historiques — même lecture, mêmes espions — pour que
+  // toutes les surcharges déjà écrites par les tests gardent leur effet.
+  tx.customer.findFirst = tx.customer.findUnique;
+  tx.customer.findFirstOrThrow = tx.customer.findUniqueOrThrow;
+
   const service = new DataRightsService(prisma as never);
   return { service, prisma, tx };
 }
@@ -245,7 +261,7 @@ describe("DataRightsService.anonymizeCustomerById", () => {
       anonCustomer({ invoices: [{ documentType: "invoice", status: "draft", issuedAt: new Date() }] }),
     );
 
-    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false }, "org-1");
 
     expect(result.outcome).toBe("completed");
     expect(tx.customer.update).toHaveBeenCalledWith({
@@ -269,7 +285,7 @@ describe("DataRightsService.anonymizeCustomerById", () => {
       }),
     );
 
-    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false }, "org-1");
 
     expect(result.outcome).toBe("partial");
     const updateData = tx.customer.update.mock.calls[0][0].data;
@@ -287,7 +303,7 @@ describe("DataRightsService.anonymizeCustomerById", () => {
       fullRead: anonCustomer({ anonymizedAt: new Date("2026-08-01T00:00:00.000Z"), phone: null }),
     });
 
-    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+    const result = await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false }, "org-1");
 
     expect(result.outcome).toBe("completed");
     expect(tx.customer.update).not.toHaveBeenCalled();
@@ -296,13 +312,20 @@ describe("DataRightsService.anonymizeCustomerById", () => {
     expect(drr.subjectPhoneHash).toBeNull(); // plus de téléphone à hacher
   });
 
-  it("prend le verrou consultatif AVANT la re-lecture du client et avant l'écriture", async () => {
+  it("pose le GUC RLS, PUIS le verrou consultatif, avant la re-lecture et l'écriture", async () => {
     const { service, tx } = buildAnon(anonCustomer());
 
-    await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+    await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false }, "org-1");
 
-    const lockOrder = tx.$executeRaw.mock.invocationCallOrder[0];
-    const rereadOrder = tx.customer.findUniqueOrThrow.mock.invocationCallOrder[0];
+    // $executeRaw sert maintenant DEUX usages successifs dans cette transaction :
+    // [0] le set_config de setOrganizationScope(), [1] le verrou consultatif.
+    // L'ordre compte — le scope doit couvrir le verrou lui-même.
+    const setConfig = tx.$executeRaw.mock.calls[0][0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-1");
+
+    const lockOrder = tx.$executeRaw.mock.invocationCallOrder[1];
+    const rereadOrder = tx.customer.findFirstOrThrow.mock.invocationCallOrder[0];
     const updateOrder = tx.customer.update.mock.invocationCallOrder[0];
     expect(lockOrder).toBeLessThan(rereadOrder);
     expect(rereadOrder).toBeLessThan(updateOrder);
@@ -310,17 +333,17 @@ describe("DataRightsService.anonymizeCustomerById", () => {
 
   it("client introuvable → NotFoundException (jamais un 200 avec outcome failed)", async () => {
     const { service, tx } = buildAnon(anonCustomer());
-    tx.customer.findUnique.mockResolvedValue(null);
+    tx.customer.findUnique.mockResolvedValue(null); // findFirst y est adossé
 
     await expect(
-      service.anonymizeCustomerById("cus-404", { requestedByUserId: "usr-1", viaOps: false }),
+      service.anonymizeCustomerById("cus-404", { requestedByUserId: "usr-1", viaOps: false }, "org-1"),
     ).rejects.toThrow(NotFoundException);
   });
 
   it("registre : affectedCustomerIds contient l'id anonymisé + HMAC du téléphone", async () => {
     const { service, tx } = buildAnon(anonCustomer());
 
-    await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false });
+    await service.anonymizeCustomerById("cus-1", { requestedByUserId: "usr-1", viaOps: false }, "org-1");
 
     expect(tx.dataRightsRequest.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -353,16 +376,35 @@ describe("DataRightsService.anonymizeSubjectByPhone (chemin ops, transverse)", (
       },
       dataRightsRequest: { create: vi.fn((args: any) => Promise.resolve({ id: "drr", ...args.data })) },
     };
+    // Le service lit par findFirst/findFirstOrThrow : adossés aux mocks
+    // historiques, mêmes espions, mêmes surcharges.
+    tx.customer.findFirst = tx.customer.findUnique;
+    tx.customer.findFirstOrThrow = tx.customer.findUniqueOrThrow;
     const prisma: any = {
       $transaction: vi.fn((cb: any) => cb(tx)),
       customer: { findMany: vi.fn().mockResolvedValue([{ id: "cus-a" }, { id: "cus-b" }]) },
+      $extends: vi.fn(),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    prisma.$extends.mockReturnValue(prisma);
     const service = new DataRightsService(prisma as never);
 
     const result = await service.anonymizeSubjectByPhone({ phone: PHONE, organizationId: null });
 
     expect(result.outcome).toBe("partial");
     expect(result.affectedCustomerIds.sort()).toEqual(["cus-a", "cus-b"]);
+
+    // INVARIANT CENTRAL DU CHEMIN OPS — aucun GUC ne doit être posé. Une demande
+    // PDP porte sur un SUJET à travers toutes les organisations : un
+    // app.current_org_id la réduirait à une seule et laisserait le reste du sujet
+    // non anonymisé, en silence. Ici cus-a et cus-b appartiennent à deux
+    // organisations différentes, et les deux doivent être traités.
+    // Discrimination : le verrou consultatif passe par un template balisé
+    // (premier argument = tableau de chaînes), setOrganizationScope() par un seul
+    // Prisma.Sql. Un appel dont le premier argument n'est pas un tableau est donc
+    // un set_config — il ne doit y en avoir aucun.
+    const guc = tx.$executeRaw.mock.calls.find((appel: any[]) => !Array.isArray(appel[0]));
+    expect(guc).toBeUndefined();
     expect(tx.dataRightsRequest.create).toHaveBeenCalledTimes(1);
     expect(tx.dataRightsRequest.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

@@ -1,10 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes sur les arguments inchangées.
+// (La pose effective du set_config est couverte par packages/db rls.spec.ts.)
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { UssdInvoiceListService } from "./ussd-invoice-list.service";
 
 const ORG_ID = "org-1";
 
 function createFakePrisma(invoices: any[] = []) {
-  return { invoice: { findMany: vi.fn().mockResolvedValue(invoices) } };
+  return auClientScope({ invoice: { findMany: vi.fn().mockResolvedValue(invoices) } });
 }
 
 // Revue post-fix #3 — un fake Prisma qui APPLIQUE réellement le filtrage
@@ -14,7 +32,7 @@ function createFakePrisma(invoices: any[] = []) {
 // prouver l'absence d'IDOR : un mock qui vérifie seulement la FORME du where
 // passerait même si organizationId était oublié dans le code du service.
 function createScopedFakePrisma(invoices: any[]) {
-  return {
+  return auClientScope({
     invoice: {
       findMany: vi.fn().mockImplementation(({ where, orderBy, take }: any) => {
         let result = invoices.filter((inv) => inv.organizationId === where.organizationId);
@@ -39,7 +57,7 @@ function createScopedFakePrisma(invoices: any[]) {
         return Promise.resolve(result);
       }),
     },
-  };
+  });
 }
 
 describe("UssdInvoiceListService — mes factures (§2.3 Spec USSD)", () => {

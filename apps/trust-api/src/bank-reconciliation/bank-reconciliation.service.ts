@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { BankTransaction, Payment, Prisma, PrismaClient } from "@facture-gn/db";
 
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PaymentsService } from "../payments/payments.service";
@@ -46,6 +47,19 @@ export interface TransactionWithSuggestions extends BankTransaction {
   suggestions: MatchSuggestion[];
 }
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. Cas simple : `bank_transaction` et
+// `invoice` portent toutes deux organization_id en direct et sont sous
+// org_isolation ; les quatre méthodes publiques reçoivent déjà organizationId du
+// RolesGuard (routes sous /organizations/:id avec
+// @OrganizationIdSource("organization")). TOUT est donc scopé, sans exception,
+// sans lecture de découverte et sans table hors RLS.
+//
+// Aucune transaction interactive : la séquence « revendiquer puis payer puis
+// poser matchedPaymentId » est délibérément faite d'écritures gardées
+// (updateMany + where sur l'état) plutôt que d'un $transaction, parce qu'elle
+// englobe un appel à PaymentsService qui ouvre la sienne. Aucun
+// setOrganizationScope() n'a donc lieu d'être posé ici — PaymentsService pose
+// déjà le sien dans createPaymentAndApply().
 @Injectable()
 export class BankReconciliationService {
   private readonly logger = new Logger(BankReconciliationService.name);
@@ -60,6 +74,7 @@ export class BankReconciliationService {
     dto: ImportBankTransactionsDto,
     userId: string,
   ): Promise<ImportResult> {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
     const importBatchId = randomUUID();
     const results: ImportRowResult[] = [];
     let imported = 0;
@@ -74,7 +89,7 @@ export class BankReconciliationService {
       });
 
       try {
-        const created = await this.prisma.bankTransaction.create({
+        const created = await scoped.bankTransaction.create({
           data: {
             organizationId,
             importBatchId,
@@ -93,8 +108,11 @@ export class BankReconciliationService {
         if (!isUniqueConstraintViolation(error, "fingerprint")) {
           throw error;
         }
-        const existing = await this.prisma.bankTransaction.findUnique({
-          where: { fingerprint: fp },
+        // L'empreinte intègre déjà organizationId (voir fingerprint()), mais la
+        // double clause la rend explicite : c'est elle, et non la seule forme de
+        // l'empreinte, qui garantit qu'on ne relit jamais la ligne d'un tiers.
+        const existing = await scoped.bankTransaction.findFirst({
+          where: { fingerprint: fp, organizationId },
           select: { id: true },
         });
         if (!existing) {
@@ -121,7 +139,8 @@ export class BankReconciliationService {
     if (query.state) where.state = query.state;
     if (query.importBatchId) where.importBatchId = query.importBatchId;
 
-    const transactions = await this.prisma.bankTransaction.findMany({
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const transactions = await scoped.bankTransaction.findMany({
       where,
       orderBy: { valueDate: "desc" },
       take: query.take,
@@ -132,7 +151,7 @@ export class BankReconciliationService {
     // UN SEUL findMany des factures payables, quel que soit le nombre de
     // transactions — jamais un N+1. Non exécuté si rien à suggérer.
     const payableInvoices = hasUnmatched
-      ? await this.prisma.invoice.findMany({
+      ? await scoped.invoice.findMany({
           where: { organizationId, status: { in: [...PAYABLE_INVOICE_STATUSES] } },
           select: { id: true, number: true, certificationId: true, amountDue: true, issuedAt: true },
         })
@@ -156,7 +175,8 @@ export class BankReconciliationService {
     invoiceId: string,
     userId: string,
   ): Promise<{ transaction: BankTransaction; payment: Payment }> {
-    const transaction = await this.prisma.bankTransaction.findFirst({
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const transaction = await scoped.bankTransaction.findFirst({
       where: { id: transactionId, organizationId },
     });
     if (!transaction) {
@@ -165,11 +185,14 @@ export class BankReconciliationService {
 
     // La facture DOIT appartenir à la même organisation — recordBankTransferPayment
     // ne vérifie pas l'organisation, ne jamais le lui déléguer (fuite inter-tenant).
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      select: { organizationId: true },
+    // La double clause porte désormais cette vérification, là où une lecture
+    // globale suivie d'une comparaison applicative la portait : « facture
+    // inexistante » et « facture d'un tiers » restent indistinguables, comme avant.
+    const invoice = await scoped.invoice.findFirst({
+      where: { id: invoiceId, organizationId },
+      select: { id: true },
     });
-    if (!invoice || invoice.organizationId !== organizationId) {
+    if (!invoice) {
       throw new NotFoundException(`Facture ${invoiceId} introuvable pour cette organisation`);
     }
 
@@ -177,7 +200,7 @@ export class BankReconciliationService {
     // Revendication d'abord : ferme la course "deux confirm concurrents sur la
     // même transaction vers des factures différentes" (sinon la clé d'idempotence
     // dérivée renverrait le mauvais Payment à la 2ᵉ confirmation).
-    const claim = await this.prisma.bankTransaction.updateMany({
+    const claim = await scoped.bankTransaction.updateMany({
       where: { id: transactionId, organizationId, state: "unmatched" },
       data: {
         state: "matched",
@@ -204,10 +227,11 @@ export class BankReconciliationService {
         );
         const recovered = await this.paymentsService.recordBankTransferPayment(
           invoiceId,
+          organizationId,
           { amount: transaction.amountCentimes },
           `bank-reconciliation:${transactionId}`,
         );
-        const repaired = await this.prisma.bankTransaction.update({
+        const repaired = await scoped.bankTransaction.update({
           where: { id: transactionId },
           data: { matchedPaymentId: recovered.id },
         });
@@ -222,6 +246,7 @@ export class BankReconciliationService {
     try {
       payment = await this.paymentsService.recordBankTransferPayment(
         invoiceId,
+        organizationId,
         { amount: transaction.amountCentimes },
         `bank-reconciliation:${transactionId}`,
       );
@@ -233,8 +258,10 @@ export class BankReconciliationService {
       // l'erreur d'origine. La transaction reste alors `matched` sans paiement :
       // un `confirm` ultérieur la reprend via la branche de reprise ci-dessus.
       try {
-        await this.prisma.bankTransaction.updateMany({
-          where: { id: transactionId, state: "matched" },
+        // `organizationId` AJOUTÉ ici : cette compensation était la seule
+        // écriture du module dont le `where` ne portait pas l'organisation.
+        await scoped.bankTransaction.updateMany({
+          where: { id: transactionId, organizationId, state: "matched" },
           data: {
             state: "unmatched",
             matchedInvoiceId: null,
@@ -252,7 +279,7 @@ export class BankReconciliationService {
       throw error;
     }
 
-    const updated = await this.prisma.bankTransaction.update({
+    const updated = await scoped.bankTransaction.update({
       where: { id: transactionId },
       data: { matchedPaymentId: payment.id },
     });
@@ -265,7 +292,8 @@ export class BankReconciliationService {
     transactionId: string,
     userId: string,
   ): Promise<BankTransaction> {
-    const claim = await this.prisma.bankTransaction.updateMany({
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const claim = await scoped.bankTransaction.updateMany({
       where: { id: transactionId, organizationId, state: "unmatched" },
       data: { state: "ignored", resolvedByUserId: userId, resolvedAt: new Date() },
     });
@@ -274,6 +302,8 @@ export class BankReconciliationService {
         `Transaction bancaire ${transactionId} introuvable ou déjà résolue`,
       );
     }
-    return this.prisma.bankTransaction.findUniqueOrThrow({ where: { id: transactionId } });
+    // Atteinte uniquement si claim.count > 0 : la ligne existe et appartient à
+    // cette organisation. Pas d'oracle, et la double clause le dit explicitement.
+    return scoped.bankTransaction.findFirstOrThrow({ where: { id: transactionId, organizationId } });
   }
 }

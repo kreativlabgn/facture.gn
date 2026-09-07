@@ -4,6 +4,8 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
+
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import {
   organizationScopedListQuerySchema,
   type OrganizationScopedListQueryDto,
@@ -60,8 +62,8 @@ export class CustomersController {
   @Get(":id")
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
   @OrganizationIdSource("customer")
-  findOne(@Param("id") id: string) {
-    return this.customersService.findOneWithBalance(id);
+  findOne(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.customersService.findOneWithBalance(id, organizationId);
   }
 
   // E4, ADR-038 — "admin/owner uniquement, jamais cashier ni field_agent"
@@ -69,8 +71,12 @@ export class CustomersController {
   @Post(":id/merge")
   @Roles("owner", "admin")
   @OrganizationIdSource("customer")
-  merge(@Param("id") id: string, @Body(new ZodValidationPipe(mergeCustomerSchema)) dto: MergeCustomerDto) {
-    return this.customersService.merge(id, dto.duplicateCustomerId);
+  merge(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(mergeCustomerSchema)) dto: MergeCustomerDto,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.customersService.merge(id, dto.duplicateCustomerId, organizationId);
   }
 
   // F16, ADR-105 — même trio restreint que merge() (E4) : réservé admin/owner,
@@ -81,8 +87,9 @@ export class CustomersController {
   flagPublicEntity(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(flagPublicEntitySchema)) dto: FlagPublicEntityDto,
+    @CurrentOrganizationId() organizationId: string,
   ) {
-    return this.customersService.flagPublicEntity(id, dto.publicBuyerAccountId);
+    return this.customersService.flagPublicEntity(id, dto.publicBuyerAccountId, organizationId);
   }
 
   // E5, ADR-083 — même trio restreint que merge() (E4) et flagPublicEntity() (F16).
@@ -93,8 +100,9 @@ export class CustomersController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(proposeCreditLimitSchema)) dto: ProposeCreditLimitDto,
     @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
   ) {
-    return this.customersService.proposeCreditLimit(id, dto.newLimit, user.id);
+    return this.customersService.proposeCreditLimit(id, dto.newLimit, user.id, organizationId);
   }
 
   // E5, ADR-083 — idSource "credit-limit-request" (jamais "customer" : :id est
@@ -107,7 +115,11 @@ export class CustomersController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(resolveCreditLimitRequestSchema)) dto: ResolveCreditLimitRequestDto,
     @CurrentUser() user: CurrentUserPayload,
+    // @OrganizationIdSource("credit-limit-request") ci-dessus : le guard résout
+    // l'organisation depuis LA DEMANDE, pas depuis un client — c'est bien celle
+    // qui doit scoper la résolution.
+    @CurrentOrganizationId() organizationId: string,
   ) {
-    return this.customersService.resolveCreditLimitRequest(id, user.id, dto.decision);
+    return this.customersService.resolveCreditLimitRequest(id, user.id, dto.decision, organizationId);
   }
 }

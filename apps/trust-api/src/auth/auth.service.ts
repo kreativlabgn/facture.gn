@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { PASSWORD_SERVICE, AUTH_TOKEN_SERVICE } from "./auth.tokens";
@@ -23,6 +24,28 @@ const RECOVERY_REQUEST_GENERIC_MESSAGE =
 // aucun signal backlog pour une valeur précise.
 const RECOVERY_FREEZE_WINDOW_MS = 24 * 3600_000;
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. `auth` est le module de la
+// DÉCOUVERTE : il travaille sur des requêtes anonymes ou de pré-connexion, avant
+// qu'une organisation existe. Aucune de ses routes ne porte @Roles(), donc
+// RolesGuard ne résout jamais d'organisation et @CurrentOrganizationId() y
+// lèverait sur CHAQUE route — le contrôleur reste volontairement inchangé.
+//
+// Restent GLOBAUX, à dessein :
+//   • `user` et `user_phone` : tables d'IDENTITÉ, hors des politiques RLS.
+//     register(), login(), addPhone(), grantCommercialAgentStatus() n'y touchent
+//     qu'à ça.
+//   • `organization.findUnique({ nif })` dans requestRecovery() : recherche
+//     d'annuaire par NIF émise par un appelant ANONYME — c'est précisément le
+//     scope qu'on cherche, le scoper serait circulaire. Même famille que
+//     OrganizationsService.createFromApip().
+//   • `account_recovery_request.findFirst({ id })` dans resolveRecovery() :
+//     l'organisation n'est connue qu'APRÈS cette lecture, elle en sort.
+//   • Les deux transactions de register() : elles créent/réclament un User, et
+//     resolveForNewUser() résout des invitations émises par d'AUTRES
+//     organisations — un GUC posé là les masquerait (même piège que
+//     OrganizationsService.createAssisted()).
+//
+// Sont SCOPÉS : tout ce qui suit la découverte, une fois organization.id connu.
 @Injectable()
 export class AuthService {
   constructor(
@@ -156,20 +179,29 @@ export class AuthService {
   // (voire l'owner) sans son consentement — mouvement latéral interne, la victime
   // n'étant jamais impliquée (aucun canal de notification n'existe pour l'alerter).
   async requestRecovery(dto: RequestRecoveryDto): Promise<{ message: string }> {
+    // Les DEUX lectures ci-dessous restent globales (voir la carte en tête de
+    // classe) : user_phone est hors RLS, et la recherche d'organisation par NIF
+    // est la découverte du scope lui-même, émise par un appelant anonyme.
     const phone = await this.prisma.userPhone.findUnique({ where: { msisdn: dto.msisdn } });
     const organization = await this.prisma.organization.findUnique({ where: { nif: dto.organizationNif } });
 
     if (phone && organization) {
-      const membership = await this.prisma.organizationMember.findUnique({
-        where: { organizationId_userId: { organizationId: organization.id, userId: phone.userId } },
+      // À partir d'ici l'organisation est connue : tout est scopé. Le GUC est
+      // dérivé d'une entrée ANONYME, mais il ne confère jamais aucun droit — il
+      // ne fait que RESTREINDRE, exactement comme le `where` explicite qui
+      // l'accompagne. C'est de la défense en profondeur, pas une autorisation.
+      const scoped = organizationScopedClient(this.prisma, organization.id);
+
+      const membership = await scoped.organizationMember.findFirst({
+        where: { organizationId: organization.id, userId: phone.userId },
       });
 
       if (membership && !membership.revokedAt && membership.role === "owner") {
-        const existingPending = await this.prisma.accountRecoveryRequest.findFirst({
+        const existingPending = await scoped.accountRecoveryRequest.findFirst({
           where: { userId: phone.userId, organizationId: organization.id, status: "pending" },
         });
         if (!existingPending) {
-          await this.prisma.accountRecoveryRequest.create({
+          await scoped.accountRecoveryRequest.create({
             data: { userId: phone.userId, organizationId: organization.id },
           });
         }
@@ -185,14 +217,31 @@ export class AuthService {
     approverId: string,
     decision: "approved" | "rejected",
   ): Promise<{ temporaryPassword: string | null }> {
-    const request = await this.prisma.accountRecoveryRequest.findUniqueOrThrow({ where: { id: requestId } });
+    // Lecture de DÉCOUVERTE, non scopée à dessein : l'organisation de la demande
+    // n'est connue qu'ici, elle sort de cette ligne.
+    //
+    // findFirst nullable, plus findUniqueOrThrow : cette application n'a AUCUN
+    // ExceptionFilter (vérifié), donc la NotFoundError Prisma d'un requestId
+    // inconnu remontait en 500 — et un 500 face au 403 d'une demande existante
+    // laissait distinguer les deux, soit un oracle d'énumération sur une route
+    // dont le :id est fourni par l'appelant. On renvoie donc la MÊME
+    // ForbiddenException que pour un approbateur non habilité : ce fichier
+    // applique déjà cette discipline anti-énumération partout ailleurs
+    // (RECOVERY_REQUEST_GENERIC_MESSAGE, message unique de login()).
+    const request = await this.prisma.accountRecoveryRequest.findFirst({ where: { id: requestId } });
+    if (!request) {
+      throw new ForbiddenException(
+        "Seul un owner ou admin de l'organisation peut résoudre cette demande de récupération",
+      );
+    }
 
     if (request.userId === approverId) {
       throw new ConflictException("Vous ne pouvez pas résoudre votre propre demande de récupération");
     }
 
-    const approverMembership = await this.prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId: request.organizationId, userId: approverId } },
+    const scoped = organizationScopedClient(this.prisma, request.organizationId);
+    const approverMembership = await scoped.organizationMember.findFirst({
+      where: { organizationId: request.organizationId, userId: approverId },
     });
     if (
       !approverMembership ||
@@ -205,11 +254,16 @@ export class AuthService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // GUC en première ligne : il couvre la revendication de la demande et le
+      // gel de l'organisation. `tx.user.update` plus bas vise `user`, table
+      // HORS RLS — le GUC ne l'affecte pas, c'est attendu.
+      await setOrganizationScope(tx, request.organizationId);
+
       // Même garde atomique que convertToInvoice()/forfeitDeposit() (C15/C5) : sous
       // deux résolutions concurrentes, seule la transaction qui voit encore
       // status="pending" au moment de l'écriture peut committer.
       const claimed = await tx.accountRecoveryRequest.updateMany({
-        where: { id: requestId, status: "pending" },
+        where: { id: requestId, organizationId: request.organizationId, status: "pending" },
         data: { status: decision, resolvedAt: new Date(), resolvedByUserId: approverId },
       });
       if (claimed.count === 0) {
@@ -244,6 +298,8 @@ export class AuthService {
   // session active, pas une intention fraîche pour une action qui modifie
   // durablement les moyens d'accès au compte — un JWT volé sans le mot de passe ne
   // doit jamais suffire à planter un numéro persistant sur le compte de la victime.
+  // `user` et `user_phone` sont HORS RLS (identité, partagée entre
+  // organisations) : aucune de ces lectures/écritures n'est scopable.
   async addPhone(userId: string, msisdn: string, password: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const valid = user.passwordHash ? await this.passwordService.verify(user.passwordHash, password) : false;
@@ -274,6 +330,8 @@ export class AuthService {
   // statut Agent commercial terrain plateforme (sans rapport avec
   // OrganizationRole.field_agent). Aucun check explicite d'existence : Prisma lève
   // déjà son erreur si userId est inconnu, cohérent avec findUniqueOrThrow ailleurs.
+  // `user` hors RLS, et le statut d'agent commercial est PLATEFORME : il
+  // n'appartient à aucune organisation. Non scopable par nature.
   async grantCommercialAgentStatus(userId: string): Promise<void> {
     await this.prisma.user.update({ where: { id: userId }, data: { isCommercialAgent: true } });
   }

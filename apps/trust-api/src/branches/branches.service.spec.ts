@@ -2,8 +2,25 @@ import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { BranchesService } from "./branches.service";
 
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function createFakePrisma(overrides: { branch?: any; invoice?: any; organization?: any } = {}) {
-  return {
+  return auClientScope({
     branch: {
       create: vi.fn().mockResolvedValue({
         id: "branch-1",
@@ -30,7 +47,7 @@ function createFakePrisma(overrides: { branch?: any; invoice?: any; organization
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", commercialTier: "pro" }),
       ...overrides.organization,
     },
-  };
+  });
 }
 
 describe("BranchesService — création (E1, ADR-037)", () => {
@@ -42,7 +59,7 @@ describe("BranchesService — création (E1, ADR-037)", () => {
       organizationId: "org-1",
       name: "Boutique Kaloum",
       type: "boutique",
-    } as any);
+    } as any, "org-1");
 
     expect(prisma.branch.create).toHaveBeenCalledWith({
       data: { organizationId: "org-1", name: "Boutique Kaloum", type: "boutique" },
@@ -60,7 +77,7 @@ describe("BranchesService — plafond de succursales par palier commercial (H1, 
     const service = new BranchesService(prisma as any);
 
     await expect(
-      service.create({ organizationId: "org-1", name: "Boutique Matam", type: "boutique" } as any),
+      service.create({ organizationId: "org-1", name: "Boutique Matam", type: "boutique" } as any, "org-1"),
     ).rejects.toThrow(ForbiddenException);
     expect(prisma.branch.create).not.toHaveBeenCalled();
   });
@@ -72,7 +89,7 @@ describe("BranchesService — plafond de succursales par palier commercial (H1, 
     });
     const service = new BranchesService(prisma as any);
 
-    await service.create({ organizationId: "org-1", name: "Boutique Kaloum", type: "boutique" } as any);
+    await service.create({ organizationId: "org-1", name: "Boutique Kaloum", type: "boutique" } as any, "org-1");
 
     expect(prisma.branch.create).toHaveBeenCalled();
   });
@@ -85,7 +102,7 @@ describe("BranchesService — plafond de succursales par palier commercial (H1, 
     const service = new BranchesService(prisma as any);
 
     await expect(
-      service.create({ organizationId: "org-1", name: "Boutique Dixinn", type: "boutique" } as any),
+      service.create({ organizationId: "org-1", name: "Boutique Dixinn", type: "boutique" } as any, "org-1"),
     ).rejects.toThrow(ForbiddenException);
   });
 
@@ -96,7 +113,7 @@ describe("BranchesService — plafond de succursales par palier commercial (H1, 
     });
     const service = new BranchesService(prisma as any);
 
-    await service.create({ organizationId: "org-1", name: "Boutique Ratoma", type: "boutique" } as any);
+    await service.create({ organizationId: "org-1", name: "Boutique Ratoma", type: "boutique" } as any, "org-1");
 
     expect(prisma.branch.create).toHaveBeenCalled();
   });
@@ -109,7 +126,7 @@ describe("BranchesService — CA calculé à la volée (E1, ADR-037)", () => {
     });
     const service = new BranchesService(prisma as any);
 
-    const result = await service.findOneWithRevenue("branch-1");
+    const result = await service.findOneWithRevenue("branch-1", "org-1");
 
     expect(result.totalRevenue).toBe(0n);
   });
@@ -120,11 +137,12 @@ describe("BranchesService — CA calculé à la volée (E1, ADR-037)", () => {
     });
     const service = new BranchesService(prisma as any);
 
-    const result = await service.findOneWithRevenue("branch-1");
+    const result = await service.findOneWithRevenue("branch-1", "org-1");
 
     expect(prisma.invoice.aggregate).toHaveBeenCalledWith({
       where: {
         branchId: "branch-1",
+        organizationId: "org-1",
         documentType: "invoice",
         status: { in: ["issued", "partially_paid", "paid"] },
       },

@@ -25,6 +25,16 @@ const VERIFICATION_SHORTCUT = /^2\*(.+)$/;
 // rejet immédiat au-delà, jamais un plafonnement silencieux.
 const ANONYMOUS_EMISSION_MAX_GNF = 500_000n;
 
+// RLS (ADR-111 étape 1) — les accès `ussdSession` de ce service RESTENT NON
+// SCOPÉS, à dessein. `ussd_session` est bien sous politique org_isolation, mais
+// son `organization_id` est NULLABLE : le flux d'émission anonyme (*620*1*…#)
+// crée et fait vivre une session AVANT toute organisation, et chaque tour de
+// menu recharge la session par son `sessionId` seul — poser app.current_org_id
+// masquerait les sessions à organisation nulle, cassant l'entrée du menu.
+// L'isolation d'une session tient à l'imprévisibilité du sessionId opérateur,
+// pas à RLS. Tout ce qui découle de la session (factures, paiements, compte)
+// passe, lui, par les services scopés.
+
 export interface UssdResponse {
   continue: boolean;
   text: string;
@@ -45,6 +55,10 @@ interface SessionContext {
   emitAmountCentimes?: string;
   payInvoiceId?: string;
   payInvoiceNumber?: string;
+  // Organisation ayant servi à TROUVER la facture à l'étape de sélection.
+  // Conservée pour que la confirmation soit scopée sur la même, sans la
+  // redécouvrir — deux résolutions successives pourraient diverger.
+  payOrganizationId?: string;
   mandateAction?: "accept" | "revoke";
   mandateOptions?: { id: string; name: string }[];
   // K3, §2.6.1 Spec USSD — client entité publique déjà résolu (sélection
@@ -712,6 +726,7 @@ export class UssdSessionService {
     await this.setState(session.id, "pay_awaiting_confirmation", {
       payInvoiceId: invoice.id,
       payInvoiceNumber: invoice.number as string,
+      payOrganizationId: organizationId,
     });
 
     return {
@@ -735,7 +750,11 @@ export class UssdSessionService {
       return { continue: false, text: "Paiement annulé." };
     }
 
-    await this.ussdPayment.confirmPayment(context.payInvoiceId as string, session.userId as string);
+    await this.ussdPayment.confirmPayment(
+      context.payInvoiceId as string,
+      session.userId as string,
+      context.payOrganizationId as string,
+    );
     return { continue: false, text: `Lien de paiement envoyé pour la facture ${context.payInvoiceNumber}.` };
   }
 

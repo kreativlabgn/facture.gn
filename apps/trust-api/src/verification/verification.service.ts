@@ -79,6 +79,18 @@ export class VerificationService {
 
   // Recherche exclusivement par certification_id (jamais par l'id UUID interne, qui
   // n'est jamais destiné à être partagé publiquement — ADR-023).
+  // RLS (ADR-111 étape 1) — CE SERVICE RESTE ENTIÈREMENT NON SCOPÉ, à dessein.
+  // C'est le point d'entrée PUBLIC de vérification : n'importe qui doit pouvoir
+  // vérifier une facture certifiée sans appartenir à l'organisation émettrice —
+  // c'est tout l'objet du dispositif de confiance. Aucun appelant n'a
+  // d'organisation à fournir, et en poser une rendrait l'endpoint inutilisable
+  // pour un tiers vérificateur.
+  //
+  // La reconstruction de la preuve Merkle (plus bas) est doublement
+  // non scopable : un lot d'ancrage rassemble les factures de TOUTES les
+  // organisations, et la racine ne se recalcule qu'avec l'intégralité des
+  // feuilles. Un GUC y produirait une racine fausse, donc une vérification
+  // faussement négative.
   async verifyByCertificationId(certificationId: string): Promise<PublicInvoiceVerification> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { certificationId },

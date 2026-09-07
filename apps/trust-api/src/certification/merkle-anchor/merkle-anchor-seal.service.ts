@@ -43,6 +43,13 @@ export class MerkleAnchorSealService {
     @InjectMetric(MERKLE_INVOICES_ANCHORED_METRIC) private readonly anchored: Counter<string>,
   ) {}
 
+  // RLS (ADR-111 étape 1) — À NE JAMAIS SCOPER, et c'est la raison d'être de
+  // l'ancrage : un lot Merkle scelle les factures de TOUTES les organisations
+  // dans un seul arbre, dont la racine est chaînée à la précédente. Poser un GUC
+  // ici n'ancrerait qu'une PME et forkerait la chaîne de racines pour toutes les
+  // autres. `merkle_anchor_batch` n'est d'ailleurs pas sous RLS (aucune colonne
+  // organization_id — un lot est plateforme par nature), et la transaction
+  // ci-dessous reste sans setOrganizationScope() pour la même raison.
   async sealDue(now: Date = new Date()): Promise<SealSummary> {
     const asOf = truncateToHourUtc(now);
 

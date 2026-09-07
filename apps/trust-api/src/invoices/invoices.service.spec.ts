@@ -1,5 +1,20 @@
 import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+
+// À travers un client scopé, le service n'appelle que findFirst* (règle du
+// runbook RLS : c'est la seule forme dont le `where` peut porter la colonne de
+// scope). Les faux de ce fichier ne déclarent que findUnique* — on adosse l'un
+// à l'autre pour TOUS les modèles, les deux désignant la même lecture, plutôt
+// que de réécrire chaque test. Les assertions sur findUnique* restent valables.
+function alignerFindFirst(prisma: any) {
+  for (const modele of Object.values(prisma)) {
+    if (!modele || typeof modele !== "object") continue;
+    const m = modele as any;
+    if (m.findUniqueOrThrow && !m.findFirstOrThrow) m.findFirstOrThrow = m.findUniqueOrThrow;
+    if (m.findUnique && !m.findFirst) m.findFirst = m.findUnique;
+  }
+}
+
 import { InvoicesService } from "./invoices.service";
 
 function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscalPeriodClosing?: any } = {}) {
@@ -74,7 +89,49 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscal
     // vraie base, le verrou lui-même n'a rien à vérifier ici).
     $transaction: vi.fn((callback: any) => callback(prisma)),
     $queryRaw: vi.fn().mockResolvedValue([]),
+    // setOrganizationScope() pose le GUC RLS via $executeRaw en première ligne
+    // des transactions interactives (issue()). Le vrai tx en dispose ; le faux
+    // doit donc le porter aussi, sinon on testerait un client qui ne peut pas
+    // scoper.
+    $executeRaw: vi.fn().mockResolvedValue(1),
+
+    // organizationScopedClient() appelle client.$extends(). Ici le faux se
+    // renvoie LUI-MÊME : les méthodes migrées (findOne, void) partagent alors
+    // les mêmes mocks de modèle, ce qui garde lisibles les assertions
+    // existantes sur les arguments. La contrepartie est qu'on ne distingue
+    // plus le client scopé du client de base — c'est pourquoi les tests
+    // vérifient explicitement que `$extends` a été appelé, et que le
+    // `where` porte bien l'organisation. La discrimination complète, elle,
+    // vit dans createFakeScopedPrisma() (tests de findAllByOrganization).
+    $extends: vi.fn(() => prisma),
   };
+  // Les méthodes migrées RLS appellent findFirstOrThrow : leur `where` porte
+  // désormais deux champs (id ET organizationId), ce qui n'est plus une clé
+  // unique. Les faux existants ne déclarent que findUniqueOrThrow — on adosse
+  // l'un à l'autre plutôt que de réécrire chaque test, les deux désignant la
+  // même lecture. Les assertions sur findUniqueOrThrow restent donc valables.
+  alignerFindFirst(prisma);
+
+  alignerFindFirst(prisma);
+  return prisma;
+}
+
+// Faux client pour les lectures scopées RLS (étape 1 du runbook rls-rollout).
+// `$extends()` rend un client DISTINCT plutôt que lui-même : c'est ce qui
+// permet à un test de distinguer une lecture passée par le client scopé d'une
+// lecture restée sur le client de base. Un faux qui se renverrait lui-même
+// laisserait passer une régression sans rien dire.
+function createFakeScopedPrisma(rows: any[] = []) {
+  const scoped = { invoice: { findMany: vi.fn().mockResolvedValue(rows) } };
+  const prisma: any = {
+    invoice: { findMany: vi.fn().mockResolvedValue(rows) },
+    $extends: vi.fn(() => scoped),
+    __scoped: scoped,
+  };
+  // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
+  // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
+  // adosse l'un à l'autre, les deux désignant la même lecture.
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -105,14 +162,20 @@ function createFakePaymentLinkClient(result: any = null) {
 }
 
 function createFakePrismaForCreateDraft(regimeFiscal: string) {
-  return {
+  // createDraft() lit et écrit désormais par le client scopé (l'organisation
+  // vient du DTO) : le faux doit donc porter $extends.
+  const prisma: any = {
     invoice: {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
     },
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal }),
     },
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  alignerFindFirst(prisma);
+  return prisma;
 }
 
 describe("InvoicesService — régime fiscal appliqué automatiquement (C4, ADR-033)", () => {
@@ -322,7 +385,15 @@ function createFakePrismaForConvertToInvoice(
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", regimeFiscal }),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
+  // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
+  // adosse l'un à l'autre, les deux désignant la même lecture.
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -340,7 +411,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(/proforma/);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/proforma/);
   });
 
   it("refuse de convertir un document qui n'est pas un proforma", async () => {
@@ -355,7 +426,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/proforma/);
+    await expect(service.convertToInvoice("inv-1", "org-1")).rejects.toThrow(/proforma/);
   });
 
   it("refuse de convertir un proforma déjà converti — empêche une double conversion", async () => {
@@ -377,7 +448,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/statut/);
+    await expect(service.convertToInvoice("inv-1", "org-1")).rejects.toThrow(/statut/);
   });
 
   it("crée une nouvelle facture draft et marque le proforma converted avec convertedToInvoiceId", async () => {
@@ -399,13 +470,15 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.documentType).toBe("invoice");
     expect(newInvoice.status).toBe("draft");
     expect(newInvoice.totalTtc).toBe(350_000n);
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", status: "draft" },
+      // organizationId dans le where de l'écriture — seule barrière tant que
+      // RLS dort.
+      where: { id: "inv-1", organizationId: "org-1", status: "draft" },
       data: { status: "converted" },
     });
     expect(prisma.invoice.update).toHaveBeenCalledWith({
@@ -433,13 +506,15 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.documentType).toBe("invoice");
     expect(newInvoice.status).toBe("draft");
     expect(newInvoice.totalTtc).toBe(220_000n);
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", status: "draft" },
+      // organizationId dans le where de l'écriture — seule barrière tant que
+      // RLS dort.
+      where: { id: "inv-1", organizationId: "org-1", status: "draft" },
       data: { status: "converted" },
     });
     expect(prisma.invoice.update).toHaveBeenCalledWith({
@@ -468,7 +543,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.discountPct).toBe(15);
   });
@@ -495,7 +570,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const newInvoice = await service.convertToInvoice("inv-1");
+    const newInvoice = await service.convertToInvoice("inv-1", "org-1");
 
     expect(newInvoice.totalHt).toBe(1_000_000n);
     expect(newInvoice.totalTva).toBe(180_000n);
@@ -525,7 +600,7 @@ describe("InvoicesService — proforma → facture (C15, ADR-064)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.convertToInvoice("inv-1")).rejects.toThrow(/conver/);
+    await expect(service.convertToInvoice("inv-1", "org-1")).rejects.toThrow(/conver/);
   });
 });
 
@@ -546,7 +621,15 @@ function createFakePrismaForForfeitDeposit(
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
+  // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
+  // adosse l'un à l'autre, les deux désignant la même lecture.
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -564,7 +647,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     );
 
     await expect(
-      service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou"),
+      service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou", "org-1"),
     ).rejects.toThrow(/arrhes/);
   });
 
@@ -580,7 +663,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou");
+    const event = await service.forfeitDeposit("proforma-1", "no_show_forfeited", "user-djenabou", "org-1");
 
     expect(event.type).toBe("no_show_forfeited");
     expect(event.amount).toBe(300_000n);
@@ -605,7 +688,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     );
 
     await expect(
-      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou", "org-1"),
     ).rejects.toThrow(/statut/);
   });
 
@@ -623,7 +706,7 @@ describe("InvoicesService — forfait d'arrhes no-show (C5, ADR-034)", () => {
     );
 
     await expect(
-      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou"),
+      service.forfeitDeposit("proforma-1", "cancellation_indemnity", "user-djenabou", "org-1"),
     ).rejects.toThrow(/autre requête/);
   });
 });
@@ -642,7 +725,7 @@ describe("InvoicesService — immutabilité post-émission", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.updateDraft("inv-1", { totalTtc: 999n })).rejects.toThrow(/immuable/);
+    await expect(service.updateDraft("inv-1", { totalTtc: 999n }, "org-1")).rejects.toThrow(/immuable/);
   });
 
   it("autorise la mutation d'une facture encore draft", async () => {
@@ -658,16 +741,83 @@ describe("InvoicesService — immutabilité post-émission", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await service.updateDraft("inv-1", { totalTtc: 999n });
+    await service.updateDraft("inv-1", { totalTtc: 999n }, "org-1");
 
-    expect(prisma.invoice.update).toHaveBeenCalledWith({
-      where: { id: "inv-1" },
+    // updateMany filtré par organisation, et non plus update par id seul.
+    expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", organizationId: "org-1" },
       data: { totalTtc: 999n },
     });
   });
 });
 
 describe("InvoicesService — machine à états", () => {
+  // Non-régression — un brouillon annulé cassait la chaîne de hash de TOUTES
+  // les factures suivantes, en silence. Il porte status='voided' (il passait
+  // donc l'ancien filtre `not: "draft"`) avec issued_at NULL, et PostgreSQL
+  // trie les NULL EN PREMIER en ORDER BY … DESC : c'est lui qui remontait,
+  // previousHash devenait nul, et la facture suivante repartait sur GENESIS.
+  //
+  // Le faux ci-dessous applique VRAIMENT le where et reproduit ce tri : sans
+  // cela le test passerait quelle que soit la requête, et ne prouverait rien.
+  it("un brouillon annulé ne devient jamais un maillon de la chaîne de hash", async () => {
+    const HASH_PRECEDENT = "c".repeat(64);
+    const lignes = [
+      {
+        id: "inv-emise",
+        status: "issued",
+        organizationId: "org-1",
+        issuedAt: new Date("2026-09-01T10:00:00Z"),
+        hash: HASH_PRECEDENT,
+      },
+      // Jamais émise : ni date d'émission, ni hash. Ce n'est pas un maillon.
+      { id: "inv-brouillon-annule", status: "voided", organizationId: "org-1", issuedAt: null, hash: null },
+    ];
+
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_500_000n,
+        }),
+        findFirst: vi.fn().mockImplementation(({ where }: any) => {
+          const retenues = lignes.filter((ligne) => {
+            if (where.organizationId && ligne.organizationId !== where.organizationId) return false;
+            if (where.issuedAt?.not === null && ligne.issuedAt === null) return false;
+            if (where.status?.not && ligne.status === where.status.not) return false;
+            return true;
+          });
+          // NULLS FIRST en DESC, comme PostgreSQL.
+          const triees = [...retenues].sort((a, b) => {
+            if (a.issuedAt === null) return -1;
+            if (b.issuedAt === null) return 1;
+            return b.issuedAt.getTime() - a.issuedAt.getTime();
+          });
+          return Promise.resolve(triees[0] ?? null);
+        }),
+      },
+    });
+
+    const certification = createFakeSigningKeyService();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      certification as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.issue("inv-1", "org-1");
+
+    expect(certification.certifyForOrganization).toHaveBeenCalledWith(
+      "org-1",
+      expect.objectContaining({ previousHash: HASH_PRECEDENT }),
+      expect.anything(),
+    );
+  });
+
   it("autorise draft → issued et certifie la facture (chaînage GENESIS pour la 1ère facture de l'org)", async () => {
     const prisma = createFakePrisma({
       invoice: {
@@ -689,7 +839,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     // Quality Audit 2026-08-23, revue post-fix #1 — 3e argument (tx) désormais
     // passé explicitement, voir invoice-numbering.service.ts/organization-signing-key.service.ts.
@@ -732,7 +882,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await service.issue("inv-1");
+    await service.issue("inv-1", "org-1");
 
     expect(numbering.nextNumber.mock.calls[0][2]).toBe(prisma);
     expect(certification.certifyForOrganization.mock.calls[0][2]).toBe(prisma);
@@ -757,7 +907,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     expect(result.signingKeyId).toBe("signing-key-1");
   });
@@ -785,7 +935,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await service.issue("inv-1");
+    await service.issue("inv-1", "org-1");
 
     expect(certification.certifyForOrganization).toHaveBeenCalledWith(
       "org-1",
@@ -807,7 +957,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(/statut/);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/statut/);
   });
 
   it("annule (voided) une facture draft sans paiement", async () => {
@@ -823,7 +973,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.void("inv-1");
+    const result = await service.void("inv-1", "org-1");
 
     expect(result.status).toBe("voided");
   });
@@ -841,7 +991,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.void("inv-1")).rejects.toThrow(/statut voided/);
+    await expect(service.void("inv-1", "org-1")).rejects.toThrow(/statut voided/);
   });
 
   it("refuse d'annuler une facture ayant déjà un paiement enregistré", async () => {
@@ -857,7 +1007,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.void("inv-1")).rejects.toThrow(/avoir/);
+    await expect(service.void("inv-1", "org-1")).rejects.toThrow(/avoir/);
   });
 
   it("refuse d'annuler si updateMany ne réclame rien (paiement/statut modifié entretemps, Quality Audit 2026-08-23, finding #3)", async () => {
@@ -874,9 +1024,12 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.void("inv-1")).rejects.toThrow(ConflictException);
+    await expect(service.void("inv-1", "org-1")).rejects.toThrow(ConflictException);
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: "inv-1", status: { in: ["draft", "issued"] }, amountPaid: 0n },
+      // organizationId dans le where de l'ÉCRITURE, pas seulement de la lecture :
+      // c'est le garde-fou qui empêche d'annuler la facture d'une autre
+      // organisation tant que RLS est dormant.
+      where: { id: "inv-1", organizationId: "org-1", status: { in: ["draft", "issued"] }, amountPaid: 0n },
       data: { status: "voided" },
     });
   });
@@ -905,7 +1058,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(/numéro/);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/numéro/);
   });
 
   it("traduit une violation de contrainte unique sur certification_id en erreur explicite, jamais un 500 brut (collision entre organisations sans NIF, B1/B4)", async () => {
@@ -932,13 +1085,17 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(/certification/);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/certification/);
   });
 
   it("convertit un timeout de transaction Prisma (P2028, contention sur FOR UPDATE) en 409 explicite, pas un 500 brut (Quality Audit 2026-08-23, revue post-fix #1)", async () => {
     const p2028 = Object.assign(new Error("Transaction already closed"), { code: "P2028" });
     const prisma: any = {
       $transaction: vi.fn().mockRejectedValue(p2028),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     };
     const service = new InvoicesService(
       prisma as any,
@@ -947,8 +1104,8 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(ConflictException);
-    await expect(service.issue("inv-1")).rejects.toThrow(/réessayer/);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(ConflictException);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/réessayer/);
   });
 
   it("sous deux appels concurrents réels sur la même facture draft, une seule certification est committée, jamais un trou dans la séquence (Quality Audit 2026-08-23, finding #1)", async () => {
@@ -983,6 +1140,9 @@ describe("InvoicesService — machine à états", () => {
     const prisma: any = {
       invoice: {
         findUniqueOrThrow: vi.fn().mockImplementation(() => Promise.resolve(invoiceState)),
+        // Même lecture que findUniqueOrThrow : le service migré RLS filtre sur
+        // { id, organizationId }, ce qui n'est plus une clé unique.
+        findFirstOrThrow: vi.fn().mockImplementation(() => Promise.resolve(invoiceState)),
         findFirst: vi.fn().mockResolvedValue(null),
         update: vi.fn().mockImplementation(({ data }: any) => {
           invoiceState = { ...invoiceState, ...data };
@@ -994,6 +1154,9 @@ describe("InvoicesService — machine à états", () => {
       },
       fiscalPeriodClosing: { findUnique: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockImplementation(() => acquireLock()),
+      // setOrganizationScope() : neutre ici. Il ne doit surtout PAS prendre le
+      // verrou simulé — le scope RLS se pose, il ne sérialise rien.
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (callback: any) => {
         try {
           return await callback(prisma);
@@ -1001,6 +1164,9 @@ describe("InvoicesService — machine à états", () => {
           releaseLock();
         }
       }),
+      // $executeRaw est déjà déclaré plus haut (neutre, il ne prend pas le
+      // verrou simulé) — ici seul $extends manquait.
+      $extends: vi.fn(() => prisma),
     };
 
     const numbering = createFakeNumbering();
@@ -1012,7 +1178,7 @@ describe("InvoicesService — machine à états", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const results = await Promise.allSettled([service.issue("inv-1"), service.issue("inv-1")]);
+    const results = await Promise.allSettled([service.issue("inv-1", "org-1"), service.issue("inv-1", "org-1")]);
 
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r) => r.status === "rejected");
@@ -1055,7 +1221,7 @@ describe("InvoicesService — gel post-récupération de compte (G2, réinterpr�
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(/gel/);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/gel/);
   });
 
   it("autorise l'émission si paymentsFrozenUntil est dans le passé (fenêtre expirée)", async () => {
@@ -1085,7 +1251,7 @@ describe("InvoicesService — gel post-récupération de compte (G2, réinterpr�
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+    await expect(service.issue("inv-1", "org-1")).resolves.toMatchObject({ status: "issued" });
   });
 
   it("autorise l'émission si paymentsFrozenUntil est null (jamais gelé)", async () => {
@@ -1107,7 +1273,7 @@ describe("InvoicesService — gel post-récupération de compte (G2, réinterpr�
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+    await expect(service.issue("inv-1", "org-1")).resolves.toMatchObject({ status: "issued" });
   });
 });
 
@@ -1135,6 +1301,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const notificationService = createNotificationService();
     const service = new InvoicesService(
       prisma as any,
@@ -1144,9 +1311,9 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       notificationService as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
-    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1", organizationId: "org-1" } });
     expect(notificationService.notify).toHaveBeenCalledWith(
       { phone: "+224622334455", notificationChannel: "sms" },
       resolvedLink.paymentLinkUrl,
@@ -1165,6 +1332,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const notificationService = createNotificationService();
     const service = new InvoicesService(
       prisma as any,
@@ -1174,7 +1342,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       notificationService as any,
     );
 
-    await service.issue("inv-1");
+    await service.issue("inv-1", "org-1");
 
     expect(notificationService.notify).toHaveBeenCalledWith(
       expect.anything(),
@@ -1205,7 +1373,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       notificationService as any,
     );
 
-    await service.issue("inv-1");
+    await service.issue("inv-1", "org-1");
 
     expect(notificationService.notify).not.toHaveBeenCalled();
   });
@@ -1223,7 +1391,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       notificationService as any,
     );
 
-    await service.issue("inv-1");
+    await service.issue("inv-1", "org-1");
 
     expect(notificationService.notify).not.toHaveBeenCalled();
   });
@@ -1233,6 +1401,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const notificationService = createNotificationService({ notify: vi.fn().mockRejectedValue(new Error("panne")) });
     const service = new InvoicesService(
       prisma as any,
@@ -1242,7 +1411,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       notificationService as any,
     );
 
-    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+    await expect(service.issue("inv-1", "org-1")).resolves.toMatchObject({ status: "issued" });
   });
 
   it("n'échoue jamais l'émission si aucun PaymentLinkNotificationService n'est fourni (compat, 65+ tests existants sans ce paramètre)", async () => {
@@ -1250,6 +1419,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoiceWithCustomer) },
     });
     (prisma as any).customer = { findUnique: vi.fn().mockResolvedValue({ phone: "+224622334455", notificationChannel: "sms" }) };
+    alignerFindFirst(prisma); // customer greffé APRÈS le constructeur : réaligner
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -1257,7 +1427,7 @@ describe("InvoicesService — notification du client au lien de paiement (C9)", 
       createFakePaymentLinkClient(resolvedLink) as any,
     );
 
-    await expect(service.issue("inv-1")).resolves.toMatchObject({ status: "issued" });
+    await expect(service.issue("inv-1", "org-1")).resolves.toMatchObject({ status: "issued" });
   });
 });
 
@@ -1287,7 +1457,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
       paymentLinkClient as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     // amountGnf majoré de la commission freemium (2,1% de 1 500 000 = 31 500,
     // ADR-074, corrigé pour absorber le frais gateway Djomy réel 1,4%) — jamais
@@ -1315,7 +1485,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
       paymentLinkClient as any,
     );
 
-    await service.issue("inv-1");
+    await service.issue("inv-1", "org-1");
 
     // 1,5% de 1 500 000 = 22 500 (pro, pas 2,5% freemium = 37 500).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
@@ -1346,7 +1516,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
       paymentLinkClient as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     expect(result.status).toBe("issued");
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
@@ -1365,7 +1535,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
       paymentLinkClient as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     expect(result.status).toBe("issued");
     expect(result.certificationId).toBe("GN-GN123456-2026-ABCDEF");
@@ -1384,7 +1554,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
       certification as any,
       createFakePaymentLinkClient(resolvedLink) as any,
     );
-    const resultSucces = await serviceSucces.issue("inv-1");
+    const resultSucces = await serviceSucces.issue("inv-1", "org-1");
 
     const prismaEchec = createFakePrisma({
       invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(draftInvoice) },
@@ -1395,7 +1565,7 @@ describe("InvoicesService — lien de paiement à l'émission (C2 Phase 2a)", ()
       certification as any,
       createFakePaymentLinkClient(null) as any,
     );
-    const resultEchec = await serviceEchec.issue("inv-1");
+    const resultEchec = await serviceEchec.issue("inv-1", "org-1");
 
     expect(resultSucces.number).toBe(resultEchec.number);
     expect(resultSucces.certificationId).toBe(resultEchec.certificationId);
@@ -1437,7 +1607,7 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
       paymentLinkClient as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     expect(paymentLinkClient.tryGenerate).not.toHaveBeenCalled();
     expect(result.status).toBe("issued");
@@ -1463,7 +1633,7 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
       paymentLinkClient as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
 
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalled();
     expect(result.paymentLinkUrl).toBe(resolvedLink.paymentLinkUrl);
@@ -1472,7 +1642,8 @@ describe("InvoicesService — envoi du lien de paiement immédiat ou différé (
 
 describe("InvoicesService — rattacher un client à la création (C6, ADR-039)", () => {
   function createFakePrismaWithCustomer(customer: any) {
-    return {
+    // createDraft() passe par le client scopé : le faux doit porter $extends.
+    const prisma: any = {
       invoice: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
       },
@@ -1482,7 +1653,11 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
       customer: {
         findUnique: vi.fn().mockResolvedValue(customer),
       },
+      $extends: vi.fn(() => prisma),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    alignerFindFirst(prisma);
+    return prisma;
   }
 
   it("crée la facture avec customerId quand le client appartient à la même organisation", async () => {
@@ -1501,7 +1676,7 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
       lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
     } as any);
 
-    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1" } });
+    expect((prisma as any).customer.findUnique).toHaveBeenCalledWith({ where: { id: "cust-1", organizationId: "org-1" } });
     expect(result.customerId).toBe("cust-1");
   });
 
@@ -1564,7 +1739,8 @@ describe("InvoicesService — rattacher un client à la création (C6, ADR-039)"
 
 describe("InvoicesService — rattacher une succursale à la création (E1, ADR-037)", () => {
   function createFakePrismaWithBranch(branch: any) {
-    return {
+    // createDraft() passe par le client scopé : le faux doit porter $extends.
+    const prisma: any = {
       invoice: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
       },
@@ -1574,7 +1750,11 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
       branch: {
         findUnique: vi.fn().mockResolvedValue(branch),
       },
+      $extends: vi.fn(() => prisma),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    alignerFindFirst(prisma);
+    return prisma;
   }
 
   it("crée la facture avec branchId quand la succursale appartient à la même organisation", async () => {
@@ -1593,7 +1773,7 @@ describe("InvoicesService — rattacher une succursale à la création (E1, ADR-
       lines: [{ description: "Sac de riz 50kg", quantity: 1, unitPrice: 1_180_000n }],
     } as any);
 
-    expect(prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: "branch-1" } });
+    expect(prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: "branch-1", organizationId: "org-1" } });
     expect(result.branchId).toBe("branch-1");
   });
 
@@ -1683,7 +1863,15 @@ function createFakePrismaForRegeneratePaymentLink(
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
+  // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
+  // adosse l'un à l'autre, les deux désignant la même lecture.
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -1709,7 +1897,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
     expect(result.paymentLinkId).toBe("djomy-ref-nouveau");
@@ -1731,7 +1919,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: { invoiceId: "inv-1", type: "payment_link_regenerated", actorId: "user-djenabou" },
@@ -1753,7 +1941,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(prisma.$transaction).toHaveBeenCalled();
   });
@@ -1773,7 +1961,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(null) as any,
     );
 
-    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(prisma.invoice.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1791,7 +1979,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
   });
 
   it("refuse la régénération sur une facture voided ou paid — plus rien à régler", async () => {
@@ -1807,7 +1995,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
-    await expect(serviceVoided.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(serviceVoided.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
 
     const prismaPaid = createFakePrismaForRegeneratePaymentLink({
       id: "inv-1",
@@ -1821,7 +2009,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakeSigningKeyService() as any,
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
-    await expect(servicePaid.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(servicePaid.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
   });
 
   it("accepte la régénération sur une facture partially_paid — toujours payable", async () => {
@@ -1839,7 +2027,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    const result = await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     expect(result.paymentLinkUrl).toBe("https://pay.facture.gn/nouveau-lien");
   });
@@ -1860,7 +2048,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       paymentLinkClient as any,
     );
 
-    await service.regeneratePaymentLink("inv-1", "user-djenabou");
+    await service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1");
 
     // 120 000 + commission freemium 2,1% (2 520) = 122 520 (ADR-074, corrigé).
     expect(paymentLinkClient.tryGenerate).toHaveBeenCalledWith(
@@ -1887,7 +2075,7 @@ describe("InvoicesService — régénération du lien de paiement à la demande 
       createFakePaymentLinkClient(resolvedPaymentLink) as any,
     );
 
-    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.regeneratePaymentLink("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
 });
@@ -1934,7 +2122,15 @@ function createFakePrismaForCreateAssisted(
     fiscalPeriodClosing: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn((callback: any) => callback(prisma)),
     $queryRaw: vi.fn().mockResolvedValue([]),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
+  // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
+  // adosse l'un à l'autre, les deux désignant la même lecture.
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -2036,7 +2232,7 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.findOne("inv-1");
+    const result = await service.findOne("inv-1", "org-1");
 
     expect(result).toEqual({
       id: "inv-1",
@@ -2060,15 +2256,53 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.findOne("inv-inconnue")).rejects.toThrow(/introuvable/);
+    await expect(service.findOne("inv-inconnue", "org-1")).rejects.toThrow(/introuvable/);
+  });
+});
+
+// RLS, étape 1 du runbook rls-rollout : la lecture doit passer par
+// organizationScopedClient(), qui pose app.current_org_id pour la durée de
+// la transaction. Tant que les politiques sont dormantes cela ne change rien
+// au résultat — d'où ce test, sinon rien ne signalerait une régression.
+describe("findAllByOrganization — scope RLS", () => {
+  it("passe par le client scopé RLS, avec l'organisation demandée", async () => {
+    const prisma = createFakeScopedPrisma();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", {});
+
+    expect(prisma.$extends).toHaveBeenCalledTimes(1);
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalled();
+    // Le client de base ne doit PAS avoir servi : sinon la requête
+    // s'exécuterait hors de toute transaction scopée.
+    expect(prisma.invoice.findMany).not.toHaveBeenCalled();
+  });
+
+  // Le where explicite reste la seule protection réelle tant que RLS dort.
+  it("garde organizationId dans le where, RLS étant encore dormant", async () => {
+    const prisma = createFakeScopedPrisma();
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findAllByOrganization("org-1", {});
+
+    const args = prisma.__scoped.invoice.findMany.mock.calls[0][0];
+    expect(args.where.organizationId).toBe("org-1");
   });
 });
 
 describe("findAllByOrganization", () => {
   it("liste les factures de l'organisation, plus récentes d'abord, paginées avec une limite par défaut", async () => {
-    const prisma: any = {
-      invoice: { findMany: vi.fn().mockResolvedValue([{ id: "inv-2" }, { id: "inv-1" }]) },
-    };
+    const prisma = createFakeScopedPrisma([{ id: "inv-2" }, { id: "inv-1" }]);
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2078,7 +2312,7 @@ describe("findAllByOrganization", () => {
 
     const result = await service.findAllByOrganization("org-1", {});
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith({
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith({
       where: { organizationId: "org-1" },
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -2088,7 +2322,7 @@ describe("findAllByOrganization", () => {
   });
 
   it("respecte take/skip explicites, plafonnés à 100 pour éviter une réponse non bornée (DAT, 1M factures/mois)", async () => {
-    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma = createFakeScopedPrisma();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2098,7 +2332,7 @@ describe("findAllByOrganization", () => {
 
     await service.findAllByOrganization("org-1", { take: 500, skip: 20 });
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 100, skip: 20 }),
     );
   });
@@ -2106,7 +2340,8 @@ describe("findAllByOrganization", () => {
 
 describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-084)", () => {
   function createFakePrismaWithProducts(products: any[]) {
-    return {
+    // createDraft() passe par le client scopé : le faux doit porter $extends.
+    const prisma: any = {
       invoice: {
         create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "inv-1", ...data })),
       },
@@ -2116,7 +2351,11 @@ describe("InvoicesService — snapshot costPriceAtTime à la création (E7, ADR-
       product: {
         findMany: vi.fn().mockResolvedValue(products),
       },
+      $extends: vi.fn(() => prisma),
+      $executeRaw: vi.fn().mockResolvedValue(1),
     };
+    alignerFindFirst(prisma);
+    return prisma;
   }
 
   it("snapshotte costPrice du produit référencé dans costPriceAtTime de la ligne", async () => {
@@ -2241,7 +2480,15 @@ function createFakePrismaForSendReminder(invoice: any) {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
     $transaction: vi.fn((callback: any) => callback(prisma)),
+    // organizationScopedClient() appelle $extends ; setOrganizationScope()
+    // appelle $executeRaw dans la transaction. Le vrai client porte les deux.
+    $extends: vi.fn(() => prisma),
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
+  // Les méthodes migrées RLS appellent findFirstOrThrow (where à deux champs,
+  // donc plus de clé unique). Les faux ne déclarent que findUniqueOrThrow : on
+  // adosse l'un à l'autre, les deux désignant la même lecture.
+  alignerFindFirst(prisma);
   return prisma;
 }
 
@@ -2274,7 +2521,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await service.sendReminder("inv-1", "user-djenabou");
+    await service.sendReminder("inv-1", "user-djenabou", "org-1");
 
     expect(reminderService.send).toHaveBeenCalledWith(
       { phone: "+224622334455", notificationChannel: "sms" },
@@ -2299,7 +2546,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await service.sendReminder("inv-1", "user-djenabou");
+    await service.sendReminder("inv-1", "user-djenabou", "org-1");
 
     expect(reminderService.send).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "pular");
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
@@ -2320,7 +2567,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 
@@ -2336,7 +2583,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
   });
 
   it("rejette (ConflictException) une facture sans client associé", async () => {
@@ -2351,7 +2598,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 
@@ -2370,7 +2617,7 @@ describe("InvoicesService — rappel de paiement après échéance (I2)", () => 
       reminderService as any,
     );
 
-    await expect(service.sendReminder("inv-1", "user-djenabou")).rejects.toThrow(ConflictException);
+    await expect(service.sendReminder("inv-1", "user-djenabou", "org-1")).rejects.toThrow(ConflictException);
     expect(reminderService.send).not.toHaveBeenCalled();
   });
 });
@@ -2430,7 +2677,7 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
   });
 
   it("findAllByOrganization filtre par emissionChannel quand il est fourni", async () => {
-    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma = createFakeScopedPrisma();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2440,13 +2687,13 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
 
     await service.findAllByOrganization("org-1", { emissionChannel: "ussd" });
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { organizationId: "org-1", emissionChannel: "ussd" } }),
     );
   });
 
   it("findAllByOrganization n'ajoute pas de clé emissionChannel au where quand le filtre est absent", async () => {
-    const prisma: any = { invoice: { findMany: vi.fn().mockResolvedValue([]) } };
+    const prisma = createFakeScopedPrisma();
     const service = new InvoicesService(
       prisma as any,
       createFakeNumbering() as any,
@@ -2456,7 +2703,7 @@ describe("InvoicesService — canal d'émission (Lot D)", () => {
 
     await service.findAllByOrganization("org-1", {});
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+    expect(prisma.__scoped.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { organizationId: "org-1" } }),
     );
   });
@@ -2530,7 +2777,7 @@ describe("InvoicesService.issue — garde d'exercice clos (Lot B, ADR-110)", () 
       createFakePaymentLinkClient() as any,
     );
 
-    await expect(service.issue("inv-1")).rejects.toThrow(/exercice/i);
+    await expect(service.issue("inv-1", "org-1")).rejects.toThrow(/exercice/i);
     expect(prisma.fiscalPeriodClosing.findUnique).toHaveBeenCalledWith({
       where: { organizationId_year: { organizationId: "org-1", year: currentYear } },
     });
@@ -2547,7 +2794,7 @@ describe("InvoicesService.issue — garde d'exercice clos (Lot B, ADR-110)", () 
       createFakePaymentLinkClient() as any,
     );
 
-    const result = await service.issue("inv-1");
+    const result = await service.issue("inv-1", "org-1");
     expect(result.status).toBe("issued");
   });
 });

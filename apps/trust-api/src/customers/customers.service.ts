@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import { DEFAULT_CREDIT_LIMIT_APPROVAL_THRESHOLD } from "./credit-limit-approval";
@@ -32,7 +33,10 @@ export class CustomersService {
   async findAllByOrganization(organizationId: string, pagination: { take?: number; skip?: number }) {
     const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
     const skip = pagination.skip ?? 0;
-    return this.prisma.customer.findMany({
+    // `where.organizationId` est CONSERVÉ : les politiques sont dormantes et le
+    // rôle applicatif possède les tables, donc contourne RLS. Le retirer rendrait
+    // les clients de toutes les organisations.
+    return organizationScopedClient(this.prisma, organizationId).customer.findMany({
       where: { organizationId },
       orderBy: { createdAt: "desc" },
       take,
@@ -66,8 +70,14 @@ export class CustomersService {
   // SIGNAL) : le verrou ne fait que garantir que le signal est posé de façon
   // fiable sous course réelle, jamais qu'une seule ligne peut exister pour ce
   // téléphone.
+  // L'organisation vient du DTO — aucun paramètre à ajouter.
   async create(dto: CreateCustomerDto) {
+    const organizationId = dto.organizationId;
     return this.prisma.$transaction(async (tx) => {
+      // RLS (rls-rollout.md, étape 1) — première ligne du bloc : le client scopé
+      // ouvrirait une transaction imbriquée par opération.
+      await setOrganizationScope(tx, organizationId);
+
       if (dto.phone) {
         // $executeRaw et non $queryRaw : pg_advisory_xact_lock() renvoie void, et
         // $queryRaw tente de désérialiser les colonnes du résultat — « Failed to
@@ -108,13 +118,16 @@ export class CustomersService {
   // plutôt que le seul UUID possibleDuplicateOf déjà exposé par la liste.
   // Jamais une fusion : uniquement la lecture nécessaire à la résolution
   // manuelle via merge() (E4) depuis cet écran.
-  async findOneWithBalance(customerId: string) {
-    const customer = await this.prisma.customer.findUniqueOrThrow({
-      where: { id: customerId },
+  async findOneWithBalance(customerId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const customer = await scoped.customer.findFirstOrThrow({
+      where: { id: customerId, organizationId },
       include: { duplicateOf: { select: { id: true, name: true } } },
     });
-    const aggregate = await this.prisma.invoice.aggregate({
-      where: { customerId, status: { in: [...OUTSTANDING_INVOICE_STATUSES] } },
+    // L'agrégat porte aussi le filtre organisation : un solde calculé sur les
+    // factures d'un autre locataire serait faux ET révélateur.
+    const aggregate = await scoped.invoice.aggregate({
+      where: { customerId, organizationId, status: { in: [...OUTSTANDING_INVOICE_STATUSES] } },
       _sum: { amountDue: true },
     });
 
@@ -125,14 +138,20 @@ export class CustomersService {
   // structurellement aucune facture à présenter à un DAF". publicBuyerAccountId
   // vérifié explicitement (jamais une simple FK muette) : une PME ne doit pas
   // pouvoir rattacher un client à un compte acheteur public inexistant.
-  async flagPublicEntity(customerId: string, publicBuyerAccountId: string) {
+  async flagPublicEntity(customerId: string, publicBuyerAccountId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    // public_buyer_account n'est PAS sous politique org_isolation (table globale
+    // des acheteurs publics, partagée entre organisations) : lecture non scopée
+    // à dessein, pas un oubli.
     const publicBuyerAccount = await this.prisma.publicBuyerAccount.findUnique({
       where: { id: publicBuyerAccountId },
     });
     if (!publicBuyerAccount) {
       throw new NotFoundException(`Compte acheteur public ${publicBuyerAccountId} introuvable`);
     }
-    this.assertNotAnonymized(await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } }));
+    this.assertNotAnonymized(
+      await scoped.customer.findFirstOrThrow({ where: { id: customerId, organizationId } }),
+    );
 
     // Security Audit 2026-08-23, finding #13 — isPublicEntityConfirmed toujours
     // remis à false ici, même en cas de re-pointage vers un autre compte : la
@@ -149,12 +168,21 @@ export class CustomersService {
     // customer<->publicBuyerAccount qui l'a produite, jamais transférable à un
     // nouveau lien sans repasser par une vraie validation.
     return this.prisma.$transaction(async (tx) => {
+      // RLS (rls-rollout.md, étape 1) — première ligne du bloc : le client scopé
+      // ouvrirait une transaction imbriquée par opération.
+      await setOrganizationScope(tx, organizationId);
+
+      // update par id, à travers le client scopé : la lecture juste au-dessus a
+      // déjà établi l'appartenance avec { id, organizationId }, et
+      // Customer.organizationId est immuable. Un updateMany + relecture
+      // n'ajouterait pas de barrière, seulement un aller-retour et une valeur de
+      // retour reconstruite.
       const customer = await tx.customer.update({
         where: { id: customerId },
         data: { isPublicEntity: true, publicBuyerAccountId, isPublicEntityConfirmed: false },
       });
       await tx.invoice.updateMany({
-        where: { customerId, validatedByAdministration: true },
+        where: { customerId, organizationId, validatedByAdministration: true },
         data: { validatedByAdministration: false },
       });
       return customer;
@@ -165,13 +193,19 @@ export class CustomersService {
   // méthode EST la résolution manuelle (un admin/owner choisit explicitement les
   // deux fiches). Organisation vérifiée par comparaison directe des deux
   // organizationId chargés, jamais un paramètre transmis par l'appelant.
-  async merge(canonicalCustomerId: string, duplicateCustomerId: string) {
+  async merge(canonicalCustomerId: string, duplicateCustomerId: string, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
     if (canonicalCustomerId === duplicateCustomerId) {
       throw new ConflictException("Impossible de fusionner un client avec lui-même");
     }
 
-    const canonical = await this.prisma.customer.findUniqueOrThrow({ where: { id: canonicalCustomerId } });
-    const duplicate = await this.prisma.customer.findUnique({ where: { id: duplicateCustomerId } });
+    // Les deux lectures et le contrôle d'appartenance ci-dessous sont conservés :
+    // le message distingue « introuvable » de « autre organisation », nuance que
+    // le scope seul écraserait.
+    const canonical = await scoped.customer.findFirstOrThrow({
+      where: { id: canonicalCustomerId, organizationId },
+    });
+    const duplicate = await scoped.customer.findFirst({ where: { id: duplicateCustomerId, organizationId } });
     if (!duplicate || duplicate.organizationId !== canonical.organizationId) {
       throw new ConflictException(`Client ${duplicateCustomerId} introuvable pour cette organisation`);
     }
@@ -180,7 +214,7 @@ export class CustomersService {
 
     // H1, Grille §2 — "gestion client avancée" (merge doublons + credit_limit)
     // dépend structurellement du rôle approver (ADR-083, Pro+ uniquement).
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: canonical.organizationId },
     });
     if (!isAdvancedCustomerManagementAllowed(organization.commercialTier)) {
@@ -190,12 +224,20 @@ export class CustomersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // RLS (rls-rollout.md, étape 1) — première ligne du bloc : le client scopé
+      // ouvrirait une transaction imbriquée par opération.
+      await setOrganizationScope(tx, organizationId);
+
       await tx.invoice.updateMany({
-        where: { customerId: duplicateCustomerId },
+        where: { customerId: duplicateCustomerId, organizationId },
         data: { customerId: canonicalCustomerId },
       });
+      // La fusion est irréversible — l'écriture la plus dangereuse de ce
+      // service. L'appartenance des DEUX clients a été vérifiée plus haut, sur
+      // des lectures scopées, et le message distingue explicitement « autre
+      // organisation » de « introuvable ».
       await tx.customer.delete({ where: { id: duplicateCustomerId } });
-      return tx.customer.findUniqueOrThrow({ where: { id: canonicalCustomerId } });
+      return tx.customer.findFirstOrThrow({ where: { id: canonicalCustomerId, organizationId } });
     });
   }
 
@@ -203,10 +245,16 @@ export class CustomersService {
   // approver, jamais une décision unilatérale". Une baisse, ou une hausse sous
   // le seuil, s'applique immédiatement (admin/owner) : seul le dépassement
   // déclenche la mise en attente, jamais l'égalité au seuil lui-même.
-  async proposeCreditLimit(customerId: string, newLimit: bigint, requestedByUserId: string) {
-    const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+  async proposeCreditLimit(
+    customerId: string,
+    newLimit: bigint,
+    requestedByUserId: string,
+    organizationId: string,
+  ) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const customer = await scoped.customer.findFirstOrThrow({ where: { id: customerId, organizationId } });
     this.assertNotAnonymized(customer);
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    const organization = await scoped.organization.findFirstOrThrow({
       where: { id: customer.organizationId },
     });
     // H1, Grille §2 — même garde que merge(), "gestion client avancée" Pro+.
@@ -220,10 +268,15 @@ export class CustomersService {
     const increase = newLimit - currentLimit;
 
     if (increase <= threshold) {
-      return this.prisma.customer.update({ where: { id: customerId }, data: { creditLimit: newLimit } });
+      // update par id, à travers le client scopé : la lecture juste au-dessus a
+      // déjà établi l'appartenance avec { id, organizationId }, et
+      // Customer.organizationId est immuable. Un updateMany + relecture
+      // n'ajouterait pas de barrière, seulement un aller-retour et une valeur de
+      // retour reconstruite.
+      return scoped.customer.update({ where: { id: customerId }, data: { creditLimit: newLimit } });
     }
 
-    return this.prisma.creditLimitChangeRequest.create({
+    return scoped.creditLimitChangeRequest.create({
       data: {
         customerId,
         organizationId: customer.organizationId,
@@ -239,8 +292,16 @@ export class CustomersService {
   // interdiction que le demandeur résolve sa propre demande — c'est le sens même
   // de "jamais une décision unilatérale" (ADR-083). RolesGuard (@Roles("approver"))
   // garantit déjà le rôle du résolveur en amont, jamais revérifié ici.
-  async resolveCreditLimitRequest(requestId: string, resolverUserId: string, decision: "approved" | "rejected") {
-    const request = await this.prisma.creditLimitChangeRequest.findUniqueOrThrow({ where: { id: requestId } });
+  async resolveCreditLimitRequest(
+    requestId: string,
+    resolverUserId: string,
+    decision: "approved" | "rejected",
+    organizationId: string,
+  ) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const request = await scoped.creditLimitChangeRequest.findFirstOrThrow({
+      where: { id: requestId, organizationId },
+    });
 
     if (request.requestedByUserId === resolverUserId) {
       throw new ConflictException("Vous ne pouvez pas résoudre votre propre demande de hausse de limite de crédit");
@@ -249,8 +310,12 @@ export class CustomersService {
     const resolvedAt = new Date();
 
     return this.prisma.$transaction(async (tx) => {
+      // RLS (rls-rollout.md, étape 1) — première ligne du bloc : le client scopé
+      // ouvrirait une transaction imbriquée par opération.
+      await setOrganizationScope(tx, organizationId);
+
       const claimed = await tx.creditLimitChangeRequest.updateMany({
-        where: { id: requestId, status: "pending" },
+        where: { id: requestId, organizationId, status: "pending" },
         data: { status: decision, resolvedAt, resolvedByUserId: resolverUserId },
       });
       if (claimed.count === 0) {
@@ -264,11 +329,13 @@ export class CustomersService {
         // L'approuver ré-écrirait `creditLimit` sur une ligne gelée, défaisant
         // l'effacement. Refuser (le rejet, lui, a déjà été posé ci-dessus).
         this.assertNotAnonymized(
-          await tx.customer.findUniqueOrThrow({
-            where: { id: request.customerId },
+          await tx.customer.findFirstOrThrow({
+            where: { id: request.customerId, organizationId },
             select: { id: true, anonymizedAt: true },
           }),
         );
+        // Même raison qu'ailleurs : la relecture scopée ci-dessus a déjà
+        // établi l'appartenance.
         await tx.customer.update({ where: { id: request.customerId }, data: { creditLimit: request.requestedLimit } });
       }
 
@@ -305,7 +372,7 @@ export class CustomersService {
 
     const existingMatches =
       phonesInPayload.size > 0
-        ? await this.prisma.customer.findMany({
+        ? await organizationScopedClient(this.prisma, organizationId).customer.findMany({
             // J2, ADR-116 — exclut les lignes anonymisées (gelées) du dédoublonnage.
             where: { organizationId, phone: { in: [...phonesInPayload] }, anonymizedAt: null },
           })
@@ -320,7 +387,7 @@ export class CustomersService {
         ? phoneToBatchCustomerId.get(data.phone) ?? phoneToExistingCustomerId.get(data.phone) ?? null
         : null;
 
-      const customer = await this.prisma.customer.create({
+      const customer = await organizationScopedClient(this.prisma, organizationId).customer.create({
         data: {
           organizationId,
           name: data.name,

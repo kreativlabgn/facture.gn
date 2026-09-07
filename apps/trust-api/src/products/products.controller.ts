@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import {
   organizationScopedListQuerySchema,
@@ -22,8 +23,11 @@ export class ProductsController {
 
   @Post()
   @Roles("owner", "admin")
-  create(@Body(new ZodValidationPipe(createProductSchema)) dto: CreateProductDto) {
-    return this.productsService.create(dto);
+  create(
+    @Body(new ZodValidationPipe(createProductSchema)) dto: CreateProductDto,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.productsService.create(dto, organizationId);
   }
 
   // E6, ADR-084 — même trio restreint que create() : donnée commerciale
@@ -31,8 +35,12 @@ export class ProductsController {
   @Post(":id/cost-price")
   @Roles("owner", "admin")
   @OrganizationIdSource("product")
-  setCostPrice(@Param("id") id: string, @Body(new ZodValidationPipe(setCostPriceSchema)) dto: SetCostPriceDto) {
-    return this.productsService.setCostPrice(id, dto.costPrice);
+  setCostPrice(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(setCostPriceSchema)) dto: SetCostPriceDto,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.productsService.setCostPrice(id, dto.costPrice, organizationId);
   }
 
   // UI backlog gap comblé ici — catalogue produit (liste + détail). Même trio
@@ -53,7 +61,7 @@ export class ProductsController {
   @Get(":id")
   @Roles("owner", "admin")
   @OrganizationIdSource("product")
-  findOne(@Param("id") id: string) {
-    return this.productsService.findOneWithDuplicate(id);
+  findOne(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
+    return this.productsService.findOneWithDuplicate(id, organizationId);
   }
 }

@@ -727,7 +727,7 @@ describe("UssdSessionService — option 1, payer une facture (D3, §2.1 Spec USS
     const prisma = createFakePrisma({
       existingSession: existingSession({
         state: "pay_awaiting_confirmation",
-        contextData: { payInvoiceId: "inv-1", payInvoiceNumber: "FG-2026-000001" },
+        contextData: { payInvoiceId: "inv-1", payInvoiceNumber: "FG-2026-000001", payOrganizationId: ORG_ID },
         userId: USER_ID,
       }),
     });
@@ -736,7 +736,7 @@ describe("UssdSessionService — option 1, payer une facture (D3, §2.1 Spec USS
 
     const result = await service.handleRequest(SESSION_ID, PHONE, "1");
 
-    expect(ussdPayment.confirmPayment).toHaveBeenCalledWith("inv-1", USER_ID);
+    expect(ussdPayment.confirmPayment).toHaveBeenCalledWith("inv-1", USER_ID, ORG_ID);
     expect(result).toEqual({ continue: false, text: "Lien de paiement envoyé pour la facture FG-2026-000001." });
   });
 
@@ -744,7 +744,7 @@ describe("UssdSessionService — option 1, payer une facture (D3, §2.1 Spec USS
     const prisma = createFakePrisma({
       existingSession: existingSession({
         state: "pay_awaiting_confirmation",
-        contextData: { payInvoiceId: "inv-1", payInvoiceNumber: "FG-2026-000001" },
+        contextData: { payInvoiceId: "inv-1", payInvoiceNumber: "FG-2026-000001", payOrganizationId: ORG_ID },
       }),
     });
     const ussdPayment = createFakeUssdPayment();

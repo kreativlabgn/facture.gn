@@ -1,5 +1,23 @@
 import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes sur les arguments inchangées.
+// (La pose effective du set_config est couverte par packages/db rls.spec.ts.)
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { UssdAccountService } from "./ussd-account.service";
 
 const USER_ID = "user-1";
@@ -8,7 +26,7 @@ const MANDATE_ID = "mandate-1";
 const PHONE = "+224622334455";
 
 function createFakePrisma(overrides: { organization?: any; requesterMembership?: any } = {}) {
-  return {
+  return auClientScope({
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(overrides.organization ?? { id: ORG_ID, phone: null }),
       update: vi.fn().mockResolvedValue({}),
@@ -23,7 +41,7 @@ function createFakePrisma(overrides: { organization?: any; requesterMembership?:
           : { organizationId: ORG_ID, userId: USER_ID, role: "owner", revokedAt: null },
       ),
     },
-  };
+  });
 }
 
 function createFakeOrganizationsService(overrides: { inviteMember?: ReturnType<typeof vi.fn> } = {}) {

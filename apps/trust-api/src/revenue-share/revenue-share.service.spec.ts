@@ -2,6 +2,26 @@ import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { RevenueShareService } from "./revenue-share.service";
 
+// practiceScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées. `$transaction`
+// bi-forme : la forme tableau est celle qu'emploie makeScopedOperation(), ce qui
+// rend l'extension rejouable par les tests de scope.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function createFakePrisma(
   overrides: {
     requesterMembership?: any;
@@ -14,7 +34,7 @@ function createFakePrisma(
     creditedSum?: bigint | null;
   } = {},
 ) {
-  return {
+  return auClientScope({
     practiceMember: {
       findFirst: vi.fn().mockResolvedValue(
         "requesterMembership" in overrides
@@ -50,10 +70,39 @@ function createFakePrisma(
         overrides.practice ?? { id: "practice-1", tier: "partner_starter", revenueShareSettlementMode: "payout" },
       ),
     },
-  };
+  });
 }
 
 describe("RevenueShareService.generate (H4, ADR-071)", () => {
+  // Ce module est scopé CABINET de bout en bout. Les faux `$extends` se
+  // renvoyant eux-mêmes, la valeur du scope n'est pas observable directement :
+  // on rejoue l'extension capturée — `$allOperations` exécute le set_config via
+  // `$executeRaw` — pour lire ce qui y a été injecté.
+  it("pose app.current_practice_id, et JAMAIS app.current_org_id", async () => {
+    const prisma = createFakePrisma({
+      mandates: [{ organizationId: "org-1", practiceId: "practice-1" }],
+      platformFeeSum: 1_000_000n,
+    });
+    const service = new RevenueShareService(prisma as any);
+
+    await service.generate("practice-1", "user-1", "2026-08");
+
+    // auClientScope() greffe $extends/$executeRaw dynamiquement : le type
+    // littéral rendu par createFakePrisma() ne les porte pas.
+    const espion = prisma as any;
+    const extension = espion.$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = espion.$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_practice_id");
+    expect(setConfig.values).toContain("practice-1");
+    // Le scope ORGANISATION serait une erreur de nature ici : les crédits et les
+    // mandats portent practice_id, et la vue paiements est transversale aux
+    // organisations mandatées. Un app.current_org_id la réduirait à une seule.
+    expect(setConfig.values).not.toContain("app.current_org_id");
+  });
+
+
   it("rejette un demandeur qui n'est pas practice_admin", async () => {
     const prisma = createFakePrisma({ requesterMembership: { role: "accountant_external", leftAt: null } });
     const service = new RevenueShareService(prisma as any);

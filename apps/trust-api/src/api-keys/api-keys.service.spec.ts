@@ -1,5 +1,23 @@
+import { NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { ApiKeysService } from "./api-keys.service";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 
 function createFakePasswordService() {
   return {
@@ -10,22 +28,31 @@ function createFakePasswordService() {
 }
 
 function createFakePrisma(overrides: { apiKeys?: any[]; existingApiKey?: any } = {}) {
-  return {
+  const cleParDefaut = { id: "apikey-1", organizationId: "org-1", revokedAt: null };
+  // `in` plutôt que `??` : un test doit pouvoir demander explicitement
+  // l'ABSENCE de clé (existingApiKey: null), que `??` écraserait par le défaut.
+  const cle = "existingApiKey" in overrides ? overrides.existingApiKey : cleParDefaut;
+
+  return auClientScope({
     apiKey: {
       create: vi.fn().mockImplementation(({ data }: any) =>
         Promise.resolve({ id: "apikey-1", createdAt: new Date("2026-08-18T00:00:00.000Z"), revokedAt: null, lastUsedAt: null, ...data }),
       ),
       findMany: vi.fn().mockResolvedValue(overrides.apiKeys ?? []),
-      findUniqueOrThrow: vi.fn().mockResolvedValue(
-        overrides.existingApiKey ?? {
-          id: "apikey-1",
-          organizationId: "org-1",
-          revokedAt: null,
-        },
-      ),
+      // Applique RÉELLEMENT le filtrage décrit par le `where` : c'est ce qui
+      // permet au test d'IDOR de prouver quelque chose. Un mock figé renverrait
+      // la clé d'une autre organisation et laisserait passer une régression.
+      findFirst: vi.fn().mockImplementation(({ where }: any) => {
+        if (!cle) return Promise.resolve(null);
+        if (where.organizationId && cle.organizationId !== where.organizationId) {
+          return Promise.resolve(null);
+        }
+        if (where.id && cle.id !== where.id) return Promise.resolve(null);
+        return Promise.resolve(cle);
+      }),
       update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
     },
-  };
+  });
 }
 
 describe("ApiKeysService.createApiKey (F15, ADR-097)", () => {
@@ -121,6 +148,21 @@ describe("ApiKeysService.revokeApiKey (F15, ADR-097)", () => {
     const service = new ApiKeysService(prisma as any, createFakePasswordService() as any);
 
     await expect(service.revokeApiKey("org-attaquant", "apikey-1", "user-2")).rejects.toThrow(/introuvable/);
+    expect(prisma.apiKey.update).not.toHaveBeenCalled();
+  });
+
+  // Régression : avant la migration RLS, ce chemin passait par
+  // findUniqueOrThrow, dont la NotFoundError Prisma n'était interceptée par aucun
+  // ExceptionFilter (il n'y en a aucun dans cette application) — l'appelant
+  // recevait un 500 là où le commentaire du service annonçait un 404 « générique
+  // dans les deux cas ». La réponse est désormais réellement indistinguable de
+  // celle d'une clé appartenant à une autre organisation.
+  it("rejette (NotFoundException) une clé inexistante — même réponse qu'une clé d'une autre organisation", async () => {
+    const prisma = createFakePrisma({ existingApiKey: null });
+    const service = new ApiKeysService(prisma as any, createFakePasswordService() as any);
+
+    await expect(service.revokeApiKey("org-1", "apikey-inconnue", "user-2")).rejects.toThrow(NotFoundException);
+    await expect(service.revokeApiKey("org-1", "apikey-inconnue", "user-2")).rejects.toThrow(/introuvable/);
     expect(prisma.apiKey.update).not.toHaveBeenCalled();
   });
 

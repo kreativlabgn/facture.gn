@@ -2,6 +2,26 @@ import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { CreditNotesService } from "./credit-notes.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw`. Le vrai client offre les deux ; un faux qui ne les offre
+// pas ne teste pas le service migré, il plante dessus. `$extends` rend le client
+// LUI-MÊME pour que les mocks restent partagés. `$transaction` bi-forme : la forme
+// tableau est celle qu'emploie makeScopedOperation(), ce qui rend l'extension
+// rejouable — indispensable pour épingler la VALEUR du client scopé.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, alreadyCreditedSum = 0) {
   const invoice = {
     id: "inv-1",
@@ -14,7 +34,7 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, alread
     ...invoiceOverrides,
   };
 
-  const prisma: any = {
+  const prisma: any = auClientScope({
     invoice: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(invoice),
     },
@@ -26,11 +46,33 @@ function createFakePrisma(invoiceOverrides: Record<string, unknown> = {}, alread
     creditNote: {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cn-1", ...data })),
     },
-  };
+  });
   return prisma;
 }
 
 describe("CreditNotesService.create (C7, ADR-040)", () => {
+  // Ce module n'ouvre aucune transaction : tout son scope passe par
+  // organizationScopedClient(), dont la valeur n'est observable qu'en rejouant
+  // l'extension capturée (les faux `$extends` se renvoient eux-mêmes).
+  it("pose app.current_org_id sur l'organisation du RolesGuard, jamais une autre", async () => {
+    const prisma = createFakePrisma();
+    const service = new CreditNotesService(prisma as any);
+
+    await service.create(
+      "inv-1",
+      { reason: "Retour", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }] },
+      "org-a-proteger",
+    );
+
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+  });
+
+
   it("calcule amount côté serveur (quantityReturned × unitPrice), jamais une valeur du client", async () => {
     const prisma = createFakePrisma();
     const service = new CreditNotesService(prisma as any);
@@ -39,7 +81,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
       reason: "Retour marchandise défectueuse",
       refundMultiplier: 1,
       lines: [{ invoiceLineId: "line-1", quantityReturned: 2 }],
-    });
+    }, "org-1");
 
     expect(result.amount).toBe(200_000n);
     expect(prisma.creditNote.create).toHaveBeenCalledWith(
@@ -54,7 +96,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
     const service = new CreditNotesService(prisma as any);
 
     await expect(
-      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }] }),
+      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }] }, "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -63,7 +105,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
     const service = new CreditNotesService(prisma as any);
 
     await expect(
-      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }] }),
+      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }] }, "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -76,7 +118,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
         reason: "Erreur",
         refundMultiplier: 1,
         lines: [{ invoiceLineId: "line-etrangere", quantityReturned: 1 }],
-      }),
+      }, "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -85,7 +127,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
     const service = new CreditNotesService(prisma as any);
 
     await expect(
-      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 6 }] }),
+      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 6 }] }, "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -96,7 +138,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
     const service = new CreditNotesService(prisma as any);
 
     await expect(
-      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 2 }] }),
+      service.create("inv-1", { reason: "Erreur", refundMultiplier: 1, lines: [{ invoiceLineId: "line-1", quantityReturned: 2 }] }, "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -109,7 +151,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
       reason: "Retour",
       refundMultiplier: 1,
       lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }],
-    });
+    }, "org-1");
 
     expect(prisma.invoice.update).not.toHaveBeenCalled();
   });
@@ -122,7 +164,7 @@ describe("CreditNotesService.create (C7, ADR-040)", () => {
       reason: "Annulation professionnelle",
       refundMultiplier: 2,
       lines: [{ invoiceLineId: "line-1", quantityReturned: 1 }],
-    });
+    }, "org-1");
 
     expect(result.refundMultiplier).toBe(2);
   });

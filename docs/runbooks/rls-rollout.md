@@ -58,8 +58,17 @@ connu** (partout où il y a déjà un `where: { organizationId }`).
 // avant
 return this.prisma.invoice.findMany({ where: { organizationId, status } });
 // après
-return organizationScopedClient(this.prisma, organizationId).invoice.findMany({ where: { status } });
+return organizationScopedClient(this.prisma, organizationId).invoice.findMany({
+  where: { organizationId, status },
+});
 ```
+
+> **Ne JAMAIS retirer `organizationId` du `where`.** Une version antérieure de
+> ce runbook le faisait dans l'exemple ci-dessus, en s'appuyant sur RLS pour
+> filtrer. Tant que l'étape 2 n'est pas faite, les politiques sont dormantes ET
+> le rôle applicatif est propriétaire des tables, donc contourne RLS : retirer
+> la clause rendrait les données de **toutes** les organisations. Elle devient
+> redondante le jour où RLS mord — jamais dangereuse.
 
 Ordre suggéré (du plus sensible au moins) : `invoices`, `payments`, `customers`,
 `fiscal-periods`, `products`, le reste. Chaque service migré garde ses tests
@@ -85,6 +94,71 @@ propriétaire bypasse RLS).
 au lieu des variantes org, là où l'accès est délégué par mandat plutôt que direct.
 Ne jamais poser les deux GUC pour une même requête sauf « entrée » explicite dans
 une organisation précise (le prédicat les OU-e).
+
+### Recette de migration (établie le 2026-09-06 sur `invoices`)
+
+Quatre situations, quatre gestes. Elles couvrent tout ce qui a été rencontré.
+
+**1. Le service reçoit déjà l'organisation** (`findAllByOrganization`, création
+depuis un DTO). Envelopper l'appel, garder le `where`.
+
+**2. La méthode est adressée par identifiant** (`findOne(invoiceId)`,
+`void`, `issue`…). C'est le cas dominant, et c'était le blocage : le service
+relisait la ressource pour découvrir son organisation, lecture non scopée donc
+impossible sous RLS. `RolesGuard` avait déjà fait ce travail — il pose
+désormais `request.organizationId`, que **`@CurrentOrganizationId()`**
+(`common/rbac/current-organization-id.decorator.ts`) transmet au handler. Le
+contrôleur le passe au service ; le `where` porte `{ id, organizationId }`.
+
+Corollaire Prisma : `findUniqueOrThrow` devient `findFirstOrThrow` dès que
+le `where` porte deux champs — `{ id, organizationId }` n'est pas une clé
+unique.
+
+**3. Transaction interactive** (`issue()`, la numérotation…). `*ScopedClient`
+y est interdit : chaque opération ouvrirait une transaction imbriquée. Appeler
+`setOrganizationScope(tx, organizationId)` en PREMIÈRE ligne du bloc. Si la
+transaction contient du SQL brut (`SELECT … FOR UPDATE`), lui ajouter aussi
+`AND organization_id = …` : tant que RLS dort, ce verrou porterait sinon sur
+la ligne d'un autre locataire.
+
+**4. Appelant hors HTTP** (module `ussd`, files d'attente, tâches planifiées).
+Aucun guard ne tourne, donc aucune organisation n'est résolue. Elle doit venir
+du contexte de l'appelant — pour l'USSD, du paramètre d'`emitInvoice()`,
+lui-même issu de la session authentifiée. **Ne jamais la redécouvrir en relisant
+la ressource** : c'est reproduire l'œuf et la poule.
+
+#### Les faux de test
+
+`organizationScopedClient()` appelle `client.$extends()`, et
+`setOrganizationScope()` appelle `tx.$executeRaw` — deux méthodes absentes
+des faux existants. La tentation est d'ajouter `$extends: () => prisma` : un
+faux qui se renvoie lui-même garde les tests verts **sans rien prouver**.
+
+Préférer un faux qui rend un client **distinct** (voir
+`createFakeScopedPrisma()` dans `invoices.service.spec.ts`) : un test peut
+alors affirmer que la lecture est passée par le client scopé **et pas** par le
+client de base. À l'adoption, les assertions existantes se mettent à échouer —
+c'est le signe que le faux est fidèle, pas un incident.
+
+#### Ordre et inventaire
+
+~300 appels `this.prisma.<modèle>` sur ~25 modules. Du plus sensible au moins :
+
+| Module | Appels prisma | État |
+|---|---|---|
+| `invoices` | 28 | partiel — `findAllByOrganization`, `findOne`, `void`, `issue` faits ; restent `regeneratePaymentLink`, `sendReminder`, `convertToInvoice`, `forfeitDeposit` |
+| `ussd` | 35 | à faire — hors HTTP, cas 4 |
+| `mandates` | 24 | à faire — scope **practice**, pas org |
+| `organizations` | 22 | à faire |
+| `payments` | 21 | à faire |
+| `customers` | 19 | à faire |
+| `certification`, `bank-reconciliation`, `public-buyer`, `commission-bypass`, … | ~130 | à faire |
+
+**Ne pas enchaîner sur l'étape 2 avant d'avoir fini l'étape 1.** Créer
+`facture_app` (`NOBYPASSRLS`) alors qu'un seul service n'a pas été migré ne
+produit pas une erreur : il produit des **écrans vides**, silencieusement, sur
+ce service. C'est la panne la plus coûteuse du chantier, parce qu'elle ne
+ressemble pas à une panne.
 
 ## Étape 2 — Créer le rôle applicatif non-propriétaire (staging)
 

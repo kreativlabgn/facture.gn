@@ -56,6 +56,17 @@ export class RolesGuard implements CanActivate {
 
     const organizationId = await this.resolveOrganizationId(request, idSource);
 
+    // Exposé au handler via @CurrentOrganizationId(). La résolution qui vient
+    // d'avoir lieu a coûté une lecture de la ressource ciblée : la refaire dans
+    // chaque service serait une lecture de plus, et surtout une lecture NON
+    // scopée — celle qui devient impossible une fois RLS appliqué
+    // (docs/runbooks/rls-rollout.md, étape 1).
+    //
+    // Aucune autorisation n'est accordée ici : le contrôle d'appartenance
+    // ci-dessous peut encore lever, et un handler ne tourne jamais si
+    // canActivate() ne rend pas true.
+    request.organizationId = organizationId;
+
     const membership = await this.prisma.organizationMember.findUnique({
       where: { organizationId_userId: { organizationId, userId: request.user.id } },
     });

@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Headers, Param, Post } from "@ne
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { createRefundSchema, type CreateRefundDto } from "./dto/create-refund.dto";
@@ -30,6 +31,7 @@ export class RefundsController {
     @Param("id") creditNoteId: string,
     @Body(new ZodValidationPipe(createRefundSchema)) dto: CreateRefundDto,
     @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
   ) {
     if (!idempotencyKey || !UUID_V4_REGEX.test(idempotencyKey)) {
@@ -37,6 +39,6 @@ export class RefundsController {
         `En-tête ${IDEMPOTENCY_KEY_HEADER} manquant ou invalide (UUID v4 attendu, ADR-016)`,
       );
     }
-    return this.refundsService.create(creditNoteId, dto, user.id, idempotencyKey);
+    return this.refundsService.create(creditNoteId, dto, user.id, idempotencyKey, organizationId);
   }
 }

@@ -1,8 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
+
+// organizationScopedClient() appelle `$extends` sur le client. Le vrai client
+// l'offre ; un faux qui ne l'offre pas ne teste pas le service migré, il plante
+// dessus. `$extends` rend ici le client LUI-MÊME, pour que les mocks de modèle
+// restent partagés et les assertions existantes inchangées.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
 import { ProductStockService } from "./product-stock.service";
 
 function createFakePrisma(overrides: { product?: any; existingStock?: any; stocks?: any[] } = {}) {
-  return {
+  return auClientScope({
     product: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(
         overrides.product ?? { id: "product-1", organizationId: "org-1", name: "Riz 25kg" },
@@ -18,7 +35,7 @@ function createFakePrisma(overrides: { product?: any; existingStock?: any; stock
       ),
       findMany: vi.fn().mockResolvedValue(overrides.stocks ?? []),
     },
-  };
+  });
 }
 
 describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
@@ -26,7 +43,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma();
     const service = new ProductStockService(prisma as any);
 
-    await service.recordMovement("branch-1", "product-1", "reception", 50);
+    await service.recordMovement("branch-1", "product-1", "reception", 50, "org-1");
 
     expect(prisma.productStock.upsert).toHaveBeenCalledWith({
       where: { productId_branchId: { productId: "product-1", branchId: "branch-1" } },
@@ -39,7 +56,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma({ existingStock: { id: "stock-1", stockQty: 100 } });
     const service = new ProductStockService(prisma as any);
 
-    await service.recordMovement("branch-1", "product-1", "reception", 20);
+    await service.recordMovement("branch-1", "product-1", "reception", 20, "org-1");
 
     expect(prisma.productStock.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: { stockQty: { increment: 20 } } }),
@@ -50,7 +67,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma();
     const service = new ProductStockService(prisma as any);
 
-    await expect(service.recordMovement("branch-1", "product-1", "reception", -5)).rejects.toThrow(/reception/i);
+    await expect(service.recordMovement("branch-1", "product-1", "reception", -5, "org-1")).rejects.toThrow(/reception/i);
     expect(prisma.productStock.upsert).not.toHaveBeenCalled();
   });
 
@@ -58,7 +75,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma();
     const service = new ProductStockService(prisma as any);
 
-    await expect(service.recordMovement("branch-1", "product-1", "loss", 5)).rejects.toThrow(/loss/i);
+    await expect(service.recordMovement("branch-1", "product-1", "loss", 5, "org-1")).rejects.toThrow(/loss/i);
     expect(prisma.productStock.upsert).not.toHaveBeenCalled();
   });
 
@@ -66,7 +83,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma();
     const service = new ProductStockService(prisma as any);
 
-    await service.recordMovement("branch-1", "product-1", "adjustment", -3);
+    await service.recordMovement("branch-1", "product-1", "adjustment", -3, "org-1");
 
     expect(prisma.productStock.upsert).toHaveBeenCalled();
   });
@@ -75,7 +92,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma({ existingStock: { id: "stock-1", stockQty: 2 } });
     const service = new ProductStockService(prisma as any);
 
-    await service.recordMovement("branch-1", "product-1", "loss", -10);
+    await service.recordMovement("branch-1", "product-1", "loss", -10, "org-1");
 
     expect(prisma.productStock.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: { stockQty: { increment: -10 } } }),
@@ -86,7 +103,7 @@ describe("ProductStockService.recordMovement (E10, ADR-037)", () => {
     const prisma = createFakePrisma({ product: { id: "product-1", organizationId: "org-victime", name: "X" } });
     const service = new ProductStockService(prisma as any);
 
-    await expect(service.recordMovement("branch-1", "product-1", "reception", 10)).rejects.toThrow(/introuvable/);
+    await expect(service.recordMovement("branch-1", "product-1", "reception", 10, "org-1")).rejects.toThrow(/introuvable/);
     expect(prisma.productStock.upsert).not.toHaveBeenCalled();
   });
 });
@@ -104,7 +121,7 @@ describe("ProductStockService.listByBranch (E10, ADR-084)", () => {
     });
     const service = new ProductStockService(prisma as any);
 
-    const result = await service.listByBranch("branch-1");
+    const result = await service.listByBranch("branch-1", "org-1");
 
     expect(result[0]).not.toHaveProperty("costPrice");
     expect(result[0]).toEqual({ productId: "product-1", productName: "Riz 25kg", stockQty: 42 });

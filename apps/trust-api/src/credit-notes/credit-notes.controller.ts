@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { createCreditNoteSchema, type CreateCreditNoteDto } from "./dto/create-credit-note.dto";
 import { CreditNotesService } from "./credit-notes.service";
 
@@ -16,7 +17,11 @@ export class CreditNotesController {
   // (C7 : portée monétaire similaire, action du staff au comptoir).
   @Post()
   @Roles("owner", "admin", "cashier")
-  create(@Param("id") invoiceId: string, @Body(new ZodValidationPipe(createCreditNoteSchema)) dto: CreateCreditNoteDto) {
-    return this.creditNotesService.create(invoiceId, dto);
+  create(
+    @Param("id") invoiceId: string,
+    @Body(new ZodValidationPipe(createCreditNoteSchema)) dto: CreateCreditNoteDto,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.creditNotesService.create(invoiceId, dto, organizationId);
   }
 }

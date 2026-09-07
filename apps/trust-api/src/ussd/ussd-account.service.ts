@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { MandatesService } from "../mandates/mandates.service";
 import { OrganizationsService } from "../organizations/organizations.service";
@@ -33,11 +34,13 @@ export class UssdAccountService {
   // PME elle-même).
   async changePin(userId: string, organizationId: string, newPin: string): Promise<void> {
     await this.ussdAuth.createPin(userId, newPin);
-    await this.prisma.organization.update({
+    await organizationScopedClient(this.prisma, organizationId).organization.update({
       where: { id: organizationId },
       data: { paymentsFrozenUntil: new Date(Date.now() + FREEZE_WINDOW_MS) },
     });
 
+    // user_phone est HORS RLS (identité, partagée entre organisations) :
+    // lecture non scopée à dessein, pas un oubli.
     const phone = await this.prisma.userPhone.findFirst({
       where: { userId },
       select: { msisdn: true, user: { select: { preferredLanguage: true } } },
@@ -77,7 +80,7 @@ export class UssdAccountService {
   // (même précédent que PracticesService.inviteMember(), F8, qui vérifie
   // requesterMembership.role lui-même pour la même raison structurelle).
   async inviteViewer(organizationId: string, requesterUserId: string, msisdn: string) {
-    const requesterMembership = await this.prisma.organizationMember.findFirst({
+    const requesterMembership = await organizationScopedClient(this.prisma, organizationId).organizationMember.findFirst({
       where: { organizationId, userId: requesterUserId, revokedAt: null },
     });
     if (!requesterMembership || !INVITER_ROLES.has(requesterMembership.role)) {

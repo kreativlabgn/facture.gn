@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateProductDto } from "./dto/create-product.dto";
 
@@ -41,23 +42,33 @@ export class ProductsService {
   // $transaction(), sans effet sous isolation Read Committed). Aucune
   // contrainte unique DB ajoutée, même raison qu'expliqué chez
   // CustomersService.create() (ADR-038 : signal, jamais une règle d'unicité).
-  async create(dto: CreateProductDto) {
+  // RLS — `organizationId` vient du RolesGuard (@CurrentOrganizationId), plus
+  // de `dto.organizationId` : sur une CRÉATION sans params.id, le guard résout
+  // depuis le corps, donc les deux valeurs coïncident — mais c'est celle que le
+  // guard a effectivement AUTORISÉE qu'on écrit, jamais celle que l'appelant a
+  // envoyée. La distinction est gratuite ici et le restera si la résolution change.
+  async create(dto: CreateProductDto, organizationId: string) {
     const name = dto.name.trim();
 
     return this.prisma.$transaction(async (tx) => {
+      // GUC en première ligne : il couvre le verrou, la recherche de doublon et
+      // la création. Le client scopé ne conviendrait pas ici (chaque opération y
+      // ouvrirait sa propre transaction, le verrou consultatif serait relâché).
+      await setOrganizationScope(tx, organizationId);
+
       // $executeRaw, jamais $queryRaw — voir CustomersService.create().
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`product:${dto.organizationId}:${name.toLowerCase()}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`product:${organizationId}:${name.toLowerCase()}`}))`;
 
       const existingMatch = await tx.product.findFirst({
         where: {
-          organizationId: dto.organizationId,
+          organizationId,
           name: { equals: name, mode: "insensitive" },
         },
       });
 
       return tx.product.create({
         data: {
-          organizationId: dto.organizationId,
+          organizationId,
           name,
           possibleDuplicateOf: existingMatch?.id ?? null,
         },
@@ -67,8 +78,13 @@ export class ProductsService {
 
   // E6, ADR-084 — "la création du produit n'est jamais bloquée en son
   // absence" : ce endpoint est le seul chemin qui renseigne costPrice.
-  async setCostPrice(productId: string, costPrice: bigint) {
-    return this.prisma.product.update({
+  async setCostPrice(productId: string, costPrice: bigint, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    // Lecture scopée AVANT l'écriture : update() exige un `where` unique et ne
+    // peut donc pas porter la colonne de scope. Cette lecture est la barrière
+    // tant que les politiques dorment (même discipline que CustomersService).
+    await scoped.product.findFirstOrThrow({ where: { id: productId, organizationId } });
+    return scoped.product.update({
       where: { id: productId },
       data: { costPrice },
     });
@@ -83,7 +99,7 @@ export class ProductsService {
   async findAllByOrganization(organizationId: string, pagination: { take?: number; skip?: number }) {
     const take = Math.min(pagination.take ?? DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE);
     const skip = pagination.skip ?? 0;
-    return this.prisma.product.findMany({
+    return organizationScopedClient(this.prisma, organizationId).product.findMany({
       where: { organizationId },
       orderBy: { name: "asc" },
       take,
@@ -97,9 +113,9 @@ export class ProductsService {
   // seul UUID possibleDuplicateOf déjà exposé par la liste. Jamais une
   // fusion : ProductsService.merge() n'existe pas (E3, décision actée — la
   // fusion n'est demandée par le Backlog que pour les clients, E4).
-  async findOneWithDuplicate(productId: string) {
-    return this.prisma.product.findUniqueOrThrow({
-      where: { id: productId },
+  async findOneWithDuplicate(productId: string, organizationId: string) {
+    return organizationScopedClient(this.prisma, organizationId).product.findFirstOrThrow({
+      where: { id: productId, organizationId },
       include: { duplicateOf: { select: { id: true, name: true } } },
     });
   }

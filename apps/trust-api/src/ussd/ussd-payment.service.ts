@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { computePlatformFee } from "../common/commission-grid";
 import { InvoicesService } from "../invoices/invoices.service";
@@ -20,7 +21,7 @@ export class UssdPaymentService {
   // Invoice.number n'est unique que par organisation — jamais une recherche
   // sans organizationId. Exclut paid/voided/draft : rien à payer.
   async findPayableInvoice(organizationId: string, number: string) {
-    return this.prisma.invoice.findFirst({
+    return organizationScopedClient(this.prisma, organizationId).invoice.findFirst({
       where: { organizationId, number, status: { in: ["issued", "partially_paid"] } },
     });
   }
@@ -29,11 +30,17 @@ export class UssdPaymentService {
   // même calcul qu'InvoicesService.regeneratePaymentLink()/issue() (ADR-074),
   // jamais un montant deviné ni dupliqué autrement.
   async previewFee(organizationId: string, amountDue: bigint): Promise<bigint> {
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+    const organization = await organizationScopedClient(this.prisma, organizationId).organization.findFirstOrThrow({
+      where: { id: organizationId },
+    });
     return computePlatformFee(amountDue, organization.commercialTier);
   }
 
-  async confirmPayment(invoiceId: string, actorId: string) {
-    return this.invoicesService.regeneratePaymentLink(invoiceId, actorId);
+  // Hors HTTP : aucun RolesGuard ne tourne, aucune organisation n'est résolue
+  // pour nous. Elle vient du contexte de session, où elle a été posée à l'étape
+  // de sélection de la facture — celle-là même qui a servi à la trouver
+  // (findPayableInvoice), jamais une organisation redécouverte après coup.
+  async confirmPayment(invoiceId: string, actorId: string, organizationId: string) {
+    return this.invoicesService.regeneratePaymentLink(invoiceId, actorId, organizationId);
   }
 }
