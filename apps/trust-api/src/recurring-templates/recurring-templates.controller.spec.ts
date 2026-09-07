@@ -49,9 +49,9 @@ describe("RecurringTemplateGenerationController — POST /recurring-templates/:i
     const service = { generate: vi.fn().mockResolvedValue({ id: "invoice-1" }) };
     const controller = new RecurringTemplateGenerationController(service as any);
 
-    const result = await controller.generate("template-1", { id: "user-1" } as any);
+    const result = await controller.generate("template-1", { id: "user-1" } as any, "org-1");
 
-    expect(service.generate).toHaveBeenCalledWith("template-1", "user-1");
+    expect(service.generate).toHaveBeenCalledWith("template-1", "user-1", "org-1");
     expect(result.id).toBe("invoice-1");
   });
 });

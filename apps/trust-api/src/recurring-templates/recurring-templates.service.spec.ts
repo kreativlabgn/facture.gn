@@ -2,11 +2,31 @@ import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { RecurringTemplatesService } from "./recurring-templates.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw`. Le vrai client offre les deux ; un faux qui ne les offre
+// pas ne teste pas le service migré, il plante dessus. `$extends` rend le client
+// LUI-MÊME pour que les mocks de modèle restent partagés et les assertions
+// existantes inchangées. `$transaction` bi-forme : la forme tableau est celle
+// qu'emploie makeScopedOperation(), ce qui rend l'extension rejouable.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 const SAMPLE_LINES = [{ description: "Abonnement mensuel maintenance", quantity: 1, unitPrice: 150_000n }];
 const STORED_LINES = [{ description: "Abonnement mensuel maintenance", quantity: 1, unitPrice: "150000" }];
 
 function createFakePrisma(overrides: { organization?: any; template?: any } = {}) {
-  return {
+  return auClientScope({
     organization: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(overrides.organization ?? { id: "org-1", regimeFiscal: "tpu" }),
     },
@@ -19,7 +39,7 @@ function createFakePrisma(overrides: { organization?: any; template?: any } = {}
     invoiceEvent: {
       create: vi.fn().mockResolvedValue({ id: "event-1" }),
     },
-  };
+  });
 }
 
 function baseTemplate(overrides: Record<string, any> = {}) {
@@ -99,12 +119,32 @@ describe("RecurringTemplatesService.create (I1, ADR-056)", () => {
 });
 
 describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
+  // Ce module n'ouvre AUCUNE transaction : tout son scope passe par
+  // organizationScopedClient(), dont la valeur n'est pas observable avec un faux
+  // `$extends` qui se renvoie lui-même. On rejoue donc l'extension capturée —
+  // `$allOperations` exécute le set_config via `$executeRaw` — pour lire
+  // l'organisation réellement injectée.
+  it("pose app.current_org_id sur l'organisation du RolesGuard, jamais une autre", async () => {
+    const prisma = createFakePrisma({ template: { findUniqueOrThrow: vi.fn().mockResolvedValue(baseTemplate()) } });
+    const service = new RecurringTemplatesService(prisma as any, createFakeInvoicesService() as any);
+
+    await service.generate("template-1", "user-1", "org-a-proteger");
+
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+  });
+
+
   it("appelle createDraft() avec documentType invoice et unitPrice reconverti en bigint", async () => {
     const prisma = createFakePrisma({ template: { findUniqueOrThrow: vi.fn().mockResolvedValue(baseTemplate()) } });
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await service.generate("template-1", "user-1");
+    await service.generate("template-1", "user-1", "org-1");
 
     expect(invoicesService.createDraft).toHaveBeenCalledWith(
       {
@@ -129,7 +169,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await expect(service.generate("template-1", "user-1")).rejects.toThrow(ConflictException);
+    await expect(service.generate("template-1", "user-1", "org-1")).rejects.toThrow(ConflictException);
     expect(invoicesService.createDraft).not.toHaveBeenCalled();
   });
 
@@ -141,7 +181,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await service.generate("template-1", "user-1");
+    await service.generate("template-1", "user-1", "org-1");
 
     expect(invoicesService.createDraft).toHaveBeenCalled();
   });
@@ -153,7 +193,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await service.generate("template-1", "user-1");
+    await service.generate("template-1", "user-1", "org-1");
 
     expect(invoicesService.createDraft).toHaveBeenCalled();
   });
@@ -166,7 +206,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await service.generate("template-1", "user-1");
+    await service.generate("template-1", "user-1", "org-1");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: {
@@ -186,7 +226,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await service.generate("template-1", "user-1");
+    await service.generate("template-1", "user-1", "org-1");
 
     expect(prisma.invoiceEvent.create).not.toHaveBeenCalled();
   });
@@ -199,7 +239,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await service.generate("template-1", "user-1");
+    await service.generate("template-1", "user-1", "org-1");
 
     expect(prisma.recurringInvoiceTemplate.update).toHaveBeenCalledWith({
       where: { id: "template-1" },
@@ -218,7 +258,7 @@ describe("RecurringTemplatesService.generate (I1, ADR-056)", () => {
     const invoicesService = createFakeInvoicesService();
     const service = new RecurringTemplatesService(prisma as any, invoicesService as any);
 
-    await expect(service.generate("template-1", "user-1")).rejects.toThrow(ConflictException);
+    await expect(service.generate("template-1", "user-1", "org-1")).rejects.toThrow(ConflictException);
     expect(invoicesService.createDraft).not.toHaveBeenCalled();
   });
 });

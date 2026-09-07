@@ -2,6 +2,26 @@ import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { FinancingService } from "./financing.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw`. Le vrai client offre les deux ; un faux qui ne les offre
+// pas ne teste pas le service migré, il plante dessus. `$extends` rend le client
+// LUI-MÊME pour que les mocks de modèle restent partagés et les assertions
+// existantes inchangées. `$transaction` bi-forme : la forme tableau est celle
+// qu'emploie makeScopedOperation(), ce qui rend l'extension rejouable.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function baseInvoice(overrides: Record<string, any> = {}) {
   return {
     id: "inv-1",
@@ -34,8 +54,12 @@ function createFakePrisma(
     invoiceEvent: {
       create: vi.fn().mockResolvedValue({ id: "event-1" }),
     },
+    // setOrganizationScope(tx, ...) pose le GUC en première ligne de la
+    // transaction : le vrai client transactionnel porte $executeRaw, le faux
+    // doit donc l'offrir aussi.
+    $executeRaw: vi.fn().mockResolvedValue(1),
   };
-  return {
+  return auClientScope({
     invoice: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(overrides.invoice ?? baseInvoice()),
     },
@@ -45,9 +69,11 @@ function createFakePrisma(
         "partner" in overrides ? overrides.partner : { id: "partner-1", status: "active" },
       ),
     },
-    $transaction: vi.fn().mockImplementation((fn: any) => fn(tx)),
+    // Bi-forme : le callback interactif du service ET la forme tableau
+    // qu'emploie makeScopedOperation(), qui rend l'extension rejouable.
+    $transaction: vi.fn().mockImplementation((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(tx))),
     __tx: tx,
-  };
+  });
 }
 
 describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
@@ -55,7 +81,7 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     const prisma = createFakePrisma({ partners: [{ id: "partner-1", name: "Ecobank", status: "active" }] });
     const service = new FinancingService(prisma as any);
 
-    const result = await service.getFinancingOptions("inv-1");
+    const result = await service.getFinancingOptions("inv-1", "org-1");
 
     expect(result.financeable).toBe(true);
     expect(result.partners).toHaveLength(1);
@@ -65,7 +91,7 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     const prisma = createFakePrisma({ invoice: baseInvoice({ validatedByAdministration: false }) });
     const service = new FinancingService(prisma as any);
 
-    const result = await service.getFinancingOptions("inv-1");
+    const result = await service.getFinancingOptions("inv-1", "org-1");
 
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
@@ -78,7 +104,7 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     });
     const service = new FinancingService(prisma as any);
 
-    const result = await service.getFinancingOptions("inv-1");
+    const result = await service.getFinancingOptions("inv-1", "org-1");
 
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
@@ -92,7 +118,7 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     });
     const service = new FinancingService(prisma as any);
 
-    const result = await service.getFinancingOptions("inv-1");
+    const result = await service.getFinancingOptions("inv-1", "org-1");
 
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
@@ -100,7 +126,7 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
 });
 
 describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
-  it("pose financedByPartnerId/financedAt et émet financing_disbursed sur une facture finançable", async () => {
+  it("pose app.current_org_id en tête de la transaction de financement", async () => {
     const prisma = createFakePrisma();
     const service = new FinancingService(prisma as any);
 
@@ -108,6 +134,53 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
       "inv-1",
       { financialPartnerId: "partner-1", disbursementMethod: "payment_link_payout" },
       "user-1",
+      "org-a-proteger",
+    );
+
+    const setConfig = (prisma as any).__tx.$executeRaw.mock.calls[0]?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+
+    // Le GUC transactionnel et le CLIENT SCOPÉ (lecture de la facture) sont deux
+    // constructions distinctes : muter l'une sans l'autre passerait inaperçu. La
+    // valeur du client scopé n'est observable qu'en rejouant l'extension.
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+    const scopeClient = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(scopeClient.values).toContain("org-a-proteger");
+  });
+
+  // `financial_partner` est un annuaire PLATEFORME, hors RLS : un partenaire
+  // financier n'appartient à aucune PME. Le scoper viderait la liste des rails de
+  // financement. Ce test garde ce « scope indûment posé » : la lecture doit passer
+  // par le client de BASE, jamais par le client étendu.
+  it("ne scope JAMAIS l'annuaire des partenaires financiers (table plateforme)", async () => {
+    const prisma = createFakePrisma();
+    const service = new FinancingService(prisma as any);
+
+    await service.chooseFinancing(
+      "inv-1",
+      { financialPartnerId: "partner-1", disbursementMethod: "payment_link_payout" },
+      "user-1",
+      "org-1",
+    );
+
+    // Un seul $extends : celui du client scopé construit pour la facture. Si
+    // l'annuaire partenaires passait aussi par un client scopé, il y en aurait
+    // davantage — ou la lecture serait filtrée par une organisation qui n'a
+    // aucun sens pour cette table.
+    expect((prisma as any).$extends).toHaveBeenCalledTimes(1);
+    expect(prisma.financialPartner.findUnique).toHaveBeenCalledWith({ where: { id: "partner-1" } });
+  });
+
+
+  it("pose financedByPartnerId/financedAt et émet financing_disbursed sur une facture finançable", async () => {
+    const prisma = createFakePrisma();
+    const service = new FinancingService(prisma as any);
+
+    await service.chooseFinancing("inv-1",
+      { financialPartnerId: "partner-1", disbursementMethod: "payment_link_payout" },
+      "user-1", "org-1"
     );
 
     expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith(
@@ -131,7 +204,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -141,7 +214,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(/déjà financée|non finançable/);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -151,7 +224,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-inconnu", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-inconnu", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -161,7 +234,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -169,15 +242,15 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const prisma = createFakePrisma();
     const service = new FinancingService(prisma as any);
 
-    await service.chooseFinancing(
-      "inv-1",
+    await service.chooseFinancing("inv-1",
       { financialPartnerId: "partner-1", disbursementMethod: "payment_link_payout" },
-      "user-1",
+      "user-1", "org-1"
     );
 
     expect(prisma.__tx.invoice.updateMany).toHaveBeenCalledWith({
       where: {
         id: "inv-1",
+        organizationId: "org-1",
         financedByPartnerId: null,
         validatedByAdministration: true,
         status: { not: "voided" },
@@ -204,7 +277,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -218,7 +291,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -228,7 +301,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     const service = new FinancingService(prisma as any);
 
     await expect(
-      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1"),
+      service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
     expect(prisma.__tx.invoiceEvent.create).not.toHaveBeenCalled();
   });

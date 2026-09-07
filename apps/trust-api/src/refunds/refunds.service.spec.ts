@@ -2,6 +2,26 @@ import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { RefundsService } from "./refunds.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw`. Le vrai client offre les deux ; un faux qui ne les offre
+// pas ne teste pas le service migré, il plante dessus. `$extends` rend le client
+// LUI-MÊME pour que les mocks de modèle restent partagés et les assertions
+// existantes inchangées. `$transaction` bi-forme : la forme tableau est celle
+// qu'emploie makeScopedOperation(), ce qui rend l'extension rejouable.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function createFakePrisma(creditNoteOverrides: Record<string, unknown> = {}, initialRefundedSum: bigint = 0n) {
   const creditNote = {
     id: "cn-1",
@@ -20,7 +40,7 @@ function createFakePrisma(creditNoteOverrides: Record<string, unknown> = {}, ini
   // idempotency_key : findUnique() reflète l'état déjà "créé" par la même clé.
   const refundsByIdempotencyKey = new Map<string, any>();
 
-  const prisma: any = {
+  const prisma: any = auClientScope({
     creditNote: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(creditNote),
     },
@@ -41,17 +61,43 @@ function createFakePrisma(creditNoteOverrides: Record<string, unknown> = {}, ini
     invoiceEvent: {
       create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "event-1", ...data })),
     },
-    $transaction: vi.fn((callback: any) => callback(prisma)),
-  };
+    // Bi-forme : le callback interactif du service ET la forme tableau
+    // qu'emploie makeScopedOperation(), qui rend l'extension rejouable.
+    $transaction: vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma))),
+  });
   return prisma;
 }
 
 describe("RefundsService.create (C13, ADR-063)", () => {
+  // Le GUC doit être posé en PREMIÈRE ligne de la transaction, sur l'organisation
+  // résolue par le RolesGuard. Ici $transaction rappelle le client lui-même, donc
+  // $executeRaw porte l'appel à setOrganizationScope().
+  it("pose app.current_org_id en tête de la transaction de remboursement", async () => {
+    const prisma = createFakePrisma();
+    const service = new RefundsService(prisma as any);
+
+    await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-1", "idem-scope", "org-a-proteger");
+
+    const setConfig = (prisma as any).$executeRaw.mock.calls[0]?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+
+    // Le GUC transactionnel ci-dessus et le CLIENT SCOPÉ sont deux constructions
+    // distinctes : muter l'une sans l'autre passerait inaperçu. Les faux
+    // `$extends` se renvoyant eux-mêmes, la valeur portée par le client scopé
+    // n'est observable qu'en rejouant l'extension capturée.
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+    const scopeClient = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(scopeClient.values).toContain("org-a-proteger");
+  });
+
+
   it("crée un remboursement cash immédiatement completed", async () => {
     const prisma = createFakePrisma();
     const service = new RefundsService(prisma as any);
 
-    const result = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1");
+    const result = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1");
 
     expect(result.status).toBe("completed");
     expect(result.completedAt).toBeInstanceOf(Date);
@@ -77,6 +123,7 @@ describe("RefundsService.create (C13, ADR-063)", () => {
       { amount: 100_000n, method: "payment_link_payout" },
       "user-djenabou",
       "idem-1",
+      "org-1",
     );
 
     expect(result.status).toBe("pending");
@@ -88,7 +135,7 @@ describe("RefundsService.create (C13, ADR-063)", () => {
     const service = new RefundsService(prisma as any);
 
     await expect(
-      service.create("cn-1", { amount: 150_000n, method: "cash" }, "user-djenabou", "idem-1"),
+      service.create("cn-1", { amount: 150_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -97,11 +144,11 @@ describe("RefundsService.create (C13, ADR-063)", () => {
     const prisma = createFakePrisma({}, 250_000n);
     const service = new RefundsService(prisma as any);
 
-    const ok = await service.create("cn-1", { amount: 50_000n, method: "cash" }, "user-djenabou", "idem-1");
+    const ok = await service.create("cn-1", { amount: 50_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1");
     expect(ok.status).toBe("completed");
 
     await expect(
-      service.create("cn-1", { amount: 1n, method: "cash" }, "user-djenabou", "idem-2"),
+      service.create("cn-1", { amount: 1n, method: "cash" }, "user-djenabou", "idem-2", "org-1"),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -109,7 +156,7 @@ describe("RefundsService.create (C13, ADR-063)", () => {
     const prisma = createFakePrisma();
     const service = new RefundsService(prisma as any);
 
-    await service.create("cn-1", { amount: 300_000n, method: "cash" }, "user-djenabou", "idem-1");
+    await service.create("cn-1", { amount: 300_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1");
 
     expect(prisma.refund.aggregate).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ status: { not: "failed" } }) }),
@@ -120,7 +167,7 @@ describe("RefundsService.create (C13, ADR-063)", () => {
     const prisma = createFakePrisma();
     const service = new RefundsService(prisma as any);
 
-    await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1");
+    await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1");
 
     expect(prisma.invoiceEvent.create).toHaveBeenCalledWith({
       data: { invoiceId: "inv-1", type: "refund_issued", amount: 100_000n, actorId: "user-djenabou" },
@@ -134,8 +181,8 @@ describe("RefundsService.create — idempotence (Security Audit 2026-08-23, find
     const prisma = createFakePrisma();
     const service = new RefundsService(prisma as any);
 
-    const first = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1");
-    const replay = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1");
+    const first = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1");
+    const replay = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-1", "org-1");
 
     expect(replay.id).toBe(first.id);
     expect(prisma.refund.create).toHaveBeenCalledTimes(1);
@@ -154,10 +201,13 @@ describe("RefundsService.create — idempotence (Security Audit 2026-08-23, find
       .fn()
       .mockResolvedValueOnce(null) // lookup initial : pas encore créé
       .mockResolvedValueOnce(winner); // après l'échec de create() : le gagnant existe déjà
+    // Mock greffé APRÈS le constructeur : l'adossement posé par auClientScope()
+    // pointerait encore l'ancien. Le service lit par findFirst (règle RLS).
+    prisma.refund.findFirst = prisma.refund.findUnique;
 
     const service = new RefundsService(prisma as any);
 
-    const result = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-race");
+    const result = await service.create("cn-1", { amount: 100_000n, method: "cash" }, "user-djenabou", "idem-race", "org-1");
 
     expect(result).toEqual(winner);
   });

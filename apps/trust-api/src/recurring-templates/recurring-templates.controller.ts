@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
+import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import {
@@ -42,7 +43,11 @@ export class RecurringTemplateGenerationController {
   @Post("generate")
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
   @OrganizationIdSource("recurring-template")
-  generate(@Param("id") templateId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.recurringTemplatesService.generate(templateId, user.id);
+  generate(
+    @Param("id") templateId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.recurringTemplatesService.generate(templateId, user.id, organizationId);
   }
 }
