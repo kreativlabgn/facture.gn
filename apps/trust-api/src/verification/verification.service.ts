@@ -27,6 +27,24 @@ export interface PublicInvoiceVerification {
   disputeStatus: string;
   validatedByAdministration: boolean;
   integrityValid: boolean;
+  // ADR-118/e1 — CONTINUITÉ DE LA CHAÎNE, distincte d'integrityValid.
+  //
+  //   integrityValid  répond de LA facture : ses champs actuels redonnent-ils le
+  //                   hash et la signature stockés ?
+  //   chainValid      répond du REGISTRE : la facture s'insère-t-elle dans une
+  //                   chaîne continue, sans fourche ni maillon manquant ?
+  //
+  // Les deux sont indépendants, et c'est tout l'intérêt : une facture peut être
+  // parfaitement signée (integrityValid: true) tout en appartenant à un registre
+  // forké (chainValid: false). `previousHash` entre dans le payload signé, donc
+  // il ne peut pas être falsifié sans casser integrityValid — mais rien ne
+  // garantissait jusqu'ici qu'il DÉSIGNE une facture réellement existante.
+  chainValid: boolean;
+  // null quand chainValid vaut true. Nommé chainError et non `error` : au même
+  // niveau qu'integrityValid et keyValidAtIssuance, un champ `error` nu se
+  // lirait comme « la requête a échoué », ce qui n'est pas le cas — la réponse
+  // est un verdict complet, pas une erreur HTTP.
+  chainError: string | null;
   // A4, ADR-025 — distinct de integrityValid (recalcul cryptographique) : ce
   // champ répond à "la clé était-elle valide AU MOMENT de l'émission", jamais
   // à l'horloge courante. Toujours true pour la clé légataire globale
@@ -142,6 +160,8 @@ export class VerificationService {
     // OU révoquée APRÈS issuedAt.
     const keyValidAtIssuance = revokedAt === null || invoice.issuedAt < revokedAt;
 
+    const { chainValid, chainError } = await this.verifyChainContinuity(invoice);
+
     // E1 — preuve d'inclusion reconstruite à la volée depuis les feuilles
     // VIVANTES de la tranche (invoice.hash, ordre total déterministe — le même
     // que le scellement). La racine reconstruite ET le compte de feuilles sont
@@ -206,8 +226,96 @@ export class VerificationService {
       disputeStatus: invoice.disputeStatus,
       validatedByAdministration: invoice.validatedByAdministration,
       integrityValid,
+      chainValid,
+      chainError,
       keyValidAtIssuance,
       anchor,
     };
+  }
+
+  // ADR-118/e1 — continuité du chaînage Ed25519 par organisation.
+  //
+  // LECTURE GLOBALE, non scopée, à dessein : le vérificateur est public et ne
+  // porte aucune organisation (voir la carte RLS en tête de
+  // verifyByCertificationId). Poser un GUC ici rendrait le contrôle impossible.
+  //
+  // COÛT BORNÉ. Au plus une lecture indexée + une vérification Ed25519, quelle
+  // que soit la longueur de la chaîne. On ne remonte JAMAIS la chaîne entière :
+  // ce serait O(n) sur un endpoint public, donc un levier de déni de service.
+  // Chaque maillon se vérifie par son propre appel à cet endpoint.
+  private async verifyChainContinuity(invoice: {
+    id: string;
+    organizationId: string;
+    previousHash: string | null;
+  }): Promise<{ chainValid: boolean; chainError: string | null }> {
+    const previousHash = invoice.previousHash ?? "GENESIS";
+
+    // ── Cas 1 : la facture se déclare TÊTE de chaîne ──────────────────────────
+    // Une organisation ne peut en avoir qu'une seule. Deux têtes = le registre a
+    // fourché — c'est exactement la trace laissée par le bug de chaînage corrigé
+    // en 5e4f203 (un brouillon annulé passait le filtre du prédécesseur, la
+    // facture suivante repartait à GENESIS). Ce contrôle-là est indispensable :
+    // sans lui, la cicatrice réelle resterait invisible, puisqu'aucun maillon ne
+    // manque — il y en a deux de trop.
+    if (previousHash === "GENESIS") {
+      const autresTetes = await this.prisma.invoice.count({
+        where: {
+          organizationId: invoice.organizationId,
+          issuedAt: { not: null },
+          previousHash: "GENESIS",
+          id: { not: invoice.id },
+        },
+      });
+      if (autresTetes > 0) {
+        return {
+          chainValid: false,
+          chainError:
+            "Rupture de graphe en amont : plusieurs factures de cette organisation se déclarent tête de chaîne",
+        };
+      }
+      return { chainValid: true, chainError: null };
+    }
+
+    // ── Cas 2 : un prédécesseur est désigné ──────────────────────────────────
+    const predecesseur = await this.prisma.invoice.findFirst({
+      where: {
+        organizationId: invoice.organizationId,
+        hash: previousHash,
+        issuedAt: { not: null },
+      },
+      include: { organization: true },
+    });
+
+    if (!predecesseur || !predecesseur.number || !predecesseur.issuedAt) {
+      return {
+        chainValid: false,
+        chainError: "Rupture de graphe en amont : aucune facture émise ne correspond au hash précédent",
+      };
+    }
+
+    // Le prédécesseur est RECALCULÉ, jamais cru sur parole. Sans cela, une
+    // altération de sa colonne `hash` suffirait à fabriquer un maillon
+    // cohérent en apparence : la recherche ci-dessus le trouverait, et le
+    // chaînage semblerait intact alors que le prédécesseur est corrompu.
+    const payloadPrecedent = {
+      invoiceId: predecesseur.id,
+      organizationNif: resolveNifForCertification(predecesseur.organization.nif),
+      number: predecesseur.number,
+      totalTtc: predecesseur.totalTtc,
+      issuedAt: predecesseur.issuedAt.toISOString(),
+      previousHash: predecesseur.previousHash ?? "GENESIS",
+    };
+    const recalcule = predecesseur.signingKeyId
+      ? await this.signingKeyService.verifyWithKey(predecesseur.signingKeyId, payloadPrecedent)
+      : this.certification.certify(payloadPrecedent);
+
+    if (recalcule.hash !== previousHash) {
+      return {
+        chainValid: false,
+        chainError: "Rupture de graphe en amont : le hash recalculé du prédécesseur ne correspond pas",
+      };
+    }
+
+    return { chainValid: true, chainError: null };
   }
 }

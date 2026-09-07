@@ -15,11 +15,22 @@ function createFakeSigningKeyService(certification: StubEd25519CertificationServ
   };
 }
 
-function createFakePrisma(invoice: any, batchLeaves: { hash: string }[] = []) {
+// `chaine` alimente les deux lectures de verifyChainContinuity() :
+//   • count()     → nombre d'AUTRES factures se déclarant tête de chaîne ;
+//   • findFirst() → le prédécesseur désigné par previousHash, ou null.
+// Défauts choisis pour que les tests antérieurs restent inchangés : une facture
+// GENESIS seule dans son organisation est une chaîne valide.
+function createFakePrisma(
+  invoice: any,
+  batchLeaves: { hash: string }[] = [],
+  chaine: { autresTetes?: number; predecesseur?: any } = {},
+) {
   return {
     invoice: {
       findUnique: vi.fn().mockResolvedValue(invoice),
       findMany: vi.fn().mockResolvedValue(batchLeaves),
+      count: vi.fn().mockResolvedValue(chaine.autresTetes ?? 0),
+      findFirst: vi.fn().mockResolvedValue(chaine.predecesseur ?? null),
     },
   };
 }
@@ -41,6 +52,7 @@ function issueGenuineInvoice(certification: StubEd25519CertificationService, org
 
   return {
     id: payload.invoiceId,
+    organizationId: "org-1",
     number: payload.number,
     certificationId: result.certificationId,
     status: "issued",
@@ -56,6 +68,157 @@ function issueGenuineInvoice(certification: StubEd25519CertificationService, org
     anchorBatch: null as Record<string, unknown> | null,
   };
 }
+
+// ADR-118/e1 — continuité du registre. Distincte de l'intégrité : toutes les
+// factures de ce bloc sont RÉELLEMENT certifiées (pas de mock crypto), donc
+// integrityValid vaut true partout — c'est bien chainValid, et lui seul, qui
+// distingue une chaîne saine d'un registre forké.
+describe("VerificationService — continuité de la chaîne (ADR-118/e1)", () => {
+  // Fabrique une facture N certifiée, chaînée sur le hash fourni.
+  function factureChainee(certification: StubEd25519CertificationService, previousHash: string) {
+    const payload = {
+      invoiceId: "inv-2",
+      organizationNif: resolveNifForCertification("GN12345678"),
+      number: "FG-2026-000002",
+      totalTtc: 2_000_000n,
+      issuedAt: "2026-08-09T10:00:00.000Z",
+      previousHash,
+    };
+    const result = certification.certify(payload);
+    return {
+      id: payload.invoiceId,
+      organizationId: "org-1",
+      number: payload.number,
+      certificationId: result.certificationId,
+      status: "issued",
+      disputeStatus: "none",
+      validatedByAdministration: false,
+      totalTtc: payload.totalTtc,
+      issuedAt: new Date(payload.issuedAt),
+      previousHash,
+      hash: result.hash,
+      signature: Buffer.from(result.signature, "hex"),
+      signingKeyId: null as string | null,
+      organization: { name: "Boutique Aissatou", nif: "GN12345678" },
+      anchorBatchId: null as string | null,
+      anchorBatch: null as Record<string, unknown> | null,
+    };
+  }
+
+  it("chaîne parfaite : le prédécesseur existe et son hash recalculé recolle", async () => {
+    const certification = new StubEd25519CertificationService();
+    const predecesseur = issueGenuineInvoice(certification);
+    const cible = factureChainee(certification, predecesseur.hash);
+    const prisma = createFakePrisma(cible, [], { predecesseur });
+    const service = new VerificationService(
+      prisma as never,
+      certification,
+      createFakeSigningKeyService(certification) as never,
+    );
+
+    const resultat = await service.verifyByCertificationId(cible.certificationId);
+
+    expect(resultat.integrityValid).toBe(true);
+    expect(resultat.chainValid).toBe(true);
+    expect(resultat.chainError).toBeNull();
+  });
+
+  it("maillon manquant : aucune facture émise ne porte le hash précédent", async () => {
+    const certification = new StubEd25519CertificationService();
+    const cible = factureChainee(certification, "hash-d-un-predecesseur-disparu");
+    const prisma = createFakePrisma(cible, [], { predecesseur: null });
+    const service = new VerificationService(
+      prisma as never,
+      certification,
+      createFakeSigningKeyService(certification) as never,
+    );
+
+    const resultat = await service.verifyByCertificationId(cible.certificationId);
+
+    // La signature de la facture CIBLE reste parfaite : c'est le registre qui
+    // est cassé, pas le document. Les deux verdicts doivent diverger.
+    expect(resultat.integrityValid).toBe(true);
+    expect(resultat.chainValid).toBe(false);
+    expect(resultat.chainError).toMatch(/Rupture de graphe en amont/);
+  });
+
+  it("prédécesseur ALTÉRÉ : sa colonne hash a été maquillée pour coller au maillon", async () => {
+    const certification = new StubEd25519CertificationService();
+    const predecesseur = issueGenuineInvoice(certification);
+    const cible = factureChainee(certification, predecesseur.hash);
+    // L'attaquant modifie le montant du prédécesseur mais laisse sa colonne
+    // `hash` intacte : la recherche par hash le trouve toujours, et sans
+    // recalcul le maillon paraîtrait sain.
+    const predecesseurAltere = { ...predecesseur, totalTtc: 9_999_999n };
+    const prisma = createFakePrisma(cible, [], { predecesseur: predecesseurAltere });
+    const service = new VerificationService(
+      prisma as never,
+      certification,
+      createFakeSigningKeyService(certification) as never,
+    );
+
+    const resultat = await service.verifyByCertificationId(cible.certificationId);
+
+    expect(resultat.integrityValid).toBe(true);
+    expect(resultat.chainValid).toBe(false);
+    expect(resultat.chainError).toMatch(/hash recalculé du prédécesseur/);
+  });
+
+  it("registre FORKÉ : deux factures se déclarent tête de chaîne (cicatrice du bug 5e4f203)", async () => {
+    const certification = new StubEd25519CertificationService();
+    const cible = issueGenuineInvoice(certification); // previousHash === "GENESIS"
+    const prisma = createFakePrisma(cible, [], { autresTetes: 1 });
+    const service = new VerificationService(
+      prisma as never,
+      certification,
+      createFakeSigningKeyService(certification) as never,
+    );
+
+    const resultat = await service.verifyByCertificationId(cible.certificationId);
+
+    expect(resultat.integrityValid).toBe(true);
+    expect(resultat.chainValid).toBe(false);
+    expect(resultat.chainError).toMatch(/tête de chaîne/);
+    // Ce cas n'a AUCUN maillon manquant : la règle « vérifier le prédécesseur
+    // quand previousHash !== GENESIS » ne l'aurait jamais vu.
+    expect(prisma.invoice.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("tête de chaîne LÉGITIME : seule facture GENESIS de son organisation", async () => {
+    const certification = new StubEd25519CertificationService();
+    const cible = issueGenuineInvoice(certification);
+    const prisma = createFakePrisma(cible, [], { autresTetes: 0 });
+    const service = new VerificationService(
+      prisma as never,
+      certification,
+      createFakeSigningKeyService(certification) as never,
+    );
+
+    const resultat = await service.verifyByCertificationId(cible.certificationId);
+
+    expect(resultat.chainValid).toBe(true);
+    expect(resultat.chainError).toBeNull();
+  });
+
+  it("coût borné : jamais plus d'une lecture de prédécesseur, quelle que soit la chaîne", async () => {
+    const certification = new StubEd25519CertificationService();
+    const predecesseur = issueGenuineInvoice(certification);
+    const cible = factureChainee(certification, predecesseur.hash);
+    const prisma = createFakePrisma(cible, [], { predecesseur });
+    const service = new VerificationService(
+      prisma as never,
+      certification,
+      createFakeSigningKeyService(certification) as never,
+    );
+
+    await service.verifyByCertificationId(cible.certificationId);
+
+    // Un endpoint public ne doit jamais remonter la chaîne : ce serait O(n) et
+    // donc un levier de déni de service.
+    expect(prisma.invoice.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.invoice.count).not.toHaveBeenCalled();
+  });
+});
 
 describe("VerificationService", () => {
   it("rejette un certification_id inconnu avec un message générique (404, pas de 500 brut)", async () => {
