@@ -12,6 +12,17 @@ import { PRISMA_CLIENT } from "../prisma.module";
 import { ROLES_KEY } from "./roles.decorator";
 import { ORGANIZATION_ID_SOURCE_KEY, type OrganizationIdSourceValue } from "./organization-id-source.decorator";
 
+// OPACITÉ INTER-TENANT. Un seul et même message pour « la ressource n'existe
+// pas » et « elle appartient à quelqu'un d'autre ». Deux réponses distinctes
+// formaient un oracle d'énumération : un attaquant apprenait qu'un identifiant
+// existait ailleurs rien qu'en lisant le code HTTP (404 contre 403), sans jamais
+// accéder à la donnée. Constaté en E2E le 2026-09-07 sur GET /invoices/:id.
+//
+// Le message ne nomme MÊME PAS le type de ressource : « Facture … introuvable »
+// contre « Client … introuvable » renseignait déjà sur ce que l'identifiant
+// désigne.
+const RESSOURCE_INTROUVABLE = "Ressource introuvable";
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(
@@ -71,7 +82,24 @@ export class RolesGuard implements CanActivate {
       where: { organizationId_userId: { organizationId, userId: request.user.id } },
     });
 
-    if (!membership || membership.revokedAt || !requiredRoles.includes(membership.role)) {
+    // Deux échecs de nature DIFFÉRENTE, délibérément distingués.
+    //
+    // (a) Aucun membership actif sur l'organisation propriétaire de la ressource
+    //     — l'appelant est un TIERS. Répondre autre chose que le 404 générique
+    //     lui confirmerait que la ressource existe : c'est précisément l'oracle
+    //     qu'on ferme. Un membership révoqué relève du même cas : la personne
+    //     n'appartient plus à l'organisation.
+    if (!membership || membership.revokedAt) {
+      throw new NotFoundException(RESSOURCE_INTROUVABLE);
+    }
+
+    // (b) Membre ACTIF de cette organisation, mais rôle insuffisant. Ici le 403
+    //     est le bon code et ne fuit rien : l'appelant a déjà une visibilité
+    //     légitime sur l'organisation, il sait que la ressource existe. Le
+    //     masquer derrière un 404 n'ajouterait aucune sécurité et rendrait
+    //     indébogables les erreurs d'habilitation internes à une PME
+    //     (« pourquoi mon caissier voit-il "introuvable" sur SA facture ? »).
+    if (!requiredRoles.includes(membership.role)) {
       throw new ForbiddenException("Rôle insuffisant pour cette action");
     }
 
@@ -110,7 +138,7 @@ export class RolesGuard implements CanActivate {
         case "organization": {
           const organization = await this.prisma.organization.findUnique({ where: { id: request.params.id } });
           if (!organization) {
-            throw new NotFoundException(`Organisation ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return organization.id;
         }
@@ -120,21 +148,21 @@ export class RolesGuard implements CanActivate {
             include: { invoice: true },
           });
           if (!creditNote) {
-            throw new NotFoundException(`Avoir ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return creditNote.invoice.organizationId;
         }
         case "customer": {
           const customer = await this.prisma.customer.findUnique({ where: { id: request.params.id } });
           if (!customer) {
-            throw new NotFoundException(`Client ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return customer.organizationId;
         }
         case "branch": {
           const branch = await this.prisma.branch.findUnique({ where: { id: request.params.id } });
           if (!branch) {
-            throw new NotFoundException(`Succursale ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return branch.organizationId;
         }
@@ -143,14 +171,14 @@ export class RolesGuard implements CanActivate {
             where: { id: request.params.id },
           });
           if (!creditLimitRequest) {
-            throw new NotFoundException(`Demande de hausse de limite de crédit ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return creditLimitRequest.organizationId;
         }
         case "product": {
           const product = await this.prisma.product.findUnique({ where: { id: request.params.id } });
           if (!product) {
-            throw new NotFoundException(`Produit ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return product.organizationId;
         }
@@ -159,14 +187,14 @@ export class RolesGuard implements CanActivate {
             where: { id: request.params.id },
           });
           if (!template) {
-            throw new NotFoundException(`Modèle récurrent ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return template.organizationId;
         }
         case "invoice": {
           const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
           if (!invoice) {
-            throw new NotFoundException(`Facture ${request.params.id} introuvable`);
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
           }
           return invoice.organizationId;
         }

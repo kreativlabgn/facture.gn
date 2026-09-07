@@ -56,6 +56,14 @@ describe("RolesGuard", () => {
     });
   });
 
+  // LA DISTINCTION À NE PAS PERDRE. Membre ACTIF de l'organisation, mais rôle
+  // insuffisant : 403, et non 404. L'appelant a déjà une visibilité légitime sur
+  // l'organisation — il sait que la ressource existe, rien ne fuit. Le masquer
+  // rendrait indébogables les erreurs d'habilitation internes à une PME.
+  //
+  // Ce test est le pendant exact de « refuse (404 opaque) quand aucun membership
+  // n'existe » : ensemble, ils fixent la frontière entre ce qui fuit et ce qui ne
+  // fuit pas.
   it("refuse (403) un membre dont le rôle n'est pas dans la liste requise", async () => {
     const prisma: any = {
       organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "client_portal", revokedAt: null }) },
@@ -90,22 +98,27 @@ describe("RolesGuard", () => {
     expect(prisma.organizationMember.findUnique).toHaveBeenCalled();
   });
 
-  it("refuse (403) quand aucun membership n'existe pour cette organisation", async () => {
+  // OPACITÉ INTER-TENANT — l'appelant n'est PAS membre de l'organisation
+  // propriétaire : sa réponse doit être indistinguable de « la ressource
+  // n'existe pas ». Un 403 lui confirmerait l'existence de la ressource.
+  it("refuse (404 opaque) quand aucun membership n'existe pour cette organisation", async () => {
     const prisma: any = { organizationMember: { findUnique: vi.fn().mockResolvedValue(null) } };
     const guard = new RolesGuard(createReflector(["owner"]), prisma);
     const context = buildContext({ user: { id: "user-1" }, body: { organizationId: "org-1" } });
 
-    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
   });
 
-  it("refuse (403) un membership révoqué même avec le bon rôle", async () => {
+  // Un membership révoqué n'appartient plus à l'organisation : même traitement
+  // qu'un tiers, jamais un 403 qui trahirait l'existence de la ressource.
+  it("refuse (404 opaque) un membership révoqué même avec le bon rôle", async () => {
     const prisma: any = {
       organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner", revokedAt: new Date() }) },
     };
     const guard = new RolesGuard(createReflector(["owner"]), prisma);
     const context = buildContext({ user: { id: "user-1" }, body: { organizationId: "org-1" } });
 
-    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
   });
 
   it("résout l'organisation depuis la facture pointée par :id quand organizationId n'est pas dans le body", async () => {
@@ -169,7 +182,9 @@ describe("RolesGuard", () => {
       body: { organizationId: "org-attaquant" },
     });
 
-    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    // 404 opaque et non 403 : l'attaquant ne doit pas pouvoir déduire de la
+    // réponse que « invoice-victime » existe bel et bien chez un tiers.
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.invoice.findUnique).toHaveBeenCalledWith({ where: { id: "invoice-victime" } });
     expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
       where: { organizationId_userId: { organizationId: "org-victime", userId: "attaquant-1" } },
@@ -195,7 +210,7 @@ describe("RolesGuard", () => {
       query: { organizationId: "org-attaquant" },
     });
 
-    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
       where: { organizationId_userId: { organizationId: "org-victime", userId: "attaquant-1" } },
     });
