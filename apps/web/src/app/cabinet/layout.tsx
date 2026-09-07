@@ -1,5 +1,6 @@
 import { CabinetShell } from "@/components/shell/CabinetShell";
 import { Wordmark } from "@/components/Wordmark";
+import { ButtonLink } from "@/components/ui";
 import { requireSessionToken } from "@/lib/session";
 import { listMyPractices } from "@/lib/trust-api";
 
@@ -17,6 +18,12 @@ export default async function CabinetLayout({ children }: { children: React.Reac
 
   // Sans cabinet, il n'y a rien à naviguer : on rend l'explication seule
   // plutôt qu'une coquille dont chaque entrée mènerait à une page vide.
+  //
+  // Avec une SORTIE, désormais. Cet écran était une impasse : il constatait
+  // l'absence de cabinet sans jamais dire comment en créer un, alors que
+  // POST /practices existe depuis F8. Le lien pointe hors de /cabinet — ce
+  // layout-ci intercepterait une route /cabinet/nouveau et lui servirait ce
+  // même écran vide.
   if (!practice) {
     return (
       <div className="flex min-h-full flex-col">
@@ -31,6 +38,15 @@ export default async function CabinetLayout({ children }: { children: React.Reac
             <p className="mx-auto mt-3 max-w-sm text-sm text-navy-600">
               Votre compte n&apos;est rattaché à aucun cabinet comptable, gestionnaire, fiduciaire ou CGA.
             </p>
+            <div className="mt-6 flex flex-col items-center gap-3">
+              <ButtonLink href="/nouveau-cabinet" variant="accent">
+                Créer mon cabinet
+              </ButtonLink>
+              <p className="mx-auto max-w-sm text-xs text-navy-600">
+                Si un collègue a déjà créé le cabinet, demandez-lui de vous inviter : c&apos;est lui
+                qui vous y rattache, depuis l&apos;onglet Collaborateurs.
+              </p>
+            </div>
           </div>
         </main>
       </div>

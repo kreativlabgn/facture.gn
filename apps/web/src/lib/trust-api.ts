@@ -625,6 +625,31 @@ export interface PracticeSummary {
   role: string;
 }
 
+export interface CreatePracticeInput {
+  name: string;
+  type: string;
+  /** Facultatif — voir create-practice.dto.ts. Omis, jamais envoyé vide. */
+  registrationNumber?: string;
+  phone: string;
+  email?: string;
+}
+
+// Le créateur devient practice_admin de la structure : POST /practices ne prend
+// aucun identifiant de membre, il rattache le porteur du token.
+export async function createPractice(token: string, input: CreatePracticeInput): Promise<PracticeSummary> {
+  const response = await authenticatedFetch("/practices", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message.join(", ") : body?.message;
+    throw new TrustApiError(message ?? "Création du cabinet impossible", response.status);
+  }
+  return response.json();
+}
+
 export async function listMyPractices(token: string): Promise<PracticeSummary[]> {
   const response = await authenticatedFetch("/practices/mine", token);
   if (!response.ok) {
