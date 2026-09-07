@@ -555,8 +555,21 @@ model Organization {
   // organisations sans NIF n'entrent jamais en conflit : Postgres autorise
   // plusieurs NULL sur une colonne @unique (même pattern qu'Invoice.number).
   nif                          String?               @unique
-  etaxNumber                   String?               @map("etax_number")
-  rccm                         String?
+  // @unique, comme le NIF juste au-dessus, et pour la même raison : une
+  // organisation = un identifiant fiscal chez l'État. Sans cette contrainte,
+  // une redélivraison du webhook APIP (ADR-016) ou deux saisies assistées
+  // concurrentes créeraient deux organisations pour la MÊME entreprise, chacune
+  // avec sa séquence de factures et sa chaîne de certification — une scission
+  // irréparable a posteriori. Nullable : plusieurs NULL restent autorisés par
+  // Postgres, le self-service sans identifiant fiscal n'est jamais bloqué (B4,
+  // ADR-035).
+  etaxNumber                   String?               @unique @map("etax_number")
+  // @unique — le RCCM est l'identifiant du registre du commerce, l'autre clé
+  // naturelle du guichet SYNERGUI-SAFIG 2. C'est sur lui que porte la seconde
+  // branche d'idempotence de createFromApip() : APIP peut redélivrer un
+  // company-created dont le NIF a changé entre-temps alors que le RCCM, lui,
+  // est immuable.
+  rccm                         String?               @unique
   registrationSource           RegistrationSource    @default(organic) @map("registration_source")
   dgiVerificationStatus        DgiVerificationStatus @default(unverified) @map("dgi_verification_status")
   // D4, §4 Spec USSD — nécessaire pour "T1+90j" (velocity_tier). Posé au

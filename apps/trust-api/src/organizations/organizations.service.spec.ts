@@ -1,4 +1,4 @@
-import { ForbiddenException } from "@nestjs/common";
+import { ConflictException, ForbiddenException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
 // organizationScopedClient() appelle `$extends` sur le client. Le vrai client
@@ -98,6 +98,29 @@ describe("OrganizationsService", () => {
         "user-1",
       ),
     ).rejects.toThrow(/NIF/);
+  });
+
+  // rccm et etax_number ne sont uniques que depuis 20260907040000. Avant le
+  // balayage de collisionIdentifiantEtat(), seul le NIF rendait un 409 : les
+  // deux autres remontaient le P2002 brut, donc un 500 (aucun ExceptionFilter
+  // au-dessus de ce service).
+  it.each([
+    ["rccm", /RCCM/],
+    ["etax_number", /eTax/],
+  ])("traduit une collision sur %s en 409 explicite, jamais un 500", async (colonne, motif) => {
+    const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: [colonne] },
+    });
+    const prisma = createFakePrisma(vi.fn().mockRejectedValue(uniqueViolation));
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    const promesse = service.create(
+      { name: "Boutique Aissatou", regimeFiscal: "tpu", legalForm: "commercial", nif: "GN12345678" },
+      "user-1",
+    );
+    await expect(promesse).rejects.toThrow(ConflictException);
+    await expect(promesse).rejects.toThrow(motif);
   });
 
   it("crée une organisation sans NIF ni eTax — inscription self-service jamais bloquée (B1/B4)", async () => {
@@ -296,6 +319,28 @@ describe("OrganizationsService.createAssisted (B5, ADR-045/046/047)", () => {
     expect(prisma.organization.create).toHaveBeenCalledTimes(3);
   });
 
+  // Le code-compte est tiré au hasard par la plateforme : sa collision se
+  // réessaie. Un identifiant d'État est saisi par l'agent : le réessayer
+  // produirait la même collision indéfiniment. Il doit donc sortir de la
+  // boucle en 409 — et non remonter en 500, ce qu'il faisait jusqu'ici Y
+  // COMPRIS pour le NIF, pourtant unique bien avant ce chantier.
+  it.each([
+    ["nif", /NIF/],
+    ["etax_number", /eTax/],
+  ])("collision sur %s : 409 immédiat, sans réessai (contrairement au code-compte)", async (colonne, motif) => {
+    const prisma = createFakePrismaForAssisted();
+    prisma.organization.create = vi.fn().mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { target: [colonne] } }),
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    const promesse = service.createAssisted("agent-1", ASSISTED_DTO);
+    await expect(promesse).rejects.toThrow(ConflictException);
+    await expect(promesse).rejects.toThrow(motif);
+    // Une seule tentative par appel : réessayer serait une boucle stérile.
+    expect(prisma.organization.create).toHaveBeenCalledTimes(1);
+  });
+
   // ADR-107 — avant ce correctif, registrationSource retombait silencieusement sur
   // le défaut "organic" du schema : une organisation créée par l'Agent commercial
   // terrain était mal étiquetée dans les données, sans qu'aucun test ne le détecte.
@@ -406,11 +451,24 @@ const APIP_DTO = {
   rccm: "GC-KAL-2026-A-001",
 };
 
-function createFakePrismaForCreateFromApip(createImpl?: ReturnType<typeof vi.fn>) {
+// `existantes` décrit ce que la plateforme contient DÉJÀ, par clé naturelle.
+// Un faux qui rendrait la même organisation pour n'importe quel `where` ne
+// saurait pas distinguer « redélivrance sur le NIF » de « redélivrance sur le
+// RCCM » ni détecter un payload contradictoire — soit les trois cas que
+// createFromApip() traite désormais différemment.
+function createFakePrismaForCreateFromApip(
+  createImpl?: ReturnType<typeof vi.fn>,
+  existantes: { parNif?: unknown; parRccm?: unknown } = {
+    parNif: { id: "org-1", ...APIP_DTO, registrationSource: "apip" },
+    parRccm: { id: "org-1", ...APIP_DTO, registrationSource: "apip" },
+  },
+) {
   const prisma: any = auClientScope({
     organization: {
       create: createImpl ?? vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "org-1", ...APIP_DTO, registrationSource: "apip" }),
+      findUnique: vi.fn(async ({ where }: any) =>
+        (where.nif !== undefined ? existantes.parNif : existantes.parRccm) ?? null,
+      ),
     },
     // A3 — atomicité création+provisionnement, même précédent que create()/
     // createAssisted() : jamais une organisation sans clé.
@@ -450,8 +508,50 @@ describe("OrganizationsService — création depuis webhook APIP (F11, ADR-077)"
 
     const result = await service.createFromApip(APIP_DTO);
 
-    expect(prisma.organization.findUniqueOrThrow).toHaveBeenCalledWith({ where: { nif: APIP_DTO.nif } });
+    expect(prisma.organization.findUnique).toHaveBeenCalledWith({ where: { nif: APIP_DTO.nif } });
     expect(result.id).toBe("org-1");
+  });
+
+  // Le RCCM est immuable là où le NIF peut être corrigé par le guichet : une
+  // redélivrance dont seul le RCCM percute la contrainte est tout aussi
+  // légitime. Avant l'ajout de l'index unique sur rccm elle n'existait pas ;
+  // depuis, ne pas la traiter la ferait remonter en 500.
+  it("idempotent : une redélivraison qui ne percute QUE le RCCM retourne l'organisation existante", async () => {
+    const createImpl = vi.fn().mockRejectedValue({ code: "P2002", meta: { target: ["rccm"] } });
+    const prisma = createFakePrismaForCreateFromApip(createImpl, {
+      parNif: null,
+      parRccm: { id: "org-1", ...APIP_DTO, registrationSource: "apip" },
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    const result = await service.createFromApip(APIP_DTO);
+
+    expect(prisma.organization.findUnique).toHaveBeenCalledWith({ where: { rccm: APIP_DTO.rccm } });
+    expect(result.id).toBe("org-1");
+  });
+
+  // Le cas dangereux : rendre l'une des deux au hasard rattacherait les futures
+  // factures à la mauvaise entreprise, sans retour possible une fois la chaîne
+  // de certification entamée.
+  it("payload contradictoire (NIF et RCCM sur deux organisations distinctes) : 409, jamais un choix arbitraire", async () => {
+    const createImpl = vi.fn().mockRejectedValue({ code: "P2002", meta: { target: ["nif"] } });
+    const prisma = createFakePrismaForCreateFromApip(createImpl, {
+      parNif: { id: "org-nif", ...APIP_DTO },
+      parRccm: { id: "org-rccm", ...APIP_DTO },
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await expect(service.createFromApip(APIP_DTO)).rejects.toThrow(ConflictException);
+  });
+
+  // Course : la ligne percutée a disparu entre le create() et la relecture.
+  // Maquiller ça en succès rendrait une réponse vide au partenaire.
+  it("organisation disparue entre la collision et la relecture : propage l'erreur d'origine", async () => {
+    const createImpl = vi.fn().mockRejectedValue({ code: "P2002", meta: { target: ["nif"] } });
+    const prisma = createFakePrismaForCreateFromApip(createImpl, { parNif: null, parRccm: null });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await expect(service.createFromApip(APIP_DTO)).rejects.toMatchObject({ code: "P2002" });
   });
 
   it("propage toute autre erreur inattendue (pas une collision NIF)", async () => {

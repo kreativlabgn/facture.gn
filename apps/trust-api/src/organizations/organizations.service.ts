@@ -56,6 +56,24 @@ const EVENT_CATEGORY_BY_TYPE: Record<InvoiceEventType, "facture" | "paiement"> =
   liquidation_validated: "facture",
 };
 
+// Les trois identifiants délivrés par l'État portent chacun un index unique
+// GLOBAL depuis 20260907040000. Une collision doit rendre un 409 explicite :
+// ce service n'a aucun ExceptionFilter au-dessus de lui, donc un P2002 laissé
+// brut remonterait en 500 opaque au lieu de dire à l'appelant QUEL identifiant
+// est déjà pris. Les libellés parlent la langue de l'utilisateur final, pas
+// celle du schéma (etax_number → « numéro eTax »).
+const IDENTIFIANTS_ETAT = [
+  { colonne: "nif", libelle: "NIF" },
+  { colonne: "rccm", libelle: "RCCM" },
+  { colonne: "etax_number", libelle: "numéro eTax" },
+] as const;
+
+type CollisionIdentifiant = (typeof IDENTIFIANTS_ETAT)[number];
+
+function collisionIdentifiantEtat(error: unknown): CollisionIdentifiant | null {
+  return IDENTIFIANTS_ETAT.find((identifiant) => isUniqueConstraintViolation(error, identifiant.colonne)) ?? null;
+}
+
 @Injectable()
 export class OrganizationsService {
   private readonly logger = new Logger(OrganizationsService.name);
@@ -96,8 +114,12 @@ export class OrganizationsService {
         return organization;
       });
     } catch (error) {
-      if (isUniqueConstraintViolation(error, "nif")) {
-        throw new ConflictException(`Une organisation avec le NIF ${dto.nif} existe déjà`);
+      // Les trois identifiants sont désormais uniques, pas seulement le NIF :
+      // sans ce balayage, une collision sur le RCCM ou le numéro eTax
+      // remonterait en 500 alors que le NIF, lui, rend un 409 propre.
+      const collision = collisionIdentifiantEtat(error);
+      if (collision) {
+        throw new ConflictException(`Une organisation avec ce ${collision.libelle} existe déjà`);
       }
       throw error;
     }
@@ -222,6 +244,15 @@ export class OrganizationsService {
         if (isUniqueConstraintViolation(error, "account_code") && !isLastAttempt) {
           continue;
         }
+        // Même traitement que create() : l'agent terrain saisit NIF et eTax à
+        // la main, la collision est un cas NOMINAL de son quotidien (la PME
+        // s'est déjà inscrite ailleurs), jamais une panne. Sans ceci elle
+        // remontait en 500 — y compris pour le NIF, qui était pourtant déjà
+        // unique avant ce chantier.
+        const collision = collisionIdentifiantEtat(error);
+        if (collision) {
+          throw new ConflictException(`Une organisation avec ce ${collision.libelle} existe déjà`);
+        }
         throw error;
       }
     }
@@ -296,17 +327,49 @@ export class OrganizationsService {
         return organization;
       });
     } catch (error) {
-      if (isUniqueConstraintViolation(error, "nif")) {
-        // NE JAMAIS SCOPER CETTE LECTURE. C'est une recherche d'unicité
-        // GLOBALE sur le NIF : on vient précisément de percuter la contrainte
-        // unique, donc l'organisation existante appartient par définition à
-        // quelqu'un d'autre que le scope courant (il n'y en a d'ailleurs aucun
-        // ici — webhook APIP signé, pas de requête organisationnelle). Scopée,
-        // elle ne trouverait rien et lèverait à la place de rendre la
-        // sémantique idempotente attendue par la redélivraison (ADR-016).
-        return this.prisma.organization.findUniqueOrThrow({ where: { nif: dto.nif } });
+      // DEUX clés naturelles, pas une seule. APIP peut redélivrer un
+      // company-created dont le NIF a été corrigé entre-temps alors que le
+      // RCCM, identifiant du registre du commerce, ne bouge pas — et
+      // inversement. N'écouter que le NIF laisserait la collision RCCM
+      // remonter en 500 sur une redélivrance parfaitement légitime.
+      const collisionNif = isUniqueConstraintViolation(error, "nif");
+      const collisionRccm = isUniqueConstraintViolation(error, "rccm");
+      if (!collisionNif && !collisionRccm) {
+        throw error;
       }
-      throw error;
+
+      // NE JAMAIS SCOPER CES LECTURES. C'est une recherche d'unicité GLOBALE :
+      // on vient précisément de percuter la contrainte, donc l'organisation
+      // existante appartient par définition à quelqu'un d'autre que le scope
+      // courant (il n'y en a d'ailleurs aucun ici — webhook APIP signé, pas de
+      // requête organisationnelle). Scopées, elles ne trouveraient rien et
+      // lèveraient au lieu de rendre la sémantique idempotente attendue par la
+      // redélivraison (ADR-016).
+      const [parNif, parRccm] = await Promise.all([
+        this.prisma.organization.findUnique({ where: { nif: dto.nif } }),
+        this.prisma.organization.findUnique({ where: { rccm: dto.rccm } }),
+      ]);
+
+      // Payload CONTRADICTOIRE : le NIF désigne une entreprise, le RCCM une
+      // autre. Ce n'est plus une redélivrance mais une incohérence du guichet
+      // (ou un RCCM réattribué). Rendre l'une des deux au hasard rattacherait
+      // les futures factures à la MAUVAISE entreprise — silencieusement, et
+      // sans retour possible une fois la chaîne de certification entamée. On
+      // refuse, et l'incident remonte à l'APIP.
+      if (parNif && parRccm && parNif.id !== parRccm.id) {
+        throw new ConflictException(
+          `Payload APIP incohérent : le NIF ${dto.nif} et le RCCM ${dto.rccm} désignent deux organisations distinctes`,
+        );
+      }
+
+      const existante = parNif ?? parRccm;
+      if (!existante) {
+        // La ligne percutée a disparu entre le create() et cette lecture. Rien
+        // à rendre idempotemment : on propage l'erreur d'origine plutôt que de
+        // maquiller une course en succès.
+        throw error;
+      }
+      return existante;
     }
   }
 
