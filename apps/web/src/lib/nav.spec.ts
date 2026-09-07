@@ -6,7 +6,7 @@ const labels = (entries: readonly { label: string }[]) => entries.map((entry) =>
 describe("nav — onglets visibles par rôle", () => {
   it("coquille complète pour owner", () => {
     expect(labels(visibleTabs("owner"))).toEqual(["Accueil", "Factures", "Clients"]);
-    expect(labels(visibleMoreEntries("owner"))).toEqual(["Produits", "Simulateur USSD", "Crédits", "Paramètres"]);
+    expect(labels(visibleMoreEntries("owner"))).toEqual(["Produits", "Simulateur USSD", "Crédits", "Parrainage", "Paramètres"]);
     expect(canEmit("owner")).toBe(true);
   });
 

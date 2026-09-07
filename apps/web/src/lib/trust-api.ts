@@ -683,6 +683,82 @@ export async function getCreditWallet(token: string, organizationId: string): Pr
   return response.json();
 }
 
+export interface ReferralItem {
+  id: string;
+  /** Instantané du nom au moment du rattachement — voir Referral dans le
+   *  schéma : sous RLS le parrain ne peut pas lire l'organisation du filleul. */
+  referredName: string;
+  status: "pending" | "converted";
+  convertedAt: string | null;
+  /** null tant que le filleul n'a pas pris d'abonnement payant. */
+  referrerBonusCentimes: string | null;
+  createdAt: string;
+}
+
+export interface ReferralSummary {
+  isActive: boolean;
+  referralCode: string | null;
+  totalGainsCentimes: string;
+  referrals: ReferralItem[];
+}
+
+export async function getReferralSummary(
+  token: string,
+  organizationId: string,
+): Promise<ReferralSummary> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/referrals`,
+    token,
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger le parrainage", response.status);
+  }
+  return response.json();
+}
+
+/** Idempotent côté API : réactiver rend le code déjà attribué. */
+export async function activateReferral(
+  token: string,
+  organizationId: string,
+): Promise<{ referralCode: string }> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/referrals/activate`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible d'activer le parrainage", response.status);
+  }
+  return response.json();
+}
+
+export async function attachReferral(
+  token: string,
+  organizationId: string,
+  code: string,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/referrals/attach`,
+    token,
+    {
+      method: "POST",
+      // authenticatedFetch ne pose pas Content-Type : sans lui, Nest ne parse
+      // pas le corps et le code arrive vide côté validation.
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    },
+  );
+  if (!response.ok) {
+    // 409 recouvre deux cas distincts et l'API les libelle : déjà rattaché, ou
+    // auto-parrainage. On relaie son message plutôt qu'un texte générique.
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(
+      body?.message ?? "Impossible d'enregistrer ce code",
+      response.status,
+    );
+  }
+}
+
 export interface PracticeSummary {
   id: string;
   name: string;

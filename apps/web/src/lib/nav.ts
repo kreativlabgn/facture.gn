@@ -47,6 +47,10 @@ export const MORE_ENTRIES: readonly NavEntry[] = [
   // pilote l'entreprise. La vraie barrière reste le PIN, côté serveur.
   { href: "/dashboard/ussd", label: "Simulateur USSD", permission: "organization:read" },
   { href: "/dashboard/credits", label: "Crédits", permission: "organization:read" },
+  // Même garde que Crédits : le code de parrainage engage l'organisation et la
+  // prime tombe dans son portefeuille. Le contrôleur, lui, exige owner/admin —
+  // masquer n'autorise rien, il servirait un 403 à un rôle intermédiaire.
+  { href: "/dashboard/parrainage", label: "Parrainage", permission: "organization:read" },
   { href: "/dashboard/settings", label: "Paramètres", permission: "organization:read" },
 ];
 

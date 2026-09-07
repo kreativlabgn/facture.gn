@@ -587,6 +587,10 @@ model Organization {
   // de SMS exigerait un SUM() sur tout l'historique de l'organisation.
   // CreditsService.reconcile() permet de le recalculer depuis le registre.
   creditBalanceCentimes        BigInt                @default(0) @map("credit_balance_centimes")
+  // Code de parrainage, généré à la demande — null tant que l'organisation n'a
+  // pas activé le programme. @unique : c'est lui qui rattache un filleul, une
+  // collision enverrait la prime au mauvais parrain.
+  referralCode                 String?               @unique @map("referral_code")
   preferredLanguage            PreferredLanguage     @default(fr) @map("preferred_language")
   chiffreAffairesBrutDeclare   BigInt                @default(0) @map("chiffre_affaires_brut_declare")
   paymentLinkAutoSend          Boolean               @default(true) @map("payment_link_auto_send")
@@ -636,6 +640,8 @@ model Organization {
   fiscalPeriodClosings  FiscalPeriodClosing[]
   bankTransactions      BankTransaction[]
   creditTransactions    CreditTransaction[]
+  referralsMade         Referral[]                 @relation("ReferralReferrer")
+  referralReceived      Referral?                  @relation("ReferralReferred")
   devices               Device[]
 
   @@map("organization")
@@ -893,6 +899,51 @@ enum CreditTransactionType {
   refund
   // Correction manuelle, geste commercial. Toujours étiquetée comme telle.
   adjustment
+}
+
+// Parrainage entre marchands. Une ligne par filleul rattaché.
+//
+// LE NOM DU FILLEUL EST RECOPIÉ ICI, et ce n'est pas de la négligence : sous
+// RLS, le parrain ne voit QUE ses propres lignes (politique sur
+// referrer_organization_id). L'organisation du filleul, elle, lui reste
+// invisible — c'est une autre organisation. Sans cet instantané, afficher
+// « qui j'ai parrainé » exigerait une lecture hors scope, c'est-à-dire un trou
+// dans l'isolation pour un simple libellé.
+//
+// La prime est versée EN CRÉDITS, dans le portefeuille (CreditTransaction) —
+// pas en espèces : facture.gn n'a aucun moyen de payer un marchand, et un
+// crédit se dépense immédiatement en relances.
+model Referral {
+  id                     String         @id @default(uuid())
+  referrerOrganizationId String         @map("referrer_organization_id")
+  // @unique : un marchand n'est parrainé qu'une fois. Sans cette contrainte,
+  // deux parrains pourraient revendiquer le même filleul et toucher chacun la
+  // prime.
+  referredOrganizationId String         @unique @map("referred_organization_id")
+  referredName           String         @map("referred_name")
+  // Le code effectivement saisi, conservé tel quel : le parrain peut en
+  // changer, le rattachement historique ne doit pas bouger.
+  code                   String
+  status                 ReferralStatus @default(pending)
+  convertedAt            DateTime?      @map("converted_at")
+  // Montants réellement versés, figés au moment du versement. La grille peut
+  // évoluer ; un historique qui changerait rétroactivement serait faux.
+  referrerBonusCentimes  BigInt?        @map("referrer_bonus_centimes")
+  referredBonusCentimes  BigInt?        @map("referred_bonus_centimes")
+  createdAt              DateTime       @default(now()) @map("created_at")
+
+  referrer Organization @relation("ReferralReferrer", fields: [referrerOrganizationId], references: [id])
+  referred Organization @relation("ReferralReferred", fields: [referredOrganizationId], references: [id])
+
+  @@index([referrerOrganizationId, createdAt])
+  @@map("referral")
+}
+
+enum ReferralStatus {
+  // Filleul inscrit, encore en Freemium : aucune prime versée.
+  pending
+  // Premier abonnement payant activé : les deux primes ont été créditées.
+  converted
 }
 
 model Branch {
