@@ -5,18 +5,25 @@ import type { CommercialTier, OrganizationRole } from "@facture-gn/db";
 // scaffoldée). Seules les fonctionnalités qui existent réellement en code sont
 // gatées ici — jamais récurrence/rappels/branding/UBL/analytics avancé (I1/I2
 // non livrées, aucun branding/UBL/analytics avancé construit dans ce repo).
-// "Starter Plus" (ADR-106, 6e palier commercial) n'existe pas dans l'enum
-// CommercialTier (5 paliers) — gap hors scope H1, voir
-// docs/plans/2026-08-19-plan-feature-gating.md.
+// "Starter Plus" (ADR-106) a rejoint l'enum CommercialTier le 2026-09-07
+// (migration 20260907070000) : le gap signalé ici depuis H1 est comblé.
 // Exporté uniquement pour le test de garde-fou (plan-features-grid.spec.ts)
 // qui vérifie sa cohérence avec l'enum Prisma CommercialTier — jamais consommé
 // par un autre service, qui doit toujours passer par les fonctions ci-dessous.
-export const TIER_ORDER: CommercialTier[] = ["freemium", "starter", "pro", "enterprise", "custom"];
+export const TIER_ORDER: CommercialTier[] = [
+  "freemium",
+  "starter",
+  "starter_plus",
+  "pro",
+  "enterprise",
+  "custom",
+];
 
 // null = illimité.
 const MAX_BRANCHES_BY_TIER: Record<CommercialTier, number | null> = {
   freemium: 1,
   starter: 2,
+  starter_plus: 5,
   pro: null,
   enterprise: null,
   custom: null,
@@ -25,6 +32,7 @@ const MAX_BRANCHES_BY_TIER: Record<CommercialTier, number | null> = {
 const MAX_MEMBERS_BY_TIER: Record<CommercialTier, number | null> = {
   freemium: 1,
   starter: 4,
+  starter_plus: 7,
   pro: 10,
   enterprise: null,
   custom: null,
@@ -34,6 +42,10 @@ const MAX_MEMBERS_BY_TIER: Record<CommercialTier, number | null> = {
 // conformité, §2.1). business_manager n'y figure pas volontairement : ce n'est
 // pas un OrganizationRole dans ce repo (c'est un Mandate.grantedRole, jamais
 // assignable via inviteMember()).
+// starter_plus n'ouvre AUCUN rôle nouveau : la grille produit le décrit comme
+// « sophistication restreinte (hors API) ». Il hérite simplement de starter,
+// puisque tierIndex(starter_plus) > tierIndex(starter) — aucune entrée à
+// ajouter ici, et developer_api reste à pro.
 const MIN_TIER_FOR_ROLE: Partial<Record<OrganizationRole, CommercialTier>> = {
   inventory_manager: "starter",
   approver: "pro",

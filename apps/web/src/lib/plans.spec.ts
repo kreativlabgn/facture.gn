@@ -3,6 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER,
+  COMMISSION_BPS,
+  COMMISSION_CAP_CENTIMES,
+  PRIX_MENSUEL_CENTIMES,
+  pourcentage,
+  totalPayeurBps,
   MAX_BRANCHES_BY_TIER,
   MAX_MEMBERS_BY_TIER,
   MIN_TIER_FOR_ROLE,
@@ -18,6 +23,14 @@ import {
 // exactement le genre d'écart qu'un utilisateur découvre au pire moment.
 const GRID = readFileSync(
   path.resolve(__dirname, "../../../trust-api/src/common/plan-features-grid.ts"),
+  "utf8",
+);
+
+// La grille de commission est la seconde autorité, et la plus sensible : elle
+// calcule le platformFeeAmount prélevé sur CHAQUE encaissement. Un écart entre
+// ce qu'on affiche et ce qu'on prélève est une fausse annonce de prix.
+const COMMISSION = readFileSync(
+  path.resolve(__dirname, "../../../trust-api/src/common/commission-grid.ts"),
   "utf8",
 );
 
@@ -68,13 +81,51 @@ describe("miroir de la grille des paliers", () => {
     expect(m![1]).toBe(ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER);
   });
 
-  // Aucun prix ne doit apparaître : il n'en existe aucun dans le dépôt, et un
-  // montant inventé sur un écran d'abonnement serait le pire endroit possible.
-  it("n'affiche aucun montant", () => {
-    const source = readFileSync(path.resolve(__dirname, "./plans.ts"), "utf8")
-      .replace(/\/\/.*$/gm, "");
-    expect(source).not.toMatch(/GNF/);
-    expect(source).not.toMatch(/\bprix\b|\bprice\b/i);
+  // LE TEST LE PLUS IMPORTANT DU FICHIER. Afficher 1,6 % pendant que le code
+  // prélève 2,0 % serait une fausse annonce de prix — c'est exactement l'écart
+  // qui existait dans la grille produit en circulation.
+  it("les taux de commission sont EXACTEMENT ceux prélevés par le code", () => {
+    const bloc = COMMISSION.match(/COMMISSION_BPS_BY_TIER[^=]*=\s*\{([\s\S]*?)\n\};/);
+    expect(bloc, "COMMISSION_BPS_BY_TIER introuvable").toBeTruthy();
+
+    const duBackend: Record<string, number> = {};
+    for (const ligne of bloc![1].split("\n")) {
+      const m = ligne.replace(/\/\/.*$/, "").match(/^\s*(\w+):\s*(\d+)\s*,/);
+      if (m) duBackend[m[1]] = Number(m[2]);
+    }
+    expect(duBackend).toEqual(COMMISSION_BPS);
+  });
+
+  it("les plafonds de commission correspondent", () => {
+    const bloc = COMMISSION.match(/COMMISSION_CAP_CENTIMES_BY_TIER[^=]*=\s*\{([\s\S]*?)\n\};/);
+    expect(bloc, "COMMISSION_CAP_CENTIMES_BY_TIER introuvable").toBeTruthy();
+
+    const duBackend: Record<string, string> = {};
+    for (const ligne of bloc![1].split("\n")) {
+      const m = ligne.replace(/\/\/.*$/, "").match(/^\s*(\w+):\s*([\d_]+)n\s*,/);
+      if (m) duBackend[m[1]] = m[2].replace(/_/g, "");
+    }
+    expect(duBackend).toEqual(COMMISSION_CAP_CENTIMES);
+  });
+
+  // Un palier qui coûte plus cher doit prélever moins : c'est toute la logique
+  // de la grille. Une inversion serait un bug, pas une offre.
+  it("la commission décroît quand le prix augmente", () => {
+    for (let i = 1; i < TIER_ORDER.length; i++) {
+      const tier = TIER_ORDER[i];
+      const precedent = TIER_ORDER[i - 1];
+      expect(COMMISSION_BPS[tier]).toBeLessThan(COMMISSION_BPS[precedent]);
+      expect(BigInt(PRIX_MENSUEL_CENTIMES[tier])).toBeGreaterThan(
+        BigInt(PRIX_MENSUEL_CENTIMES[precedent]),
+      );
+    }
+  });
+
+  it("chaque palier a un prix et un plafond", () => {
+    for (const tier of TIER_ORDER) {
+      expect(PRIX_MENSUEL_CENTIMES[tier]).toBeDefined();
+      expect(COMMISSION_CAP_CENTIMES[tier]).toBeDefined();
+    }
   });
 });
 
@@ -114,6 +165,41 @@ describe("avantagesDuPalier", () => {
         avantagesDuPalier(TIER_ORDER[i - 1]).length,
       );
     }
+  });
+});
+
+describe("Starter Plus (ADR-106)", () => {
+  it("s'intercale entre Starter et Pro sur les trois axes", () => {
+    expect(tierIndex("starter")).toBeLessThan(tierIndex("starter_plus"));
+    expect(tierIndex("starter_plus")).toBeLessThan(tierIndex("pro"));
+    expect(COMMISSION_BPS.starter_plus).toBe(175);
+  });
+
+  it("n'ouvre aucun rôle de plus que Starter", () => {
+    const starter = avantagesDuPalier("starter").join(" ");
+    const plus = avantagesDuPalier("starter_plus").join(" ");
+    expect(plus).toContain("gestionnaire de stock");
+    expect(plus).not.toContain("développeur API");
+    // Seules les limites d'échelle changent.
+    expect(plus).toContain("5 succursales");
+    expect(starter).toContain("2 succursales");
+  });
+});
+
+describe("affichage des taux", () => {
+  it("formate à la française, virgule décimale", () => {
+    expect(pourcentage(175)).toBe("1,75 %");
+    expect(pourcentage(200)).toBe("2 %");
+  });
+
+  // Le payeur supporte la commission ET la passerelle Djomy (1,4 % réel,
+  // ADR-072). Les totaux du code : freemium 3,5 / starter 3,4 / pro 2,9 /
+  // enterprise 2,6 / custom 2,4.
+  it("le total payeur ajoute la passerelle", () => {
+    expect(totalPayeurBps("freemium")).toBe(350);
+    expect(totalPayeurBps("starter")).toBe(340);
+    expect(totalPayeurBps("pro")).toBe(290);
+    expect(totalPayeurBps("custom")).toBe(240);
   });
 });
 

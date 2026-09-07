@@ -23,9 +23,17 @@ import type { CommercialTier } from "@facture-gn/db";
 // brut de la facture. Un taux exact de ~2,071% annulerait cet effet
 // (p + g + p×g = 3,5%), mais l'écart réel (~0,03 point, quelques GNF par
 // transaction) a été jugé négligeable — 2,1% (soustraction simple) conservé.
+// ADR-106 — starter_plus à 175 bps, entre starter (200) et pro (150).
+// DÉRIVÉ, pas relevé : la grille produit de ce palier annonçait 1,35 %, mais
+// elle datait d'avant la correction du frais Djomy (1,0 % → 1,4 %), qui a
+// laissé la marge des paliers payants inchangée et remonté le total payeur.
+// L'écart est uniforme sur les quatre paliers payants existants (+0,40 pt
+// entre la grille produit et le code), d'où 1,35 % + 0,40 = 1,75 %.
+// À confirmer par une décision produit avant toute communication publique.
 const COMMISSION_BPS_BY_TIER: Record<CommercialTier, number> = {
   freemium: 210,
   starter: 200,
+  starter_plus: 175,
   pro: 150,
   enterprise: 120,
   custom: 100,
@@ -36,6 +44,10 @@ const COMMISSION_BPS_BY_TIER: Record<CommercialTier, number> = {
 const COMMISSION_CAP_CENTIMES_BY_TIER: Record<CommercialTier, bigint> = {
   freemium: 5_000_000n,
   starter: 5_000_000n,
+  // Plafond de Starter conservé : la grille produit n'en annonce aucun pour
+  // ce palier, et un plafond intermédiaire inventé serait plus arbitraire
+  // que d'hériter celui dont ce palier est l'extension.
+  starter_plus: 5_000_000n,
   pro: 7_500_000n,
   enterprise: 10_000_000n,
   custom: 15_000_000n,

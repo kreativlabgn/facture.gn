@@ -154,6 +154,10 @@ enum DgiVerificationStatus {
 enum CommercialTier {
   freemium
   starter
+  // ADR-106 — 6e palier commercial, comblant le saut tarifaire entre Starter et
+  // Pro (5 succursales / 7 collaborateurs). Le gap était documenté depuis H1
+  // dans plan-features-grid.ts : « n'existe pas dans l'enum CommercialTier ».
+  starter_plus
   pro
   enterprise
   custom

@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import { resolveActiveOrganization } from "@/lib/active-organization";
+import { formatGnf } from "@/lib/format";
 import {
+  COMMISSION_BPS,
+  COMMISSION_CAP_CENTIMES,
+  PRIX_MENSUEL_CENTIMES,
   TIER_ORDER,
   avantagesDuPalier,
+  pourcentage,
   tierIndex,
   tierLabel,
+  totalPayeurBps,
   type Tier,
 } from "@/lib/plans";
 import { requireSessionToken } from "@/lib/session";
@@ -15,11 +21,16 @@ export const metadata: Metadata = { title: "Abonnement — facture.gn" };
 
 // Ce que chaque palier ouvre, et où se situe l'organisation.
 //
-// AUCUN PRIX N'EST AFFICHÉ, et c'est une décision, pas un oubli : il n'en existe
-// aucun dans le dépôt. Ni au schéma, ni dans les grilles hardcodées, ni dans
-// docs/. Le document « Grille-Offres-facture-gn.md » est cité en commentaire
-// mais absent. Un montant inventé sur un écran d'abonnement serait le pire
-// endroit possible pour en inventer un.
+// LES TAUX AFFICHÉS SONT CEUX QUE LE CODE PRÉLÈVE, pas ceux de la plaquette.
+// La grille produit en circulation annonçait 1,6 / 1,1 / 0,8 / 0,6 % alors que
+// commission-grid.ts prélève 2,00 / 1,50 / 1,20 / 1,00 % — elle datait d'avant
+// la correction du frais Djomy et n'avait pas été mise à jour. lib/plans.spec.ts
+// confronte désormais les deux à chaque exécution des tests : un écart ne peut
+// plus être livré.
+//
+// Les PLAFONDS sont affichés parce qu'ils sont un argument, pas une petite
+// ligne : à 1,50 %, une facture de 50 M GNF coûterait 750 000 de commission ;
+// le plafond la ramène à 75 000.
 //
 // AUCUN BOUTON « ACTIVER CE FORFAIT » NON PLUS. POST /organizations/:id/
 // commercial-tier existe et est ouvert à owner/admin, mais il écrit le champ
@@ -62,8 +73,8 @@ export default async function AbonnementPage() {
       <div>
         <h1 className="font-display text-2xl font-bold text-navy-950">Abonnement</h1>
         <p className="mt-1 max-w-prose text-sm text-navy-600">
-          Votre palier est <strong className="text-navy-950">{tierLabel(actuel)}</strong>. Voici ce
-          que chaque palier ouvre — ce sont les limites réellement appliquées, pas une plaquette.
+          Votre palier est <strong className="text-navy-950">{tierLabel(actuel)}</strong>. Les
+          limites et les taux ci-dessous sont ceux réellement appliqués par la plateforme.
         </p>
       </div>
 
@@ -72,6 +83,18 @@ export default async function AbonnementPage() {
           <CartePalier key={tier} tier={tier} actuel={actuel} />
         ))}
       </div>
+
+      <Card>
+        <div className="flex flex-col gap-2 p-5">
+          <h2 className="font-display text-base font-semibold text-navy-950">Comment lire ces taux</h2>
+          <p className="max-w-prose text-sm text-navy-600">
+            La commission ne s&apos;applique qu&apos;aux encaissements par lien de paiement —
+            jamais aux règlements en espèces ni aux virements bancaires. Le total supporté par
+            le payeur ajoute les frais de la passerelle Mobile Money, qui ne reviennent pas à
+            facture.gn.
+          </p>
+        </div>
+      </Card>
 
       <Card>
         <div className="flex flex-col gap-2 p-5">
@@ -99,6 +122,29 @@ function CartePalier({ tier, actuel }: { tier: Tier; actuel: string }) {
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-display text-base font-semibold text-navy-950">{tierLabel(tier)}</h2>
           {estActuel ? <Badge tone="good">● Votre palier</Badge> : null}
+        </div>
+
+        <div className="flex flex-col gap-1 border-y border-navy-50 py-3">
+          <p className="font-mono text-xl font-bold tabular-nums text-navy-950">
+            {formatGnf(PRIX_MENSUEL_CENTIMES[tier])}
+            <span className="text-xs font-normal text-navy-600"> / mois</span>
+          </p>
+          <dl className="mt-1 flex flex-col gap-0.5 text-xs text-navy-600">
+            <div className="flex justify-between gap-2">
+              <dt>Commission sur encaissement</dt>
+              <dd className="font-mono tabular-nums text-navy-950">{pourcentage(COMMISSION_BPS[tier])}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>Plafonnée à</dt>
+              <dd className="font-mono tabular-nums text-navy-950">
+                {formatGnf(COMMISSION_CAP_CENTIMES[tier])}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>Total supporté par le payeur</dt>
+              <dd className="font-mono tabular-nums text-navy-950">{pourcentage(totalPayeurBps(tier))}</dd>
+            </div>
+          </dl>
         </div>
 
         <ul className="flex flex-col gap-1.5">
