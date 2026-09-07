@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { OrganizationRole, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { OrganizationAccessService } from "../common/rbac/organization-access.service";
 import { FEC_HEADER } from "./fec-formatting";
@@ -29,7 +30,11 @@ export class FecService {
     const start = new Date(Date.UTC(fiscalYear, 0, 1));
     const end = new Date(Date.UTC(fiscalYear + 1, 0, 1));
 
-    const invoices = await this.prisma.invoice.findMany({
+    // L'autorisation est déjà tranchée par assertAccess() ci-dessus, qui combine
+    // OrganizationMember ET Mandate (un cabinet mandaté peut exporter le FEC de
+    // son client). Le scope organisation reste correct dans les deux cas : c'est
+    // bien le FEC de CETTE organisation qu'on exporte, jamais une vue cabinet.
+    const invoices = await organizationScopedClient(this.prisma, organizationId).invoice.findMany({
       where: {
         organizationId,
         documentType: "invoice",

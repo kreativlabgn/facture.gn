@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { InvoiceStatus, PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateCreditNoteDto } from "./dto/create-credit-note.dto";
 
@@ -24,9 +25,19 @@ export class CreditNotesService {
   // sur la même ligne pourraient en théorie toutes deux passer la vérification.
   // Scénario rare (contrairement aux paiements cash concurrents), pas de
   // contrainte DB supplémentaire pour cette story.
-  async create(invoiceId: string, dto: CreateCreditNoteDto) {
-    const invoice = await this.prisma.invoice.findUniqueOrThrow({
-      where: { id: invoiceId },
+  // RLS (ADR-111 étape 1) — `credit_note` et `credit_note_line` sont sous
+  // org_isolation par INDIRECTION (via invoice_id, et via credit_note→invoice
+  // pour les lignes) : aucune ne porte de colonne organization_id. Seule la
+  // facture peut porter la double clause ; pour les deux autres, le GUC sera la
+  // barrière à l'étape 2 et les `where` applicatifs (invoiceLineId issus de
+  // cette facture) le sont d'ici là.
+  async create(invoiceId: string, dto: CreateCreditNoteDto, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    // Pas d'oracle malgré le *OrThrow : RolesGuard a déjà résolu cette facture
+    // (résolution "invoice" par défaut, findUnique + 404 explicite) avant
+    // d'entrer dans le service.
+    const invoice = await scoped.invoice.findFirstOrThrow({
+      where: { id: invoiceId, organizationId },
       include: { lines: true },
     });
 
@@ -42,7 +53,7 @@ export class CreditNotesService {
     }
 
     // Une seule requête pour toutes les lignes demandées (pas de N+1).
-    const alreadyCredited = await this.prisma.creditNoteLine.groupBy({
+    const alreadyCredited = await scoped.creditNoteLine.groupBy({
       by: ["invoiceLineId"],
       where: { invoiceLineId: { in: dto.lines.map((line) => line.invoiceLineId) } },
       _sum: { quantityReturned: true },
@@ -77,7 +88,7 @@ export class CreditNotesService {
 
     // Création imbriquée en une seule opération Prisma (atomique nativement),
     // même précédent que createDraft() — pas de $transaction explicite requise.
-    return this.prisma.creditNote.create({
+    return scoped.creditNote.create({
       data: {
         invoiceId,
         amount,

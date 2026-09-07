@@ -1,12 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import { MarginService } from "./margin.service";
 
+// organizationScopedClient() appelle `$extends`, et setOrganizationScope() pose le
+// GUC via `$executeRaw`. Le vrai client offre les deux ; un faux qui ne les offre
+// pas ne teste pas le service migré, il plante dessus. `$extends` rend le client
+// LUI-MÊME pour que les mocks restent partagés. `$transaction` bi-forme : la forme
+// tableau est celle qu'emploie makeScopedOperation(), ce qui rend l'extension
+// rejouable — indispensable pour épingler la VALEUR du client scopé.
+function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
+  const p = prisma as Record<string, unknown>;
+  p.$extends = vi.fn(() => prisma);
+  p.$executeRaw = p.$executeRaw ?? vi.fn().mockResolvedValue(1);
+  p.$transaction = p.$transaction ?? vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma)));
+  for (const valeur of Object.values(p)) {
+    const modele = valeur as Record<string, unknown> | null;
+    if (!modele || typeof modele !== "object") continue;
+    if (modele.findUniqueOrThrow && !modele.findFirstOrThrow) modele.findFirstOrThrow = modele.findUniqueOrThrow;
+    if (modele.findUnique && !modele.findFirst) modele.findFirst = modele.findUnique;
+  }
+  return prisma;
+}
+
 function createFakePrisma(lines: any[]) {
-  return {
+  return auClientScope({
     invoiceLine: {
       findMany: vi.fn().mockResolvedValue(lines),
     },
-  };
+  });
 }
 
 const SALE_LINE = {
@@ -16,6 +36,26 @@ const SALE_LINE = {
   invoice: { id: "inv-1", issuedAt: new Date("2026-08-19T00:00:00.000Z") },
   product: { id: "product-1", name: "Sac de riz 50kg" },
 };
+
+describe("MarginService — scope RLS", () => {
+  // Épinglage du CLIENT SCOPÉ : les faux `$extends` de ce dépôt se renvoient
+  // eux-mêmes, donc la valeur du scope n'est pas observable directement. On
+  // rejoue l'extension capturée — `$allOperations` exécute le set_config via
+  // `$executeRaw` — pour lire l'organisation réellement injectée.
+  it("pose app.current_org_id sur l'organisation demandée, jamais une autre", async () => {
+    const prisma = createFakePrisma([]);
+    const service = new MarginService(prisma as any);
+
+    await service.listLines("org-a-proteger");
+
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+
+    const setConfig = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+  });
+});
 
 describe("MarginService.listLines (E7, ADR-084)", () => {
   it("ne considère que les factures issued/partially_paid/paid — même filtre que FecService", async () => {

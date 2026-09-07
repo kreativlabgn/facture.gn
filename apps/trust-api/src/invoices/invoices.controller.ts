@@ -81,8 +81,11 @@ export class InvoicesController {
   // params.id. 409 si la facture n'est pas encore émise (RenderingService).
   @Get(":id/pdf")
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer")
-  async downloadPdf(@Param("id") id: string): Promise<StreamableFile> {
-    const { pdf, filename } = await this.renderingService.renderInvoicePdf(id);
+  async downloadPdf(
+    @Param("id") id: string,
+    @CurrentOrganizationId() organizationId: string,
+  ): Promise<StreamableFile> {
+    const { pdf, filename } = await this.renderingService.renderInvoicePdf(id, organizationId);
     return new StreamableFile(pdf, {
       type: "application/pdf",
       disposition: `attachment; filename="${filename}"`,

@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { computeSealHash } from "./fiscal-period-seal";
@@ -35,6 +36,10 @@ export class FiscalPeriodsService {
     };
 
     return this.prisma.$transaction(async (tx) => {
+      // GUC en première ligne : il couvre l'agrégat, la lecture de la dernière
+      // facture et la création du sceau — les trois composantes du hash.
+      await setOrganizationScope(tx, organizationId);
+
       const aggregate = await tx.invoice.aggregate({
         where,
         _sum: { totalHt: true, totalTva: true, totalTtc: true },
@@ -87,7 +92,7 @@ export class FiscalPeriodsService {
   }
 
   async listByOrganization(organizationId: string) {
-    return this.prisma.fiscalPeriodClosing.findMany({
+    return organizationScopedClient(this.prisma, organizationId).fiscalPeriodClosing.findMany({
       where: { organizationId },
       orderBy: { year: "desc" },
     });

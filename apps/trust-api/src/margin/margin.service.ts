@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { organizationScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 
 // Même filtre que FecService (F9) : une facture réellement vendue, jamais un
@@ -47,8 +48,12 @@ export class MarginService {
     return lines.map(mapLineMargin);
   }
 
+  // `invoice_line` est sous org_isolation par INDIRECTION (via invoice_id) :
+  // la jointure `invoice: { organizationId }` est l'équivalent explicite de la
+  // double clause. Point d'accès unique aux lignes — listLines() comme
+  // listByProduct() passent par ici, donc une seule adoption suffit.
   private async fetchLines(organizationId: string, pagination: { take?: number; skip?: number }) {
-    return this.prisma.invoiceLine.findMany({
+    return organizationScopedClient(this.prisma, organizationId).invoiceLine.findMany({
       where: {
         invoice: { organizationId, status: { in: [...REAL_SALE_STATUSES] } },
         productId: { not: null },

@@ -78,9 +78,9 @@ describe("InvoicesController — GET /invoices/:id/pdf (Lot A)", () => {
     };
     const controller = new InvoicesController({} as any, rendering as any);
 
-    const result = await controller.downloadPdf("inv-1");
+    const result = await controller.downloadPdf("inv-1", "org-1");
 
-    expect(rendering.renderInvoicePdf).toHaveBeenCalledWith("inv-1");
+    expect(rendering.renderInvoicePdf).toHaveBeenCalledWith("inv-1", "org-1");
     const headers = result.getHeaders();
     expect(headers.type).toBe("application/pdf");
     expect(headers.disposition).toContain("attachment");

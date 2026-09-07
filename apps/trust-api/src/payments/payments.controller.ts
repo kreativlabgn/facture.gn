@@ -49,8 +49,9 @@ export class PaymentsController {
   async downloadReceipt(
     @Param("id") invoiceId: string,
     @Param("paymentId") paymentId: string,
+    @CurrentOrganizationId() organizationId: string,
   ): Promise<StreamableFile> {
-    const { pdf, filename } = await this.renderingService.renderReceiptPdf(invoiceId, paymentId);
+    const { pdf, filename } = await this.renderingService.renderReceiptPdf(invoiceId, paymentId, organizationId);
     return new StreamableFile(pdf, {
       type: "application/pdf",
       disposition: `attachment; filename="${filename}"`,
