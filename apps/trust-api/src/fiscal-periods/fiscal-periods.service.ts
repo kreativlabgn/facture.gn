@@ -4,6 +4,7 @@ import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
 import { computeSealHash } from "./fiscal-period-seal";
+import { EtaxSyncService } from "../etax/etax-sync.service";
 
 // Lot B, ADR-110 — arrêté des comptes OHADA. Les statuts "émis" comptent dans le
 // sceau : draft/proforma/quote (jamais certifiés) sont exclus. voided est inclus
@@ -13,7 +14,10 @@ const SEALED_STATUSES = ["issued", "partially_paid", "paid", "voided"] as const;
 
 @Injectable()
 export class FiscalPeriodsService {
-  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
+    private readonly etaxSync: EtaxSyncService,
+  ) {}
 
   async close(organizationId: string, year: number, closedByUserId: string) {
     const currentYear = new Date().getUTCFullYear();
@@ -35,7 +39,7 @@ export class FiscalPeriodsService {
       issuedAt: { gte: from, lte: to },
     };
 
-    return this.prisma.$transaction(async (tx) => {
+    const closing = await this.prisma.$transaction(async (tx) => {
       // GUC en première ligne : il couvre l'agrégat, la lecture de la dernière
       // facture et la création du sceau — les trois composantes du hash.
       await setOrganizationScope(tx, organizationId);
@@ -89,6 +93,19 @@ export class FiscalPeriodsService {
         throw error;
       }
     });
+
+    // Chantier 5, étape 3 — télétransmission à eTax, APRÈS le commit et HORS
+    // de la transaction, à dessein. Enfiler à l'intérieur poserait deux
+    // problèmes : un Redis en panne ferait échouer et annuler une clôture
+    // comptable pourtant valide, et un rollback tardif laisserait dans la file
+    // un job déclarant à la DGI un exercice qui n'a finalement pas été clos.
+    //
+    // enqueueForClosing() ne lève jamais : la clôture est déjà acquise, elle
+    // n'a pas à être défaite parce que la file est indisponible. Une clôture
+    // non enfilée reste repérable par etax_submitted_at IS NULL.
+    await this.etaxSync.enqueueForClosing(closing);
+
+    return closing;
   }
 
   async listByOrganization(organizationId: string) {

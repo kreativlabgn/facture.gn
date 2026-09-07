@@ -33,6 +33,7 @@ import { FinancingModule } from "./financing/financing.module";
 import { RecurringTemplatesModule } from "./recurring-templates/recurring-templates.module";
 import { CommissionBypassModule } from "./commission-bypass/commission-bypass.module";
 import { ClientPortalModule } from "./client-portal/client-portal.module";
+import { EtaxModule } from "./etax/etax.module";
 import { FiscalPeriodsModule } from "./fiscal-periods/fiscal-periods.module";
 import { QueueModule } from "./queue/queue.module";
 import { RetentionModule } from "./retention/retention.module";
@@ -91,6 +92,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     CommissionBypassModule,
     ClientPortalModule,
     FiscalPeriodsModule,
+    EtaxModule,
     // Lot J3 — purge périodique des tables opérationnelles éphémères.
     RetentionModule,
     // Lot E1 — registre Merkle des factures + seam d'ancrage externe (opt-in).

@@ -22,6 +22,13 @@ function auClientScope<T extends Record<string, unknown>>(prisma: T): T {
   return prisma;
 }
 
+// La clôture enfile désormais une déclaration eTax. Le faux ne lève jamais —
+// comme le vrai : une file indisponible ne doit pas défaire une clôture
+// comptable déjà commitée.
+function fakeEtaxSync() {
+  return { enqueueForClosing: vi.fn().mockResolvedValue(undefined) };
+}
+
 const CURRENT_YEAR = new Date().getUTCFullYear();
 const CLOSABLE_YEAR = CURRENT_YEAR - 1;
 
@@ -65,7 +72,7 @@ describe("FiscalPeriodsService.close", () => {
   // valeur du client scopé n'est observable qu'en rejouant l'extension capturée.
   it("pose app.current_org_id en tête de la transaction de clôture", async () => {
     const prisma = fakePrisma();
-    const service = new FiscalPeriodsService(prisma as never);
+    const service = new FiscalPeriodsService(prisma as never, fakeEtaxSync() as never);
 
     await service.close("org-a-proteger", CLOSABLE_YEAR, "user-1");
 
@@ -76,7 +83,7 @@ describe("FiscalPeriodsService.close", () => {
 
   it("pose le même scope sur le CLIENT SCOPÉ de la lecture des clôtures", async () => {
     const prisma = fakePrisma();
-    const service = new FiscalPeriodsService(prisma as never);
+    const service = new FiscalPeriodsService(prisma as never, fakeEtaxSync() as never);
 
     await service.listByOrganization("org-a-proteger");
 
@@ -90,19 +97,19 @@ describe("FiscalPeriodsService.close", () => {
 
 
   it("refuse de clôturer une année future", async () => {
-    const service = new FiscalPeriodsService(fakePrisma() as never);
+    const service = new FiscalPeriodsService(fakePrisma() as never, fakeEtaxSync() as never);
     await expect(service.close("org-1", CURRENT_YEAR + 1, "user-1")).rejects.toBeInstanceOf(ConflictException);
   });
 
   it("refuse une année absurde (avant 2020)", async () => {
-    const service = new FiscalPeriodsService(fakePrisma() as never);
+    const service = new FiscalPeriodsService(fakePrisma() as never, fakeEtaxSync() as never);
     await expect(service.close("org-1", 1998, "user-1")).rejects.toBeInstanceOf(ConflictException);
     await expect(service.close("org-1", -5, "user-1")).rejects.toBeInstanceOf(ConflictException);
   });
 
   it("agrège les factures émises de l'année (bornes UTC) et le dernier numéro/hash", async () => {
     const prisma = fakePrisma();
-    const service = new FiscalPeriodsService(prisma as never);
+    const service = new FiscalPeriodsService(prisma as never, fakeEtaxSync() as never);
 
     const closing = await service.close("org-1", CLOSABLE_YEAR, "user-1");
 
@@ -130,7 +137,7 @@ describe("FiscalPeriodsService.close", () => {
       aggregate: { _sum: { totalHt: null, totalTva: null, totalTtc: null }, _count: 0 },
       lastInvoice: null,
     });
-    const service = new FiscalPeriodsService(prisma as never);
+    const service = new FiscalPeriodsService(prisma as never, fakeEtaxSync() as never);
 
     const closing = await service.close("org-1", CLOSABLE_YEAR, "user-1");
 
@@ -152,7 +159,7 @@ describe("FiscalPeriodsService.close", () => {
     const prisma = fakePrisma({
       createImpl: () => Promise.reject(p2002),
     });
-    const service = new FiscalPeriodsService(prisma as never);
+    const service = new FiscalPeriodsService(prisma as never, fakeEtaxSync() as never);
 
     await expect(service.close("org-1", CLOSABLE_YEAR, "user-1")).rejects.toBeInstanceOf(ConflictException);
   });
@@ -161,7 +168,7 @@ describe("FiscalPeriodsService.close", () => {
 describe("FiscalPeriodsService.listByOrganization", () => {
   it("liste les clôtures de l'organisation, plus récent exercice d'abord", async () => {
     const prisma = fakePrisma({ closings: [{ year: 2026 }, { year: 2025 }] });
-    const service = new FiscalPeriodsService(prisma as never);
+    const service = new FiscalPeriodsService(prisma as never, fakeEtaxSync() as never);
 
     const result = await service.listByOrganization("org-1");
 
