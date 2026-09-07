@@ -31,6 +31,9 @@ export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 export type Permission =
   | "invoices:read"
   | "invoices:create"
+  | "invoices:issue"
+  | "invoices:void"
+  | "invoices:relance"
   | "customers:read"
   | "customers:create"
   | "customers:merge"
@@ -42,9 +45,21 @@ export type Permission =
 const PERMISSION_ROLES: Record<Permission, readonly OrganizationRole[]> = {
   // invoices.controller.ts — GET /invoices, GET /invoices/:id
   "invoices:read": ["owner", "admin", "accountant_internal", "cashier", "field_agent", "tax_controller_readonly", "viewer"],
-  // invoices.controller.ts — POST /invoices, POST /invoices/:id/issue.
-  // delivery_driver en est absent : il encaisse, il n'émet pas.
+  // invoices.controller.ts — POST /invoices. delivery_driver en est absent :
+  // il encaisse, il n'émet pas.
   "invoices:create": ["owner", "admin", "accountant_internal", "cashier", "field_agent"],
+  // invoices.controller.ts — POST /invoices/:id/issue. Trio PLUS ÉTROIT que
+  // invoices:create : accountant_internal et field_agent peuvent préparer un
+  // brouillon, pas le certifier. L'émission scelle le hash et consomme un
+  // numéro de séquence légal — elle est irréversible.
+  "invoices:issue": ["owner", "admin", "cashier"],
+  // invoices.controller.ts — POST /invoices/:id/void. Le plus étroit des trois :
+  // annuler une facture émise touche la séquence légale.
+  "invoices:void": ["owner", "admin"],
+  // invoices.controller.ts — POST /invoices/:id/send-reminder et
+  // /regenerate-payment-link. Deux routes, même trio, même geste métier :
+  // relancer un client qui n'a pas payé.
+  "invoices:relance": ["owner", "admin", "cashier"],
   // customers.controller.ts — GET /customers, GET /customers/:id
   "customers:read": ["owner", "admin", "accountant_internal", "cashier", "field_agent"],
   // customers.controller.ts — POST /customers

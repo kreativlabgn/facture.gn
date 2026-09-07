@@ -2243,6 +2243,53 @@ describe("InvoicesService — consulter le statut d'une facture (C10)", () => {
     });
   });
 
+  // L'écran de détail affiche les lignes et le journal d'événements. Sans cet
+  // include, la page se rendrait sans erreur, simplement vide de son contenu
+  // le plus utile — une régression invisible côté API et silencieuse côté web.
+  it("remonte les lignes, la chaîne d'événements et le client", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1" }) },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findOne("inv-1", "org-1");
+
+    const args = (prisma as any).invoice.findUniqueOrThrow.mock.calls[0][0];
+    expect(args.include.lines).toBeTruthy();
+    expect(args.include.events).toBeTruthy();
+    expect(args.include.customer).toBeTruthy();
+    // Antéchronologique : sur une facture ancienne, ce qui vient de se passer
+    // est ce qu'on cherche en premier.
+    expect(args.include.events.orderBy).toEqual({ createdAt: "desc" });
+  });
+
+  // `include` seul sur actor/customer remonterait l'entité User entière —
+  // passwordHash compris — dans une réponse HTTP. Le select est la barrière,
+  // et elle doit tenir même quand un champ est ajouté à ces tables plus tard.
+  it("ne remonte JAMAIS l'entité User ni Customer en entier", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "inv-1" }) },
+    });
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    await service.findOne("inv-1", "org-1");
+
+    const args = (prisma as any).invoice.findUniqueOrThrow.mock.calls[0][0];
+    expect(args.include.events.include.actor.select).toBeTruthy();
+    expect(args.include.events.include.actor.select.passwordHash).toBeUndefined();
+    expect(args.include.customer.select).toBeTruthy();
+  });
+
   it("propage l'échec (404) si la facture n'existe pas", async () => {
     const prisma = createFakePrisma({
       invoice: {

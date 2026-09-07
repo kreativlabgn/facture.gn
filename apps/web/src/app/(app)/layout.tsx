@@ -50,7 +50,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-full flex-col">
-      <AppHeader tabs={tabs} organizations={organizations} active={active} />
+      <AppHeader
+        tabs={tabs}
+        moreEntries={moreEntries}
+        cabinetHref={practices.length > 0 ? "/cabinet" : null}
+        organizations={organizations}
+        active={active}
+      />
 
       {/* pb-24 laisse la place à la barre basse : sans lui, la dernière ligne
           de chaque liste passe sous les onglets et devient intouchable. */}

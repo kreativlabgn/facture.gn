@@ -11,6 +11,9 @@ describe("permissions — miroir des @Roles() de trust-api", () => {
       expect(permissionsFor(role)).toEqual([
         "invoices:read",
         "invoices:create",
+        "invoices:issue",
+        "invoices:void",
+        "invoices:relance",
         "customers:read",
         "customers:create",
         "customers:merge",

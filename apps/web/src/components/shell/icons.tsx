@@ -61,6 +61,16 @@ export function MoreIcon() {
   );
 }
 
+// Trois traits : le glyphe universel du menu. MoreIcon (trois points) reste
+// distincte — elle dit « autres options », celle-ci dit « la navigation ».
+export function MenuIcon() {
+  return (
+    <svg {...COMMON_PROPS}>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  );
+}
+
 export function PlusIcon() {
   return (
     <svg {...COMMON_PROPS} strokeWidth={2.25}>

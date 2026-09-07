@@ -395,6 +395,226 @@ export async function issueInvoice(token: string, invoiceId: string): Promise<In
   return response.json();
 }
 
+
+// ── Détail de facture ───────────────────────────────────────────────────────
+//
+// Mirroir de ce que renvoie GET /invoices/:id depuis que findOne() remonte les
+// lignes, les événements et le client (invoices.service.ts). Volontairement
+// PARTIEL : Invoice porte une soixantaine de colonnes (change, affacturage,
+// ancrage Merkle, cadre B2G…) dont l'écran n'affiche rien. Déclarer ici les
+// seules consommées documente ce que la page utilise réellement.
+
+export interface InvoiceLineItem {
+  id: string;
+  description: string;
+  quantity: number;
+  /** Centimes GNF, sérialisé en chaîne — voir formatGnf. */
+  unitPrice: string;
+  taxRateBps: number;
+  productCode: string | null;
+}
+
+// La trace WORM (ADR-015) : append-only, jamais modifiée ni supprimée. C'est
+// ce qui rend la facture opposable, et cet écran est le seul endroit où une
+// PME peut la lire.
+export interface InvoiceEventItem {
+  id: string;
+  type: string;
+  amount: string | null;
+  createdAt: string;
+  actor: { id: string; name: string } | null;
+}
+
+export interface InvoiceFullDetail {
+  id: string;
+  number: string | null;
+  status: string;
+  documentType: string;
+  disputeStatus: string;
+  validatedByAdministration: boolean;
+  emissionChannel: string;
+
+  totalHt: string;
+  totalTva: string;
+  totalTtc: string;
+  amountPaid: string;
+  amountDue: string;
+
+  // Preuve de certification. `hash` et `certificationId` ne sont renseignés
+  // qu'après émission — un brouillon n'a rien à prouver.
+  certificationId: string | null;
+  hash: string | null;
+  previousHash: string | null;
+
+  paymentLinkUrl: string | null;
+  paymentLinkExpiresAt: string | null;
+
+  referenceMarche: string | null;
+  issuedAt: string | null;
+  createdAt: string;
+
+  customer: { id: string; name: string; phone: string | null; nif: string | null } | null;
+  lines: InvoiceLineItem[];
+  events: InvoiceEventItem[];
+}
+
+export async function getInvoice(token: string, invoiceId: string): Promise<InvoiceFullDetail> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger la facture", response.status);
+  }
+  return response.json();
+}
+
+// Les quatre actions de l'écran. Chacune relaie le message de trust-api tel
+// quel : il est déjà écrit pour être lu par un humain (« Une facture avec un
+// paiement enregistré ne peut être annulée — utiliser un avoir »), et le
+// remplacer par un texte générique perdrait la seule explication utile.
+export async function voidInvoice(token: string, invoiceId: string): Promise<InvoiceDetail> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/void`, token, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Annulation impossible", response.status);
+  }
+  return response.json();
+}
+
+export async function sendInvoiceReminder(token: string, invoiceId: string): Promise<void> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/send-reminder`, token, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Relance impossible", response.status);
+  }
+}
+
+export async function regeneratePaymentLink(token: string, invoiceId: string): Promise<void> {
+  const response = await authenticatedFetch(
+    `/invoices/${encodeURIComponent(invoiceId)}/regenerate-payment-link`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Régénération du lien impossible", response.status);
+  }
+}
+
+
+// ── Portail client (F13, ADR-096) ───────────────────────────────────────────
+//
+// L'ACHETEUR, PAS LA FACTURE. C'est le point à ne pas inverser : l'OTP
+// s'adresse à un NUMÉRO et ouvre l'accès à toutes les factures que ce numéro a
+// reçues, de toutes les entreprises qui l'ont facturé. Aucune route ne prend
+// un invoiceId, et aucune ne rend une facture seule.
+//
+// Le parcours qui part d'UNE facture existe déjà ailleurs : /pay/[invoiceId],
+// servi par money-api, pour un payeur sans compte arrivé par un lien. Les deux
+// ne se remplacent pas.
+//
+// Ces fonctions sont SERVER-ONLY comme le reste de ce fichier : TRUST_API_URL
+// n'a pas le préfixe NEXT_PUBLIC_, et le token de portail ne doit jamais
+// atteindre le navigateur — il vit dans un cookie httpOnly (portal-session.ts).
+
+export async function requestPortalOtp(msisdn: string): Promise<void> {
+  const response = await fetch(`${TRUST_API_URL}/client-portal/otp/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ msisdn }),
+  });
+  if (!response.ok) {
+    throw new TrustApiError(await messageDErreur(response, "Envoi du code impossible"), response.status);
+  }
+}
+
+// Rend `accessToken`, pas `token` : c'est le nom que renvoie
+// ClientPortalAuthService.verifyOtp, et le renommer ici obligerait à traduire
+// dans les deux sens à chaque appel. Le code est à 4 chiffres (verify-otp.dto).
+export async function verifyPortalOtp(msisdn: string, code: string): Promise<{ accessToken: string }> {
+  const response = await fetch(`${TRUST_API_URL}/client-portal/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ msisdn, code }),
+  });
+  if (!response.ok) {
+    throw new TrustApiError(await messageDErreur(response, "Code invalide ou expiré"), response.status);
+  }
+  return response.json();
+}
+
+// Une entrée par CLIENT (Customer), pas par organisation : le même acheteur a
+// une fiche distincte chez chaque entreprise qui le facture, et c'est
+// `customerId` — pas `organizationId` — qui ouvre la liste des factures.
+export interface PortalOrganizationSummary {
+  organizationId: string;
+  organizationName: string;
+  customerId: string;
+  /** Centimes GNF en chaîne. Somme des factures encore dues, pas un plafond. */
+  runningBalance: string;
+  /** null = aucun plafond posé par cette entreprise. */
+  creditLimit: string | null;
+}
+
+export async function listPortalOrganizations(token: string): Promise<PortalOrganizationSummary[]> {
+  const response = await authenticatedFetch("/client-portal/organizations", token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger vos comptes", response.status);
+  }
+  return response.json();
+}
+
+// Les brouillons et les factures annulées sont exclus côté serveur : un
+// acheteur ne voit jamais un document que la PME n'a pas émis.
+export async function listPortalInvoices(
+  token: string,
+  customerId: string,
+  pagination: { take?: number; skip?: number } = {},
+): Promise<InvoiceListItem[]> {
+  const params = new URLSearchParams();
+  if (pagination.take) params.set("take", String(pagination.take));
+  if (pagination.skip) params.set("skip", String(pagination.skip));
+  const suffixe = params.toString() ? `?${params.toString()}` : "";
+
+  const response = await authenticatedFetch(
+    `/client-portal/customers/${encodeURIComponent(customerId)}/invoices${suffixe}`,
+    token,
+  );
+  if (!response.ok) {
+    // 404 volontairement opaque côté trust-api : client inexistant et client
+    // d'un tiers rendent le même statut, pour ne jamais confirmer l'existence
+    // d'un customerId à qui n'y a pas droit. On relaie sans l'interpréter.
+    throw new TrustApiError("Impossible de charger ces factures", response.status);
+  }
+  return response.json();
+}
+
+// trust-api rend deux formes d'erreur : `message` pour une exception Nest,
+// `fieldErrors` pour un rejet du ZodValidationPipe (« msisdn attendu au format
+// +224XXXXXXXXX », « code attendu à 4 chiffres »). Ces deux-là sont exactement
+// ce qu'il faut montrer à l'acheteur.
+async function messageDErreur(response: Response, defaut: string): Promise<string> {
+  const corps = (await response.json().catch(() => null)) as {
+    message?: unknown;
+    fieldErrors?: Record<string, unknown>;
+  } | null;
+
+  if (corps?.fieldErrors) {
+    const details = Object.values(corps.fieldErrors)
+      .flatMap((messages) => (Array.isArray(messages) ? messages : [messages]))
+      .map(String)
+      .join(" · ");
+    if (details) return details;
+  }
+  if (Array.isArray(corps?.message)) return corps.message.join(", ");
+  if (typeof corps?.message === "string") return corps.message;
+  return defaut;
+}
+
 // Mirroir de la forme aplatie retournée par GET /practices/mine
 // (practices.service.ts:listMine — practice + role du user connecté).
 export interface PracticeSummary {

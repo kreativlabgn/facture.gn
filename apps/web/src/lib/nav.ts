@@ -40,6 +40,12 @@ export const EMIT_ACTION: NavEntry = {
 // directement par MoreDrawer.
 export const MORE_ENTRIES: readonly NavEntry[] = [
   { href: "/dashboard/products", label: "Produits", permission: "products:read" },
+  // Le simulateur *620# : un outil de démonstration et de mise au point, pas
+  // un écran de gestion. Même garde que Paramètres (owner/admin) plutôt que
+  // invoices:read : le tiroir « Plus » n'existe pas pour les rôles terrain ni
+  // pour un caissier (voir nav.spec.ts), et le simulateur s'adresse à qui
+  // pilote l'entreprise. La vraie barrière reste le PIN, côté serveur.
+  { href: "/dashboard/ussd", label: "Simulateur USSD", permission: "organization:read" },
   { href: "/dashboard/settings", label: "Paramètres", permission: "organization:read" },
 ];
 

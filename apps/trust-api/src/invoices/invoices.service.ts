@@ -817,9 +817,32 @@ export class InvoicesService {
   // champs, et `{ id, organizationId }` n'est pas une clé unique. Le filtre
   // organisation est explicite, il reste la seule protection réelle tant que
   // RLS est dormant (rls-rollout.md, étape 1).
+  // L'écran de détail de facture a besoin des LIGNES et de la CHAÎNE
+  // D'ÉVÉNEMENTS, pas seulement de l'en-tête : sans elles il ne peut montrer
+  // ni ce qui a été facturé, ni ce qui est arrivé au document. Les événements
+  // sont la trace WORM (ADR-015) — c'est ce qui rend la facture opposable, et
+  // le seul endroit où une PME peut la lire.
+  //
+  // `select` explicite sur l'acteur et le client : `include` seul remonterait
+  // l'entité User entière (passwordHash compris) et l'entité Customer entière
+  // dans une réponse HTTP. Un champ ajouté plus tard à ces tables ne doit pas
+  // se retrouver exposé du seul fait qu'il existe.
+  //
+  // `user` est HORS RLS (identité plateforme) : l'acteur reste lisible sous le
+  // client scopé, sans quoi le journal afficherait des lignes anonymes.
   async findOne(invoiceId: string, organizationId: string) {
     return organizationScopedClient(this.prisma, organizationId).invoice.findFirstOrThrow({
       where: { id: invoiceId, organizationId },
+      include: {
+        lines: { orderBy: { id: "asc" } },
+        // Antéchronologique : sur une facture ancienne, ce qui vient de se
+        // passer est ce qu'on cherche.
+        events: {
+          orderBy: { createdAt: "desc" },
+          include: { actor: { select: { id: true, name: true } } },
+        },
+        customer: { select: { id: true, name: true, phone: true, nif: true } },
+      },
     });
   }
 

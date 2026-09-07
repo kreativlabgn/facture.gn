@@ -38,7 +38,11 @@ export default async function InvoicesPage() {
         ) : null}
       </div>
 
-      <InvoiceList invoices={invoices} emptyMessage="Aucune facture pour le moment." />
+      <InvoiceList
+        invoices={invoices}
+        emptyMessage="Aucune facture pour le moment."
+        href={(invoice) => `/dashboard/invoices/${invoice.id}`}
+      />
 
       {invoices.length === INVOICE_PAGE_SIZE ? (
         <p className="mt-3 text-center text-xs text-navy-600">

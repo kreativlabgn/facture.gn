@@ -89,7 +89,11 @@ export default async function DashboardHomePage() {
         ) : null}
       </div>
 
-      <InvoiceList invoices={invoices.slice(0, HOME_LIST_SIZE)} emptyMessage="Aucune facture pour le moment." />
+      <InvoiceList
+        invoices={invoices.slice(0, HOME_LIST_SIZE)}
+        emptyMessage="Aucune facture pour le moment."
+        href={(invoice) => `/dashboard/invoices/${invoice.id}`}
+      />
     </div>
   );
 }
