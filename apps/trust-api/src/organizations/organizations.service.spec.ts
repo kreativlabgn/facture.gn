@@ -157,6 +157,145 @@ function createFakePrismaForVerifyDgi(organization: any) {
   });
 }
 
+// Première route @Patch du service. Le point dur est la retombée en
+// unverified : dgiVerificationStatus atteste que la DGI a validé UN
+// identifiant précis. Le laisser à « verified » après un changement de NIF
+// ferait dire à la plateforme que l'administration a validé un numéro qu'elle
+// n'a jamais vu.
+describe("OrganizationsService.update — identité légale", () => {
+  function fakePrismaPourUpdate(actuelle: Record<string, unknown> = {}, updateImpl?: any) {
+    const prisma: any = auClientScope({
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "org-1",
+          name: "Boutique Aissatou",
+          regimeFiscal: "tpu",
+          legalForm: "commercial",
+          nif: "GN111",
+          etaxNumber: "ETAX-111",
+          dgiVerificationStatus: "unverified",
+          ...actuelle,
+        }),
+        update: vi.fn(updateImpl ?? (({ data }: any) => Promise.resolve({ id: "org-1", ...data }))),
+      },
+      // Forme TABLEAU : c'est celle qu'emploie makeScopedOperation(), et c'est
+      // elle qui rend l'extension rejouable — seul moyen d'épingler la VALEUR
+      // du scope, le faux $extends se renvoyant lui-même.
+      $transaction: vi.fn((arg: any) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma))),
+    });
+    return prisma;
+  }
+
+  function service(prisma: any) {
+    return new OrganizationsService(
+      prisma as any,
+      createFakeSigningKeyService() as any,
+      createFakePendingMemberInviteService() as any,
+    );
+  }
+
+  it("ne touche QUE les champs fournis", async () => {
+    const prisma = fakePrismaPourUpdate();
+    await service(prisma).update("org-1", { name: "Nouveau nom" });
+
+    const data = prisma.organization.update.mock.calls[0][0].data;
+    expect(data).toEqual({ name: "Nouveau nom" });
+  });
+
+  // `null` efface, `undefined` ne touche pas : sans cette distinction, un NIF
+  // saisi par erreur ne pourrait jamais être retiré.
+  it("distingue effacer (null) de ne pas toucher (undefined)", async () => {
+    const prisma = fakePrismaPourUpdate();
+    await service(prisma).update("org-1", { nif: null, etaxNumber: null });
+
+    const data = prisma.organization.update.mock.calls[0][0].data;
+    expect(data.nif).toBeNull();
+    expect(data.etaxNumber).toBeNull();
+    expect("name" in data).toBe(false);
+  });
+
+  it("changer le NIF d'une organisation VÉRIFIÉE la repasse unverified", async () => {
+    const prisma = fakePrismaPourUpdate({ dgiVerificationStatus: "verified" });
+    await service(prisma).update("org-1", { nif: "GN999", etaxNumber: "ETAX-999" });
+
+    const data = prisma.organization.update.mock.calls[0][0].data;
+    expect(data.dgiVerificationStatus).toBe("unverified");
+    // Un horodatage de vérification sans vérification est pire que rien.
+    expect(data.dgiVerifiedAt).toBeNull();
+  });
+
+  it("renommer une organisation vérifiée NE la déverifie pas", async () => {
+    const prisma = fakePrismaPourUpdate({ dgiVerificationStatus: "verified" });
+    await service(prisma).update("org-1", { name: "Autre nom" });
+
+    const data = prisma.organization.update.mock.calls[0][0].data;
+    expect("dgiVerificationStatus" in data).toBe(false);
+  });
+
+  // Réécrire le MÊME NIF n'est pas un changement d'identité fiscale.
+  it("réécrire le même NIF ne déverifie pas", async () => {
+    const prisma = fakePrismaPourUpdate({ dgiVerificationStatus: "verified" });
+    await service(prisma).update("org-1", { nif: "GN111", etaxNumber: "ETAX-111" });
+
+    const data = prisma.organization.update.mock.calls[0][0].data;
+    expect("dgiVerificationStatus" in data).toBe(false);
+  });
+
+  // I4/ADR-057 contrôlé sur l'état RÉSULTANT : le refine du DTO ne voit pas la
+  // ligne en base et ne peut donc pas attraper ce cas.
+  it("refuse un régime association sur une forme commerciale, même si la forme n'est pas dans le payload", async () => {
+    const prisma = fakePrismaPourUpdate({ legalForm: "commercial" });
+
+    await expect(
+      service(prisma).update("org-1", { regimeFiscal: "non_assujetti_association" }),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it("accepte le régime association quand la forme est fournie dans le même payload", async () => {
+    const prisma = fakePrismaPourUpdate({ legalForm: "commercial" });
+    await service(prisma).update("org-1", {
+      regimeFiscal: "non_assujetti_association",
+      legalForm: "association",
+    });
+
+    expect(prisma.organization.update).toHaveBeenCalled();
+  });
+
+  // Les trois identifiants sont uniques GLOBALEMENT depuis 20260907040000.
+  it.each([
+    ["nif", /NIF/],
+    ["rccm", /RCCM/],
+    ["etax_number", /eTax/],
+  ])("traduit une collision sur %s en 409", async (colonne, motif) => {
+    const prisma = fakePrismaPourUpdate(
+      {},
+      () =>
+        Promise.reject(
+          Object.assign(new Error("Unique constraint failed"), {
+            code: "P2002",
+            meta: { target: [colonne] },
+          }),
+        ),
+    );
+
+    const promesse = service(prisma).update("org-1", { name: "X" });
+    await expect(promesse).rejects.toThrow(ConflictException);
+    await expect(promesse).rejects.toThrow(motif);
+  });
+
+  // RLS — la lecture ET l'écriture passent par le client scopé.
+  it("pose app.current_org_id sur l'organisation ciblée", async () => {
+    const prisma = fakePrismaPourUpdate();
+    await service(prisma).update("org-a-proteger", { name: "X" });
+
+    const extension = (prisma as any).$extends.mock.calls[0][0];
+    await extension.query.$allModels.$allOperations({ args: {}, query: async () => null });
+    const setConfig = (prisma as any).$executeRaw.mock.calls.at(-1)?.[0];
+    expect(setConfig.values).toContain("app.current_org_id");
+    expect(setConfig.values).toContain("org-a-proteger");
+  });
+});
 describe("OrganizationsService — vérification DGI (B2)", () => {
   it("refuse de vérifier une organisation qui n'a jamais fourni NIF ni eTax — ADR-035, jamais un 500 brut", async () => {
     const prisma = createFakePrismaForVerifyDgi({

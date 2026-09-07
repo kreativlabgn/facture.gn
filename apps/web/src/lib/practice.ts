@@ -34,6 +34,19 @@ export function practiceTypeLabel(value: string): string {
   return isPracticeType(value) ? PRACTICE_TYPE_LABELS[value] : value;
 }
 
+// Rôles au sein du cabinet (enum PracticeMemberRole). À ne pas confondre avec
+// MandateGrantedRole, qui dit ce que le cabinet peut faire CHEZ un client :
+// ici c'est le rang du collaborateur DANS la structure.
+export const PRACTICE_MEMBER_ROLE_LABELS: Record<string, string> = {
+  practice_admin: "Administrateur",
+  accountant_external: "Comptable",
+  business_manager: "Gestionnaire",
+};
+
+export function practiceMemberRoleLabel(value: string): string {
+  return PRACTICE_MEMBER_ROLE_LABELS[value] ?? value;
+}
+
 export type PracticeField = "name" | "type" | "phone" | "email";
 
 export interface PracticeViolation {

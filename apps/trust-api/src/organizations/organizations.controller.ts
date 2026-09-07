@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiSecurity, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -8,6 +8,7 @@ import { DgiVerificationAuthGuard } from "../common/dgi-verification-auth.guard"
 import { Roles } from "../common/rbac/roles.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
 import { createOrganizationSchema, type CreateOrganizationDto } from "./dto/create-organization.dto";
+import { updateOrganizationSchema, type UpdateOrganizationDto } from "./dto/update-organization.dto";
 import {
   createAssistedOrganizationSchema,
   type CreateAssistedOrganizationDto,
@@ -167,6 +168,19 @@ export class OrganizationsController {
   // H2, ADR-049 — même trio owner/admin que les autres routes de gestion
   // d'organisation ci-dessus. Jamais de DgiVerificationAuthGuard ici (voir
   // service) : le palier commercial n'est jamais dépendant de DGI.
+  // Première route @Patch du service. owner/admin seulement : l'identité
+  // légale engage l'organisation devant la DGI, ce n'est ni du ressort d'un
+  // caissier ni de celui d'un comptable interne.
+  @Patch(":id")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  update(
+    @Param("id") organizationId: string,
+    @Body(new ZodValidationPipe(updateOrganizationSchema)) dto: UpdateOrganizationDto,
+  ) {
+    return this.organizationsService.update(organizationId, dto);
+  }
+
   @Post(":id/commercial-tier")
   @Roles("owner", "admin")
   @OrganizationIdSource("organization")

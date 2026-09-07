@@ -50,11 +50,29 @@ export class MandatesService {
 
     // Scope CABINET : c'est le cabinet qui demande le mandat.
     const scoped = practiceScopedClient(this.prisma, practiceId);
-    // L'organisation est lue AVANT tout mandat — donc hors de toute délégation.
-    // Sa politique org_isolation ne teste que app.current_org_id, nul ici, donc
-    // la ligne reste visible sous scope cabinet. C'est ce qui permet de vérifier
-    // qu'on ne demande pas un mandat sur une organisation inexistante.
-    const organization = await scoped.organization.findFirst({ where: { id: dto.organizationId } });
+    // LECTURE DE DÉCOUVERTE, NON SCOPÉE — et c'est la seule qui puisse marcher.
+    //
+    // Cette lecture passait par le client scopé cabinet, sur la foi d'un
+    // raisonnement faux : « org_isolation ne teste que app.current_org_id, nul
+    // ici, donc la ligne reste visible ». La branche dormante de la politique
+    // exige que LES DEUX GUC soient nuls ; sous scope cabinet,
+    // app.current_practice_id est posé, donc elle ne s'applique pas. On retombe
+    // sur rls_practice_sees_org(), qui est faux tant qu'aucun mandat n'existe.
+    //
+    // Résultat : demander un PREMIER mandat rendait un 404 sur une organisation
+    // parfaitement valide — un œuf et une poule, le mandat étant justement ce
+    // qu'on essaie de créer. Vérifié en SQL contre facture_app : 0 ligne visible
+    // sous scope cabinet sans mandat, 1 sans GUC.
+    //
+    // La lecture globale ne divulgue rien de nouveau : l'existence d'une
+    // organisation par NIF est DÉJÀ publique pour un cabinet via
+    // GET /practices/lookup-organization, délibérément global (ADR-035). Seul
+    // le nom en sort, et c'est le parcours normal — on cherche son client avant
+    // de lui demander un mandat.
+    const organization = await this.prisma.organization.findFirst({
+      where: { id: dto.organizationId },
+      select: { id: true },
+    });
     if (!organization) {
       throw new NotFoundException(`Organisation ${dto.organizationId} introuvable`);
     }

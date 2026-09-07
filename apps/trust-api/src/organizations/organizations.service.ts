@@ -10,6 +10,7 @@ import { generateAccountCode } from "./account-code";
 import type { CreateOrganizationDto } from "./dto/create-organization.dto";
 import type { CreateAssistedOrganizationDto } from "./dto/create-assisted-organization.dto";
 import type { CreateFromApipDto } from "./dto/create-from-apip.dto";
+import type { UpdateOrganizationDto } from "./dto/update-organization.dto";
 import type { InviteOrganizationMemberDto } from "./dto/invite-organization-member.dto";
 
 const MAX_ACCOUNT_CODE_ATTEMPTS = 3;
@@ -561,6 +562,75 @@ export class OrganizationsService {
       where: { id: organizationId },
       data: { commercialTier: tier },
     });
+  }
+
+  // Modification de l'identité légale (nom, forme, régime, NIF, eTax, RCCM).
+  //
+  // LE CHANGEMENT DE NIF OU D'eTAX RÉVOQUE LA VÉRIFICATION DGI. C'est le point
+  // dur de cette méthode : dgiVerificationStatus atteste que la DGI a validé
+  // UN identifiant précis (B2). Laisser « verified » une organisation dont le
+  // NIF vient de changer ferait dire à la plateforme que l'administration a
+  // validé un numéro qu'elle n'a jamais vu. On retombe donc à `unverified`, et
+  // dgiVerifiedAt est effacé avec — un horodatage de vérification sans
+  // vérification est pire que pas d'horodatage du tout.
+  //
+  // Le régime fiscal, lui, n'est JAMAIS rétroactif : InvoiceLine.taxRateBps fige
+  // le taux à l'émission (voir invoices.service). Les factures déjà émises
+  // gardent leur TVA, seules les suivantes suivent le nouveau régime.
+  async update(organizationId: string, dto: UpdateOrganizationDto) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    const actuelle = await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
+
+    // La contrainte I4/ADR-057 lie les deux champs : on la contrôle sur l'état
+    // RÉSULTANT, pas sur le seul payload. Modifier le régime sans toucher à la
+    // forme légale doit rester refusé si la combinaison finale est interdite —
+    // le refine du DTO ne peut pas le savoir, il ne voit pas la ligne en base.
+    const regimeFiscal = dto.regimeFiscal ?? actuelle.regimeFiscal;
+    const legalForm = dto.legalForm ?? actuelle.legalForm;
+    if (regimeFiscal === "non_assujetti_association" && legalForm !== "association") {
+      throw new ConflictException(
+        "Le régime non_assujetti_association est réservé aux organisations legalForm=association (I4, ADR-057)",
+      );
+    }
+
+    const identiteFiscaleChange =
+      (dto.nif !== undefined && dto.nif !== actuelle.nif) ||
+      (dto.etaxNumber !== undefined && dto.etaxNumber !== actuelle.etaxNumber);
+
+    try {
+      const modifiee = await scoped.organization.update({
+        where: { id: organizationId },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.regimeFiscal !== undefined ? { regimeFiscal: dto.regimeFiscal } : {}),
+          ...(dto.legalForm !== undefined ? { legalForm: dto.legalForm } : {}),
+          ...(dto.nif !== undefined ? { nif: dto.nif } : {}),
+          ...(dto.etaxNumber !== undefined ? { etaxNumber: dto.etaxNumber } : {}),
+          ...(dto.rccm !== undefined ? { rccm: dto.rccm } : {}),
+          ...(identiteFiscaleChange && actuelle.dgiVerificationStatus === "verified"
+            ? { dgiVerificationStatus: "unverified" as const, dgiVerifiedAt: null }
+            : {}),
+        },
+      });
+
+      if (identiteFiscaleChange && actuelle.dgiVerificationStatus === "verified") {
+        // Seule trace de la retombée en unverified — jamais le NIF lui-même,
+        // chemin rédigé des logs (logging.config.ts).
+        this.logger.log(
+          `Organisation ${organizationId} repassée unverified — identité fiscale modifiée`,
+        );
+      }
+
+      return modifiee;
+    } catch (error) {
+      // Les trois identifiants d'État sont uniques GLOBALEMENT (20260907040000) :
+      // une collision doit rendre un 409 lisible, jamais le P2002 brut.
+      const collision = collisionIdentifiantEtat(error);
+      if (collision) {
+        throw new ConflictException(`Une organisation avec ce ${collision.libelle} existe déjà`);
+      }
+      throw error;
+    }
   }
 
   // A4, ADR-025 — simple délégation, OrganizationSigningKeyService (@Global(),

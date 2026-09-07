@@ -152,9 +152,46 @@ export interface OrganizationDetail {
   regimeFiscal: string;
   legalForm: string;
   nif: string | null;
+  etaxNumber: string | null;
   rccm: string | null;
   commercialTier: string;
   dgiVerificationStatus: string;
+}
+
+// Première route @Patch du service (voir update-organization.dto.ts).
+// `null` efface un champ, `undefined` ne le touche pas — la distinction est
+// portée jusqu'ici, sans quoi un NIF saisi par erreur serait ineffaçable.
+export interface UpdateOrganizationInput {
+  name?: string;
+  regimeFiscal?: string;
+  legalForm?: string;
+  nif?: string | null;
+  etaxNumber?: string | null;
+  rccm?: string | null;
+}
+
+export async function updateOrganization(
+  token: string,
+  organizationId: string,
+  input: UpdateOrganizationInput,
+): Promise<OrganizationDetail> {
+  const response = await authenticatedFetch(`/organizations/${encodeURIComponent(organizationId)}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message)
+      ? body.message.join(", ")
+      : typeof body?.message === "string"
+        ? body.message
+        : body?.fieldErrors
+          ? Object.values(body.fieldErrors).flat().map(String).join(" · ")
+          : body?.formErrors?.join(", ");
+    throw new TrustApiError(message || "Modification impossible", response.status);
+  }
+  return response.json();
 }
 
 export async function getOrganization(token: string, organizationId: string): Promise<OrganizationDetail> {
@@ -665,6 +702,10 @@ export interface AccessibleOrganizationMandate {
   id: string;
   organizationId: string;
   grantedRole: string;
+  status: string;
+  /** Date d'octroi du mandat — null tant qu'il est en attente. */
+  grantedAt: string | null;
+  expiresAt: string | null;
   organization: { id: string; name: string };
 }
 

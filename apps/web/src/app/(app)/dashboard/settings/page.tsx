@@ -45,7 +45,17 @@ export default async function SettingsPage() {
 
   return (
     <div>
-      <h1 className="mb-6 font-display text-2xl font-bold text-navy-950">Paramètres</h1>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-display text-2xl font-bold text-navy-950">Paramètres</h1>
+        <div className="flex flex-wrap gap-3">
+          <ButtonLink href="/dashboard/settings/organisation" variant="secondary">
+            Modifier la fiche
+          </ButtonLink>
+          <ButtonLink href="/dashboard/abonnement" variant="secondary">
+            Abonnement
+          </ButtonLink>
+        </div>
+      </div>
 
       <Card className="mb-6">
         <CardBody>

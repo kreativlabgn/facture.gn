@@ -86,7 +86,7 @@ export default function LandingPage() {
             {/* `primary` et non `accent` : l'unique accent Or de la page est le
                 CTA du hero. Deux Or côte à côte et l'accent ne signale plus
                 rien — c'est la règle « un par écran au plus » de la primitive. */}
-            <ButtonLink href="/register" variant="primary">
+            <ButtonLink href="/inscription" variant="primary">
               Créer un espace
             </ButtonLink>
           </div>
@@ -111,7 +111,7 @@ export default function LandingPage() {
                 données RLS.
               </p>
               <div className="flex flex-col gap-4 sm:flex-row">
-                <ButtonLink href="/register" variant="accent" size="lg">
+                <ButtonLink href="/inscription" variant="accent" size="lg">
                   Immatriculer ma PME
                 </ButtonLink>
                 <ButtonLink href="#verify" variant="secondary" size="lg">
