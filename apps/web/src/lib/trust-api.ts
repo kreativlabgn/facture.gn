@@ -654,6 +654,35 @@ async function messageDErreur(response: Response, defaut: string): Promise<strin
 
 // Mirroir de la forme aplatie retournée par GET /practices/mine
 // (practices.service.ts:listMine — practice + role du user connecté).
+// Portefeuille de crédits (migration 20260907080000). L'unité est le CENTIME
+// GNF, comme partout : 1 crédit = 1 GNF, pas de jeton maison à convertir.
+export interface CreditTransactionItem {
+  id: string;
+  type: string;
+  /** Signé : positif à l'achat, négatif à la consommation. */
+  amountCentimes: string;
+  balanceAfterCentimes: string;
+  label: string;
+  invoiceId: string | null;
+  createdAt: string;
+}
+
+export interface CreditWallet {
+  balanceCentimes: string;
+  transactions: CreditTransactionItem[];
+}
+
+export async function getCreditWallet(token: string, organizationId: string): Promise<CreditWallet> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/credits`,
+    token,
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger le portefeuille", response.status);
+  }
+  return response.json();
+}
+
 export interface PracticeSummary {
   id: string;
   name: string;

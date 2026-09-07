@@ -23,6 +23,8 @@ import type { CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { PaymentLinkNotificationService } from "../notifications/payment-link-notification.service";
 import { PaymentReminderService } from "../notifications/payment-reminder.service";
 import { isOverdue } from "./overdue";
+import { CreditsService } from "../credits/credits.service";
+import { canauxFactures, type CanalFacturable } from "../credits/credits.constants";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
@@ -87,6 +89,13 @@ export class InvoicesService {
     // dernière position) : jamais forcer les 65+ tests existants de ce fichier
     // à fournir un paramètre sans rapport avec leur comportement testé.
     @Optional() private readonly paymentReminderService?: PaymentReminderService,
+    // Portefeuille de crédits — EN DERNIÈRE POSITION et @Optional(), même
+    // précédent que les deux services ci-dessus : les 65+ tests de ce fichier
+    // construisent InvoicesService positionnellement, et l'insérer plus haut
+    // décalerait tous leurs arguments. Absent, le débit est sauté — jamais une
+    // relance bloquée par une dépendance non câblée. En application complète,
+    // CreditsModule étant @Global(), le service est bel et bien injecté.
+    @Optional() private readonly credits?: CreditsService,
   ) {}
 
   // Lot D — channel est un argument SERVEUR, jamais dans CreateInvoiceDto : un
@@ -785,6 +794,46 @@ export class InvoicesService {
     }
     if (!this.paymentReminderService) {
       throw new ConflictException("Service de rappel de paiement indisponible");
+    }
+
+    // PORTEFEUILLE DE CRÉDITS — le débit précède l'envoi, et le refus est
+    // ferme : sans solde, la relance n'est pas tentée. Débiter APRÈS l'envoi
+    // laisserait passer un SMS impayé à chaque fois ; ne pas débiter du tout
+    // viderait les crédits de leur sens.
+    //
+    // Le canal du client décide du tarif — un client en `both` reçoit deux
+    // messages et doit donc être débité deux fois. Le service de notification
+    // ignore l'organisation (il ne reçoit qu'un client et un texte) : le débit
+    // vit donc ICI, chez l'appelant, qui seul connaît les deux.
+    // Le service peut être absent en test (@Optional) : le débit est alors
+    // sauté, jamais la relance bloquée.
+    const credits = this.credits;
+    const canaux = credits ? canauxFactures(invoice.customer.notificationChannel) : [];
+    const debites: CanalFacturable[] = [];
+    for (const canal of canaux) {
+      const mouvement = await credits!.consume(
+        organizationId,
+        canal,
+        `Relance ${canal === "sms" ? "SMS" : "WhatsApp"} — facture ${invoice.number}`,
+        invoice.id,
+      );
+      if (!mouvement) {
+        // Solde insuffisant en cours de route : on rembourse ce qui vient
+        // d'être débité pour les autres canaux, sinon le commerçant paierait
+        // un envoi qui n'a jamais eu lieu.
+        for (const rembourser of debites) {
+          await credits!.refund(
+            organizationId,
+            rembourser,
+            `Annulation relance — facture ${invoice.number}`,
+            invoice.id,
+          );
+        }
+        throw new ConflictException(
+          "Crédits insuffisants pour envoyer cette relance — rechargez votre portefeuille",
+        );
+      }
+      debites.push(canal);
     }
 
     await this.paymentReminderService.send(

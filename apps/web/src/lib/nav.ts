@@ -46,6 +46,7 @@ export const MORE_ENTRIES: readonly NavEntry[] = [
   // pour un caissier (voir nav.spec.ts), et le simulateur s'adresse à qui
   // pilote l'entreprise. La vraie barrière reste le PIN, côté serveur.
   { href: "/dashboard/ussd", label: "Simulateur USSD", permission: "organization:read" },
+  { href: "/dashboard/credits", label: "Crédits", permission: "organization:read" },
   { href: "/dashboard/settings", label: "Paramètres", permission: "organization:read" },
 ];
 

@@ -24,6 +24,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { UssdModule } from "./ussd/ussd.module";
 import { PublicBuyerModule } from "./public-buyer/public-buyer.module";
 import { ApiKeysModule } from "./api-keys/api-keys.module";
+import { CreditsModule } from "./credits/credits.module";
 import { DevicesModule } from "./devices/devices.module";
 import { ProductsModule } from "./products/products.module";
 import { ProductStockModule } from "./product-stock/product-stock.module";
@@ -82,6 +83,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     UssdModule,
     PublicBuyerModule,
     ApiKeysModule,
+    CreditsModule,
     DevicesModule,
     ProductsModule,
     ProductStockModule,

@@ -330,6 +330,7 @@ model User {
   apiKeysRevoked                ApiKey[]                   @relation("ApiKeyRevoker")
   devicesProvisioned            Device[]                   @relation("DeviceProvisioner")
   devicesRevoked                Device[]                   @relation("DeviceRevoker")
+  creditTransactions            CreditTransaction[]
   pendingMemberInvitesSent      PendingMemberInvite[]      @relation("PendingMemberInviteInviter")
   pendingMemberInvitesResolved  PendingMemberInvite[]      @relation("PendingMemberInviteResolvedUser")
   fiscalPeriodClosingsMade      FiscalPeriodClosing[]
@@ -580,6 +581,12 @@ model Organization {
   // moment de la transition vers verified (organizations.service.ts:verifyDgi).
   dgiVerifiedAt                DateTime?             @map("dgi_verified_at")
   bankAccountDetails           Json?                 @map("bank_account_details")
+  // Portefeuille de crédits, en centimes GNF. DÉNORMALISATION ASSUMÉE : la
+  // vérité est le registre credit_transaction, ce champ n'en est que la somme,
+  // écrite dans la MÊME transaction que chaque mouvement. Sans lui, chaque envoi
+  // de SMS exigerait un SUM() sur tout l'historique de l'organisation.
+  // CreditsService.reconcile() permet de le recalculer depuis le registre.
+  creditBalanceCentimes        BigInt                @default(0) @map("credit_balance_centimes")
   preferredLanguage            PreferredLanguage     @default(fr) @map("preferred_language")
   chiffreAffairesBrutDeclare   BigInt                @default(0) @map("chiffre_affaires_brut_declare")
   paymentLinkAutoSend          Boolean               @default(true) @map("payment_link_auto_send")
@@ -628,6 +635,7 @@ model Organization {
   pendingMemberInvites  PendingMemberInvite[]
   fiscalPeriodClosings  FiscalPeriodClosing[]
   bankTransactions      BankTransaction[]
+  creditTransactions    CreditTransaction[]
   devices               Device[]
 
   @@map("organization")
@@ -832,6 +840,59 @@ model Device {
   @@index([enrollmentTokenHash])
   @@index([organizationId, status])
   @@map("device")
+}
+
+// Registre des mouvements de crédits — la VÉRITÉ du portefeuille.
+//
+// Un registre et non un simple solde : sans lui, personne ne peut répondre à
+// « pourquoi mon solde a baissé ». Même discipline qu'InvoiceEvent (ADR-015) :
+// append-only, jamais modifié ni supprimé. Organization.creditBalanceCentimes
+// en est la somme dénormalisée, écrite dans la même transaction.
+//
+// L'UNITÉ EST LE CENTIME GNF, comme partout ailleurs dans ce schéma — pas un
+// « crédit » abstrait. Un jeton maison aurait imposé un taux de change interne
+// à maintenir et à expliquer ; ici 1 crédit = 1 GNF, et le portefeuille est
+// lisible sans conversion. Le pack commercial (100 SMS pour 30 000 GNF) reste
+// une façon de VENDRE, pas une unité de compte.
+model CreditTransaction {
+  id             String                @id @default(uuid())
+  organizationId String                @map("organization_id")
+  type           CreditTransactionType
+  // Signé : positif pour un achat ou un remboursement, négatif pour une
+  // consommation. La somme de la colonne EST le solde — aucune règle de signe
+  // à réappliquer à la lecture, aucune erreur d'interprétation possible.
+  amountCentimes BigInt                @map("amount_centimes")
+  // Solde APRÈS ce mouvement, figé. Rend chaque ligne du relevé lisible seule,
+  // et permet de détecter une dérive du solde dénormalisé sans rejouer tout
+  // l'historique.
+  balanceAfterCentimes BigInt           @map("balance_after_centimes")
+  // Ce qui a été consommé ou vendu, en clair : « Relance SMS facture FG-… »,
+  // « Pack 100 SMS ». Jamais un code technique — c'est un relevé de compte.
+  label          String
+  // Rattachement facultatif à la facture qui a déclenché la consommation.
+  invoiceId      String?               @map("invoice_id")
+  // Qui a fait le mouvement. Null pour une consommation automatique.
+  actorId        String?               @map("actor_id")
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id])
+  actor        User?        @relation(fields: [actorId], references: [id])
+
+  // Le relevé se lit toujours antéchronologiquement, par organisation.
+  @@index([organizationId, createdAt])
+  @@map("credit_transaction")
+}
+
+enum CreditTransactionType {
+  // Rechargement décidé par facture.gn (console d'administration).
+  purchase
+  // Débit à l'usage : SMS, WhatsApp.
+  consumption
+  // Remise en crédit après un envoi facturé mais non parti.
+  refund
+  // Correction manuelle, geste commercial. Toujours étiquetée comme telle.
+  adjustment
 }
 
 model Branch {
@@ -1149,6 +1210,7 @@ model Invoice {
   creditNotes   CreditNote[]
   refunds       Refund[]
   bankTransactionsMatched BankTransaction[]
+  creditTransactions      CreditTransaction[]
 
   @@unique([organizationId, number])
   // E1 — reconstruction de la preuve d'inclusion (feuilles d'une tranche).

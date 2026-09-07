@@ -122,5 +122,6 @@ export const TRUST_API_SECRETS: readonly SecretSpec[] = [
   { name: "DATA_RIGHTS_INTERNAL_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "chemin ops plateforme des droits des personnes — accès/anonymisation transverses (J2, ADR-116)" },
   { name: "DATA_RIGHTS_SUBJECT_HASH_PEPPER", required: false, requiredInProduction: true, format: "hexMin32", purpose: "pepper HMAC du subject_phone_hash du registre data_rights_request — sans lui le hash d'un MSISDN est réversible (J2, ADR-116)" },
   { name: "APIP_WEBHOOK_SECRET", required: false, requiredInProduction: true, format: "hexMin32", purpose: "clé + secret HMAC du webhook partenaire APIP (F11, ADR-082)" },
+  { name: "CREDITS_INTERNAL_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "console d'administration — rechargement des portefeuilles de crédits (crée de la valeur monétaire, secret strictement dédié)" },
   { name: "ETAX_API_KEY", required: false, requiredInProduction: true, format: "hexMin32", purpose: "secret HMAC de signature des déclarations de TVA transmises à eTax (chantier 5, étape 3)" },
 ];
