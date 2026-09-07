@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
+import { practiceScopedClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { REVENUE_SHARE_CAP_PER_CLIENT_CENTIMES_GNF, REVENUE_SHARE_RATE_BPS } from "./revenue-share-grid";
 import { getPartnerTierPrice } from "../practices/partner-tier-grid";
@@ -8,6 +9,28 @@ import { assertPracticeAdmin } from "../common/rbac/practice-access";
 
 const BPS_DENOMINATOR = 10_000n;
 
+// RLS (ADR-111 étape 1) — CARTE DU MODULE. Ce module est ENTIÈREMENT scopé
+// CABINET, jamais organisation : `mandate` et `revenue_share_credit` portent
+// `practice_id` en direct, et c'est `practiceScopedClient` qui s'applique
+// partout. Un setOrganizationScope() serait ici une erreur de nature.
+//
+// Le cas le plus intéressant du chantier est la lecture des paiements de
+// generate() : `payment` est sous RLS par indirection (via invoice_id), et sous
+// `app.current_practice_id` sa politique délègue à `rls_practice_sees_org()`,
+// qui rend vrai exactement pour les organisations à mandat actif non expiré du
+// cabinet. Le scope cabinet et le `where` applicatif
+// (`organizationId: { in: organizationIds }`, tiré des mêmes mandats actifs)
+// désignent donc le MÊME ensemble, par construction — c'est la « vue
+// transversale cabinet » pour laquelle la politique combinée a été écrite
+// (DAT §7.2). Aucune requête ne pose les deux GUC.
+//
+// Restent GLOBAUX : `practice_member` (via les gardes d'appartenance et
+// assertPracticeAdmin) et `professional_practice` — tous deux HORS RLS
+// (annuaire cabinet partagé, vérifié : aucune ENABLE ROW LEVEL SECURITY).
+//
+// Aucune transaction dans ce module : generate() est une boucle d'upserts
+// idempotents (@@unique practiceId+organizationId+periodMonth), pas un bloc
+// atomique. Aucun setPracticeScope() n'a donc lieu d'être posé.
 @Injectable()
 export class RevenueShareService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -17,11 +40,13 @@ export class RevenueShareService {
   // Génération manuelle : aucun cron dans ce repo (voir PLAN "Clarifications"),
   // l'appelant choisit explicitement la période à clôturer.
   async generate(practiceId: string, requesterUserId: string, periodMonth: string) {
+    // practice_member est hors RLS : cette garde reste sur le client global.
     await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "générer le revenue share");
 
+    const scoped = practiceScopedClient(this.prisma, practiceId);
     const { start, end } = resolvePeriodBounds(periodMonth);
 
-    const activeMandates = await this.prisma.mandate.findMany({
+    const activeMandates = await scoped.mandate.findMany({
       where: { practiceId, status: "active", ...mandateNotExpiredWhere() },
     });
 
@@ -37,7 +62,10 @@ export class RevenueShareService {
     // reste borné à une période/un portefeuille de mandats, pas à tout
     // l'historique).
     const organizationIds = activeMandates.map((mandate) => mandate.organizationId);
-    const relevantPayments = await this.prisma.payment.findMany({
+    // Vue transversale cabinet — voir la carte en tête de classe : sous scope
+    // cabinet, la politique de `payment` retient exactement les organisations
+    // mandatées, le même ensemble que `organizationIds` ci-dessus.
+    const relevantPayments = await scoped.payment.findMany({
       where: {
         invoice: { organizationId: { in: organizationIds } },
         status: "completed",
@@ -60,14 +88,8 @@ export class RevenueShareService {
       // n'est jamais recalculé/écrasé — un paiement tardif ne doit jamais
       // changer silencieusement un montant déjà versé. Trouvé en revue
       // dev-code-reviewer (agent 1, idempotence).
-      const existingCredit = await this.prisma.revenueShareCredit.findUnique({
-        where: {
-          practiceId_organizationId_periodMonth: {
-            practiceId,
-            organizationId: mandate.organizationId,
-            periodMonth,
-          },
-        },
+      const existingCredit = await scoped.revenueShareCredit.findFirst({
+        where: { practiceId, organizationId: mandate.organizationId, periodMonth },
       });
       if (existingCredit && existingCredit.status === "paid") {
         credits.push(existingCredit);
@@ -81,7 +103,10 @@ export class RevenueShareService {
 
       // Upsert — idempotent : régénérer la même période met à jour, jamais un
       // doublon (@@unique practiceId+organizationId+periodMonth).
-      const credit = await this.prisma.revenueShareCredit.upsert({
+      // L'upsert garde sa clé composée : un `where` d'upsert doit être unique et
+      // ne peut donc pas être remplacé par un findFirst. Elle porte déjà
+      // practiceId — la colonne de scope y est bien présente.
+      const credit = await scoped.revenueShareCredit.upsert({
         where: {
           practiceId_organizationId_periodMonth: {
             practiceId,
@@ -114,7 +139,9 @@ export class RevenueShareService {
       throw new ForbiddenException("Seul un membre du cabinet peut consulter son revenue share");
     }
 
-    return this.prisma.revenueShareCredit.findMany({ where: { practiceId } });
+    return practiceScopedClient(this.prisma, practiceId).revenueShareCredit.findMany({
+      where: { practiceId },
+    });
   }
 
   // H3, ADR-071, Grille-Offres §5.2 — vue calculée à la demande, jamais
@@ -130,6 +157,11 @@ export class RevenueShareService {
       throw new ForbiddenException("Seul un membre du cabinet peut consulter son abonnement Partner");
     }
 
+    // professional_practice est HORS RLS : lecture globale à dessein. Pas
+    // d'oracle malgré le *OrThrow — la garde d'appartenance ci-dessus lève déjà
+    // ForbiddenException pour un practiceId inconnu (aucune appartenance ne peut
+    // exister sur un cabinet qui n'existe pas), cette ligne n'est jamais
+    // atteinte avec un identifiant inconnu.
     const practice = await this.prisma.professionalPractice.findUniqueOrThrow({ where: { id: practiceId } });
     const price = getPartnerTierPrice(practice.tier);
 
@@ -141,7 +173,7 @@ export class RevenueShareService {
       return { practiceId, periodMonth, tier: practice.tier, amountDueCentimes: price.amountCentimes };
     }
 
-    const aggregate = await this.prisma.revenueShareCredit.aggregate({
+    const aggregate = await practiceScopedClient(this.prisma, practiceId).revenueShareCredit.aggregate({
       where: { practiceId, periodMonth },
       _sum: { creditedAmountCentimes: true },
     });
