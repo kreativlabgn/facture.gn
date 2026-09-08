@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import { resolveActivePractice } from "@/lib/active-practice";
 import { requireSessionToken } from "@/lib/session";
-import { listMyPractices, listPracticeMembers } from "@/lib/trust-api";
+import { listPracticeMembers } from "@/lib/trust-api";
 import { InviteMemberForm } from "./InviteMemberForm";
 
 export const metadata: Metadata = { title: "Collaborateurs — facture.gn" };
@@ -13,8 +14,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default async function CabinetMembersPage() {
   const token = await requireSessionToken();
-  const practices = await listMyPractices(token);
-  const practice = practices[0];
+  const { active: practice } = await resolveActivePractice(token);
   if (!practice) {
     return null;
   }

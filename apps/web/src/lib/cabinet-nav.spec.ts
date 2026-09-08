@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   CABINET_NAV,
+  CABINET_NAV_GROUPS,
+  cabinetPageTitle,
   canInviteMembers,
   canManageMandates,
+  canManagePractice,
   isCabinetNavActive,
   practiceRoleLabel,
+  visibleCabinetGroups,
 } from "./cabinet-nav";
 
 describe("cabinet-nav — droits, miroir d'assertPracticeAdmin", () => {
@@ -56,9 +60,75 @@ describe("cabinet-nav — entrée active", () => {
   });
 
   it("exactement une entrée active sur chaque route du cabinet", () => {
-    for (const pathname of ["/cabinet", "/cabinet/mandates", "/cabinet/members"]) {
-      const actives = CABINET_NAV.filter((entry) => isCabinetNavActive(pathname, entry.href));
+    for (const entry of CABINET_NAV) {
+      const actives = CABINET_NAV.filter((autre) => isCabinetNavActive(entry.href, autre.href));
       expect(actives).toHaveLength(1);
     }
+  });
+});
+
+describe("cabinet-nav — groupes visibles selon le rôle", () => {
+  it("un administrateur voit tout", () => {
+    const entrees = visibleCabinetGroups("practice_admin").flatMap((g) => g.entries);
+    expect(entrees).toHaveLength(CABINET_NAV.length);
+  });
+
+  // Masquer n'autorise rien — trust-api refuse de toute façon en 403. C'est
+  // pour ne pas offrir un bouton qui n'aboutit pas.
+  it("un comptable externe ne voit pas les réglages du cabinet", () => {
+    const hrefs = visibleCabinetGroups("accountant_external")
+      .flatMap((g) => g.entries)
+      .map((e) => e.href);
+    expect(hrefs).not.toContain("/cabinet/settings");
+    expect(hrefs).toContain("/cabinet");
+    expect(hrefs).toContain("/cabinet/members");
+  });
+
+  it("un rôle inconnu n'ouvre aucune entrée administrative", () => {
+    const hrefs = visibleCabinetGroups("owner")
+      .flatMap((g) => g.entries)
+      .map((e) => e.href);
+    expect(hrefs).not.toContain("/cabinet/settings");
+  });
+
+  // Un titre de groupe seul, sans rien dessous, ressemble à un écran cassé.
+  it("aucun groupe vide n'est rendu", () => {
+    for (const role of ["practice_admin", "accountant_external", "business_manager", "inconnu"]) {
+      for (const groupe of visibleCabinetGroups(role)) {
+        expect(groupe.entries.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("le palier partenaire et le reversement restent administratifs", () => {
+    expect(canManagePractice("practice_admin")).toBe(true);
+    expect(canManagePractice("accountant_external")).toBe(false);
+    expect(canManagePractice("business_manager")).toBe(false);
+  });
+
+  // Chaque entrée doit exister dans un groupe : CABINET_NAV en est l'aplati,
+  // pas une seconde liste à maintenir en parallèle.
+  it("CABINET_NAV est bien l'aplati des groupes", () => {
+    const depuisGroupes = CABINET_NAV_GROUPS.flatMap((g) => g.entries);
+    expect(CABINET_NAV).toEqual(depuisGroupes);
+  });
+});
+
+describe("cabinet-nav — titre de la page", () => {
+  // L'entrée la PLUS SPÉCIFIQUE gagne : sans cette règle, /cabinet attrape
+  // tout et chaque sous-page s'annonce « Vue d'ensemble ».
+  it("chaque route porte le titre de sa propre section", () => {
+    expect(cabinetPageTitle("/cabinet")).toBe("Vue d'ensemble");
+    expect(cabinetPageTitle("/cabinet/mandates")).toBe("Mandats");
+    expect(cabinetPageTitle("/cabinet/members")).toBe("Collaborateurs");
+    expect(cabinetPageTitle("/cabinet/settings")).toBe("Paramètres");
+  });
+
+  it("une sous-route hérite du titre de sa section", () => {
+    expect(cabinetPageTitle("/cabinet/organizations/org-1")).toBe("Entreprises suivies");
+  });
+
+  it("une route hors navigation n'invente aucun titre", () => {
+    expect(cabinetPageTitle("/cabinet/inconnu")).toBeNull();
   });
 });

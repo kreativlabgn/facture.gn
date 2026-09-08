@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { canManageMandates } from "@/lib/cabinet-nav";
+import { resolveActivePractice } from "@/lib/active-practice";
 import { requireSessionToken } from "@/lib/session";
-import { listMyPractices, listPracticeMandates } from "@/lib/trust-api";
+import { listPracticeMandates } from "@/lib/trust-api";
 import { RequestMandateForm } from "./RequestMandateForm";
 import { acceptMandateRequestAction, revokeMandateAction } from "./actions";
 
@@ -9,8 +10,7 @@ export const metadata: Metadata = { title: "Mandats — facture.gn" };
 
 export default async function CabinetMandatesPage() {
   const token = await requireSessionToken();
-  const practices = await listMyPractices(token);
-  const practice = practices[0];
+  const { active: practice } = await resolveActivePractice(token);
   if (!practice) {
     return null;
   }

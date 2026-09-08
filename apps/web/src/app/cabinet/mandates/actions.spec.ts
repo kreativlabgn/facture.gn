@@ -19,6 +19,17 @@ vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
 }));
 
+// L'action ne prend plus `practices[0]` mais le cabinet ACTIF — un même
+// collaborateur peut appartenir à deux structures, et écrire dans l'une pendant
+// que l'écran montre l'autre serait une erreur bien réelle. Le faux dérive du
+// même mock que précédemment : chaque test garde son `mockResolvedValue`.
+vi.mock("@/lib/active-practice", () => ({
+  resolveActivePractice: async () => {
+    const practices = await listMyPracticesMock();
+    return { practices, active: practices[0] ?? null };
+  },
+}));
+
 vi.mock("@/lib/trust-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/trust-api")>("@/lib/trust-api");
   return {

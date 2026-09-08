@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { resolveActivePractice } from "@/lib/active-practice";
 import { requireSessionToken } from "@/lib/session";
-import { inviteMember, listMyPractices, TrustApiError } from "@/lib/trust-api";
+import { inviteMember, TrustApiError } from "@/lib/trust-api";
 
 export type InviteMemberActionState = { error: string } | null;
 
@@ -11,8 +12,7 @@ export async function inviteMemberAction(
   formData: FormData,
 ): Promise<InviteMemberActionState> {
   const token = await requireSessionToken();
-  const practices = await listMyPractices(token);
-  const practice = practices[0];
+  const { active: practice } = await resolveActivePractice(token);
   if (!practice) {
     return { error: "Aucun cabinet associé à ce compte" };
   }

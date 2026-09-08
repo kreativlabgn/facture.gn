@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { resolveActivePractice } from "@/lib/active-practice";
 import { requireSessionToken } from "@/lib/session";
 import {
   acceptMandateRequest,
-  listMyPractices,
   lookupOrganizationByNif,
   requestMandate,
   revokeMandate,
@@ -34,8 +34,7 @@ export async function requestMandateAction(
   formData: FormData,
 ): Promise<RequestMandateActionState> {
   const token = await requireSessionToken();
-  const practices = await listMyPractices(token);
-  const practice = practices[0];
+  const { active: practice } = await resolveActivePractice(token);
   if (!practice) {
     return { error: "Aucun cabinet associé à ce compte" };
   }
@@ -90,8 +89,7 @@ export async function requestMandateAction(
 
 export async function revokeMandateAction(formData: FormData): Promise<void> {
   const token = await requireSessionToken();
-  const practices = await listMyPractices(token);
-  const practice = practices[0];
+  const { active: practice } = await resolveActivePractice(token);
   const mandateId = String(formData.get("mandateId") ?? "");
   if (!practice || !mandateId) {
     return;
@@ -103,8 +101,7 @@ export async function revokeMandateAction(formData: FormData): Promise<void> {
 
 export async function acceptMandateRequestAction(formData: FormData): Promise<void> {
   const token = await requireSessionToken();
-  const practices = await listMyPractices(token);
-  const practice = practices[0];
+  const { active: practice } = await resolveActivePractice(token);
   const mandateId = String(formData.get("mandateId") ?? "");
   if (!practice || !mandateId) {
     return;

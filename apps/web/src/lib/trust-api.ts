@@ -765,6 +765,68 @@ export interface PracticeSummary {
   type: string;
   tier: string;
   role: string;
+  // GET /practices/mine recopie la ligne entiere de la practice : ces champs
+  // sont bien rendus, ils n'etaient simplement pas declares ici.
+  registrationNumber?: string | null;
+  ordreVerified?: boolean;
+  phone?: string | null;
+  email?: string | null;
+  revenueShareSettlementMode?: string;
+}
+
+export const PARTNER_TIERS = [
+  "partner_free",
+  "partner_starter",
+  "partner_pro",
+  "partner_institutional",
+] as const;
+export type PartnerTier = (typeof PARTNER_TIERS)[number];
+
+export const SETTLEMENT_MODES = ["payout", "subscription_deduction"] as const;
+export type SettlementMode = (typeof SETTLEMENT_MODES)[number];
+
+/** POST /practices/:id/partner-tier — self-service, jamais un workflow
+ *  d'approbation (H3, ADR-071). practice_admin uniquement, garde côté service. */
+export async function upgradePartnerTier(
+  token: string,
+  practiceId: string,
+  tier: PartnerTier,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/partner-tier`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Changement de palier impossible", response.status);
+  }
+}
+
+/** POST /practices/:id/revenue-share-settlement-mode — n'affecte JAMAIS un
+ *  RevenueShareCredit deja genere, oriente seulement les prochains. */
+export async function upgradeSettlementMode(
+  token: string,
+  practiceId: string,
+  mode: SettlementMode,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/revenue-share-settlement-mode`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Changement de mode impossible", response.status);
+  }
 }
 
 export interface CreatePracticeInput {
