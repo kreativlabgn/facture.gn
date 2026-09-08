@@ -490,6 +490,14 @@ export interface InvoiceFullDetail {
   issuedAt: string | null;
   createdAt: string;
 
+  // K5, ADR-089 — état de cession de la créance. `GET /invoices/:id` renvoie la
+  // ligne Invoice entière (InvoicesService.findOne n'applique aucun `select` de
+  // premier niveau) : ces deux colonnes arrivaient déjà, elles n'étaient
+  // simplement pas déclarées ici. Le NOM du cessionnaire, lui, n'y est pas —
+  // il vient de getFinancingOptions(), seule route qui joint financial_partner.
+  financedByPartnerId: string | null;
+  financedAt: string | null;
+
   customer: { id: string; name: string; phone: string | null; nif: string | null } | null;
   lines: InvoiceLineItem[];
   events: InvoiceEventItem[];
@@ -537,6 +545,62 @@ export async function regeneratePaymentLink(token: string, invoiceId: string): P
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new TrustApiError(body?.message ?? "Régénération du lien impossible", response.status);
+  }
+}
+
+// ── RAILS DE FINANCEMENT B2G — ADR-088/089, K4/K5 ───────────────────────────
+//
+// Les deux routes de `/invoices/:id/financing` portent @Roles("owner","admin").
+// Les appeler depuis un écran non filtré ne serait pas une faille — RolesGuard
+// reste seul juge et rendrait 403 — mais un appel qui ne peut que échouer n'a
+// pas de raison d'être émis : voir hasPermission(role, "invoices:financing").
+
+export interface FinancialPartnerOption {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface FinancingOptions {
+  // Verdict d'is_financeable() (ADR-031 : « règle composite unique, toute
+  // modification est un ADR »). Deux de ses cinq conditions — compte acheteur
+  // public « verified », rattachement client confirmé — ne figurent NULLE PART
+  // dans InvoiceFullDetail : recopier la règle côté web est impossible, et
+  // l'approcher afficherait un rail que trust-api refuserait ensuite.
+  financeable: boolean;
+  partners: FinancialPartnerOption[];
+  // K5 — renseigné dès que la créance est cédée, c'est-à-dire exactement quand
+  // `financeable` retombe à false et que `partners` se vide.
+  financedByPartner: { id: string; name: string } | null;
+}
+
+export type DisbursementMethod = "payment_link_payout" | "bank_transfer";
+
+export async function getFinancingOptions(token: string, invoiceId: string): Promise<FinancingOptions> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/financing/options`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les rails de financement", response.status);
+  }
+  return response.json();
+}
+
+// K5 — LA CESSION. Le 409 rendu sur une facture déjà cédée n'est pas un aléa
+// réseau : c'est l'invariant anti-double-financement qui s'exprime (updateMany
+// conditionnel, count = 0). Son message est relayé tel quel, comme partout
+// ailleurs dans ce fichier — le reformuler perdrait la seule explication utile.
+export async function chooseFinancing(
+  token: string,
+  invoiceId: string,
+  input: { financialPartnerId: string; disbursementMethod: DisbursementMethod },
+): Promise<void> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/financing`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Financement impossible", response.status);
   }
 }
 

@@ -27,7 +27,20 @@ export class FinancingService {
     const scoped = organizationScopedClient(this.prisma, organizationId);
     const invoice = await scoped.invoice.findFirstOrThrow({
       where: { id: invoiceId, organizationId },
-      include: { customer: { include: { publicBuyerAccount: true } } },
+      include: {
+        customer: { include: { publicBuyerAccount: true } },
+        // K5 — le NOM du cessionnaire, et rien d'autre. Une créance cédée est
+        // définitivement cédée : l'écran de la PME doit pouvoir nommer
+        // l'établissement qui l'a rachetée, or `financeable` retombe à false
+        // dès la cession et la liste `partners` se vide — le nom ne pouvait
+        // donc plus venir de nulle part, et l'appelant en était réduit à
+        // afficher un uuid.
+        //
+        // `select` explicite, jamais `include` seul : financial_partner porte
+        // `apiKey`, qui n'a rien à faire dans une réponse HTTP (même
+        // discipline que le select d'InvoicesService.findOne sur user).
+        financedByPartner: { select: { id: true, name: true } },
+      },
     });
     const financeable = isFinanceable({
       ...invoice,
@@ -37,9 +50,19 @@ export class FinancingService {
     });
     const partners = financeable
       ? // Annuaire PLATEFORME, hors RLS — voir la carte en tête de classe.
-        await this.prisma.financialPartner.findMany({ where: { status: "active" } })
+        //
+        // `select` explicite : sans lui, cette réponse HTTP embarquait la ligne
+        // financial_partner ENTIÈRE, `apiKey` compris — le secret d'appel du
+        // partenaire, servi à l'owner/admin de n'importe quelle PME qui ouvre
+        // l'écran d'arbitrage. Même discipline que le select d'InvoicesService
+        // .findOne sur user (passwordHash) : un champ ajouté plus tard à cette
+        // table ne doit pas se retrouver exposé du seul fait qu'il existe.
+        await this.prisma.financialPartner.findMany({
+          where: { status: "active" },
+          select: { id: true, name: true, type: true },
+        })
       : [];
-    return { financeable, partners };
+    return { financeable, partners, financedByPartner: invoice.financedByPartner ?? null };
   }
 
   // K4/K5 — garde de concurrence par transaction (même pattern que

@@ -14,6 +14,7 @@ describe("permissions — miroir des @Roles() de trust-api", () => {
         "invoices:issue",
         "invoices:void",
         "invoices:relance",
+        "invoices:financing",
         "customers:read",
         "customers:create",
         "customers:merge",
@@ -39,6 +40,17 @@ describe("permissions — miroir des @Roles() de trust-api", () => {
     expect(hasPermission("cashier", "customers:read")).toBe(true);
     expect(hasPermission("cashier", "customers:merge")).toBe(false);
     expect(hasPermission("field_agent", "customers:merge")).toBe(false);
+  });
+
+  // financing.controller.ts, K4/ADR-088 : les deux routes sont
+  // @Roles("owner","admin"). cashier peut émettre et relancer — il ne cède
+  // jamais une créance, geste irréversible qui engage un montant réel.
+  it("l'arbitrage de financement n'est ouvert qu'à owner/admin", () => {
+    expect(hasPermission("owner", "invoices:financing")).toBe(true);
+    expect(hasPermission("admin", "invoices:financing")).toBe(true);
+    expect(hasPermission("cashier", "invoices:financing")).toBe(false);
+    expect(hasPermission("accountant_internal", "invoices:financing")).toBe(false);
+    expect(hasPermission("viewer", "invoices:financing")).toBe(false);
   });
 
   // invoices.controller.ts : delivery_driver n'est dans AUCUNE route facture.

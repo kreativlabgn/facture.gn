@@ -123,6 +123,52 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
   });
+
+  // K5 — une facture déjà cédée n'est plus finançable, donc `partners` est
+  // vide : sans ce champ, l'écran de la PME n'aurait AUCUN moyen de nommer
+  // l'établissement qui a racheté sa créance, et devrait afficher un uuid.
+  it("nomme le cessionnaire d'une facture déjà cédée, alors même qu'elle n'est plus finançable", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({
+        financedByPartnerId: "partner-7",
+        financedByPartner: { id: "partner-7", name: "Ecobank Guinée" },
+      }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1", "org-1");
+
+    expect(result.financeable).toBe(false);
+    expect(result.partners).toEqual([]);
+    expect(result.financedByPartner).toEqual({ id: "partner-7", name: "Ecobank Guinée" });
+  });
+
+  // Le pendant du test précédent : tant qu'aucune cession n'a eu lieu, le champ
+  // vaut null — jamais `undefined`, qui disparaîtrait de la réponse JSON et
+  // ferait lire « champ absent » là où la réponse dit « aucune cession ».
+  it("rend financedByPartner à null quand aucune cession n'a eu lieu", async () => {
+    const prisma = createFakePrisma({ partners: [{ id: "partner-1", name: "UBA", status: "active" }] });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1", "org-1");
+
+    expect(result.financedByPartner).toBeNull();
+  });
+
+  // financial_partner.apiKey est le secret d'appel du partenaire. Sans `select`,
+  // findMany rendait la ligne entière dans une réponse HTTP servie à l'owner/
+  // admin de n'importe quelle PME ouvrant l'écran d'arbitrage. L'assertion porte
+  // sur la PROJECTION, pas sur le résultat mocké : c'est la requête qui fuit.
+  it("ne projette jamais apiKey dans l'annuaire des partenaires", async () => {
+    const prisma = createFakePrisma({ partners: [{ id: "partner-1", name: "UBA" }] });
+    const service = new FinancingService(prisma as any);
+
+    await service.getFinancingOptions("inv-1", "org-1");
+
+    const projection = prisma.financialPartner.findMany.mock.calls[0][0].select;
+    expect(projection).toBeDefined();
+    expect(projection.apiKey).toBeUndefined();
+  });
 });
 
 describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {

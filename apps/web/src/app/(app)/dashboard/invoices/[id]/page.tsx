@@ -2,13 +2,21 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolveActiveOrganization } from "@/lib/active-organization";
+import { doitInterrogerLesRails, etatArbitrage } from "@/lib/financing";
 import { formatDate, formatGnf } from "@/lib/format";
 import { invoiceEventLabel, type EventTone } from "@/lib/invoice-events";
 import { hasPermission } from "@/lib/permissions";
 import { requireSessionToken } from "@/lib/session";
-import { getInvoice, TrustApiError, type InvoiceFullDetail } from "@/lib/trust-api";
+import {
+  getFinancingOptions,
+  getInvoice,
+  TrustApiError,
+  type FinancingOptions,
+  type InvoiceFullDetail,
+} from "@/lib/trust-api";
 import { DisputeStatusPill, StatusPill } from "@/components/StatusPill";
 import { Card } from "@/components/ui";
+import { ArbitrageMarchandForm } from "./ArbitrageMarchandForm";
 import {
   IssueInvoiceForm,
   RegenerateLinkForm,
@@ -62,6 +70,31 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
   const peutAnnuler =
     (invoice.status === "draft" || invoice.status === "issued") && hasPermission(role, "invoices:void");
   const peutRelancer = emise && !soldee && hasPermission(role, "invoices:relance");
+
+  // ── Rails de financement B2G (ADR-088/089, K4/K5) ────────────────────────
+  // Le verdict d'éligibilité vient de trust-api, jamais d'une règle recopiée
+  // ici : deux des cinq conditions d'is_financeable() — compte acheteur public
+  // « verified », rattachement client confirmé — ne figurent dans AUCUN champ
+  // d'InvoiceFullDetail. L'appel n'est émis que quand il peut servir
+  // (doitInterrogerLesRails) : la route est @Roles("owner","admin"), et un
+  // écran de détail n'a pas à payer un aller-retour pour une section qu'il ne
+  // rendra pas.
+  let rails: FinancingOptions | null = null;
+  let railsIndisponibles = false;
+  if (doitInterrogerLesRails(role, invoice)) {
+    try {
+      rails = await getFinancingOptions(token, invoice.id);
+    } catch {
+      // Une section optionnelle qui ne charge pas ne doit pas emporter l'écran :
+      // les lignes, la preuve de certification et le journal restent la raison
+      // d'être de cette page. L'échec n'est pas pour autant avalé — il est
+      // ANNONCÉ plus bas, sinon un commerçant éligible verrait simplement
+      // l'arbitrage disparaître sans jamais savoir pourquoi.
+      railsIndisponibles = true;
+    }
+  }
+
+  const arbitrage = etatArbitrage({ role, invoice, financeable: rails?.financeable ?? null });
 
   return (
     <div className="flex flex-col gap-6">
@@ -125,6 +158,48 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
           ) : null}
         </dl>
       </Card>
+
+      {/* ── Financement de la créance ──────────────────────────────────── */}
+      {/* Placé juste après les montants : ce que la PME touchera, et quand,
+          est la suite immédiate de combien elle a facturé. La section
+          n'apparaît QUE pour owner/admin sur une facture B2G visée et vivante
+          — ou, définitivement, sur une créance déjà cédée (K5). */}
+      {arbitrage !== "masque" ? (
+        <section>
+          <h2 className="mb-1 font-display text-lg font-semibold text-navy-950">
+            Financement de la créance
+          </h2>
+          <p className="mb-3 text-sm text-navy-600">
+            {arbitrage === "cedee"
+              ? "La créance a été rachetée par un établissement financier. L'opération est définitive et inscrite au journal de la facture."
+              : "L'administration a visé le service fait : vous pouvez être payé maintenant par un établissement financier agréé, ou attendre le règlement du Trésor public."}
+          </p>
+          <ArbitrageMarchandForm
+            invoiceId={invoice.id}
+            totalTtc={invoice.totalTtc}
+            etat={arbitrage}
+            partenaires={rails?.partners ?? []}
+            cessionnaire={rails?.financedByPartner ?? null}
+            financedByPartnerId={invoice.financedByPartnerId}
+            financedAt={invoice.financedAt}
+          />
+        </section>
+      ) : null}
+
+      {/* L'échec de chargement des rails est ANNONCÉ, jamais seulement subi :
+          sans cette ligne, un commerçant éligible verrait l'arbitrage
+          disparaître sans distinguer « pas finançable » de « pas su lire ». */}
+      {railsIndisponibles && arbitrage === "masque" ? (
+        <div role="status" className="rounded-2xl border border-amber bg-amber-bg p-5">
+          <p className="font-display text-sm font-bold text-navy-950">
+            Options de financement momentanément illisibles
+          </p>
+          <p className="mt-1 text-sm text-navy-700">
+            Impossible de savoir si cette facture est finançable pour l&apos;instant. Réessayez dans
+            un moment — le reste de la facture, lui, est à jour.
+          </p>
+        </div>
+      ) : null}
 
       {/* ── Lignes ─────────────────────────────────────────────────────── */}
       <section>
