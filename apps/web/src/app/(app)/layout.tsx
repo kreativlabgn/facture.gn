@@ -53,7 +53,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AppHeader
         tabs={tabs}
         moreEntries={moreEntries}
-        cabinetHref={practices.length > 0 ? "/cabinet" : null}
+        cabinetHref={practices.length > 0 ? "/dashboard/espace-cabinet" : null}
         organizations={organizations}
         active={active}
       />
@@ -68,7 +68,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         tabs={tabs}
         moreEntries={moreEntries}
         canEmit={canEmit(role)}
-        cabinetHref={practices.length > 0 ? "/cabinet" : null}
+        cabinetHref={practices.length > 0 ? "/dashboard/espace-cabinet" : null}
         role={role}
       />
     </div>
