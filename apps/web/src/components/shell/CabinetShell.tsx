@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { logoutAction } from "@/app/(app)/actions";
 import { switchPracticeAction } from "@/app/cabinet/actions";
 import { Wordmark } from "@/components/Wordmark";
 import { cabinetPageTitle, PRACTICE_TYPE_LABELS, practiceRoleLabel } from "@/lib/cabinet-nav";
 import { CabinetNav } from "./CabinetNav";
-import { ExitIcon, SwitchIcon } from "./cabinet-icons";
+import { ExitIcon, LogoutIcon, SwitchIcon } from "./cabinet-icons";
 
 // Coquille de l'espace cabinet.
 //
@@ -30,6 +31,12 @@ export interface PracticeOption {
   name: string;
   type: string;
   role: string;
+  /** Vérification par l'Ordre (OCAECG). Vient de la base, JAMAIS d'un badge
+   *  posé en dur : sur une plateforme de certification fiscale, afficher
+   *  « vérifié par l'Ordre » à un cabinet qui ne l'est pas est une fausse
+   *  déclaration — et c'est précisément le genre d'assertion qu'un client
+   *  regarde avant de confier sa comptabilité. */
+  ordreVerified: boolean;
 }
 
 export function CabinetShell({
@@ -116,10 +123,32 @@ function BarreLaterale({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {tiroir ? null : (
-        <div className="px-5 py-5">
+        <div className="px-5 pt-5 pb-4">
           <Wordmark href="/cabinet" ariaLabel="facture.gn — Accueil cabinet" tone="dark" />
         </div>
       )}
+
+      {/* Identité du cabinet : ce qu'il est, et ce que J'Y suis. Le rôle en
+          premier — c'est lui qui explique pourquoi telle entrée manque. */}
+      <div className="mx-2 mb-4 border-b border-white/10 px-3 pb-4">
+        <div className="flex flex-wrap gap-1.5">
+          <span className="rounded bg-or/15 px-2 py-0.5 text-[10px] font-bold tracking-wider text-or uppercase">
+            {practiceRoleLabel(active.role)}
+          </span>
+          <span className="rounded bg-white/10 px-2 py-0.5 text-[10px] font-bold tracking-wider text-white/70 uppercase">
+            {PRACTICE_TYPE_LABELS[active.type] ?? active.type}
+          </span>
+        </div>
+        <p className="mt-2 truncate font-display text-base font-bold text-white">{active.name}</p>
+        {/* AFFICHÉ SEULEMENT S'IL EST VRAI. Un badge de confiance posé en dur
+            serait une fausse déclaration ; son absence, elle, ne dit rien de
+            négatif — elle ne dit simplement rien. */}
+        {active.ordreVerified ? (
+          <p className="mt-2 inline-flex items-center gap-1 rounded border border-good/40 bg-good/10 px-2 py-0.5 text-[10px] font-bold text-good">
+            <span aria-hidden>✓</span> Vérifié par l&apos;Ordre
+          </p>
+        ) : null}
+      </div>
 
       <nav
         aria-label={tiroir ? "Navigation du cabinet (tiroir)" : "Navigation du cabinet"}
@@ -192,6 +221,24 @@ function BarreLaterale({
             Retour à mon commerce
           </Link>
         ) : null}
+
+        {/* La déconnexion manquait entièrement à cet espace : on ne pouvait
+            fermer sa session qu'en repassant par le tableau de bord marchand —
+            impossible pour un collaborateur qui n'a pas de commerce.
+            <form> et Server Action, jamais window.location vers un GET
+            /logout : un GET destructeur se déclenche depuis n'importe quelle
+            balise <img>, et la Server Action fonctionne sans JavaScript. */}
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="mt-1 flex min-h-[42px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-white/65 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-or"
+          >
+            <span className="text-white/45">
+              <LogoutIcon />
+            </span>
+            Fermer la session
+          </button>
+        </form>
       </div>
     </div>
   );

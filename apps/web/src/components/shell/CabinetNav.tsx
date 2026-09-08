@@ -59,20 +59,15 @@ export function CabinetNav({
                     aria-current={actif ? "page" : undefined}
                     onClick={onNaviguer}
                     className={[
-                      "relative flex min-h-[42px] items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors",
-                      "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-or",
-                      actif
-                        ? "bg-white/10 text-white"
-                        : "text-white/65 hover:bg-white/5 hover:text-white",
+                      "flex min-h-[42px] items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors",
+                      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-or",
+                      // Aplat Or plein sur l'entrée active : Navy sur Or, 9.4:1.
+                      // C'est l'inverse — du clair sur l'Or — qui est interdit
+                      // (R-11, 1.8:1).
+                      actif ? "bg-or text-navy-950" : "text-white/65 hover:bg-white/5 hover:text-white",
                     ].join(" ")}
                   >
-                    {actif ? (
-                      <span
-                        aria-hidden
-                        className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r bg-or"
-                      />
-                    ) : null}
-                    <span className={actif ? "text-or" : "text-white/45"}>
+                    <span className={actif ? "text-navy-950" : "text-white/45"}>
                       <Icone />
                     </span>
                     {entree.label}

@@ -79,8 +79,18 @@ export default async function CabinetLayout({ children }: { children: React.Reac
         name: practice.name,
         type: practice.type,
         role: practice.role,
+        // Recopié depuis la base — GET /practices/mine rend la ligne entière.
+        // Jamais un défaut à `true` : un badge de confiance affiché par
+        // commodité vaudrait fausse déclaration.
+        ordreVerified: practice.ordreVerified === true,
       }))}
-      active={{ id: active.id, name: active.name, type: active.type, role: active.role }}
+      active={{
+        id: active.id,
+        name: active.name,
+        type: active.type,
+        role: active.role,
+        ordreVerified: active.ordreVerified === true,
+      }}
       aUneOrganisation={organizations.length > 0}
     >
       {children}

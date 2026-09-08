@@ -89,6 +89,19 @@ export function ExitIcon() {
   );
 }
 
+/** Fermeture de session. Distincte d'ExitIcon : sortir vers son commerce et
+ *  fermer sa session ne sont pas la même action, et les confondre dans un même
+ *  glyphe ferait cliquer sur l'une en croyant faire l'autre. */
+export function LogoutIcon() {
+  return (
+    <svg {...COMMON_PROPS}>
+      <path d="M10 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H10" />
+      <path d="m15 8 4 4-4 4" />
+      <path d="M19 12H9" />
+    </svg>
+  );
+}
+
 /** Chevron du sélecteur de cabinet. */
 export function SwitchIcon() {
   return (
