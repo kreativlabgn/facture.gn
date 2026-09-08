@@ -60,7 +60,13 @@ export class EtaxSyncService {
         // jobId déterministe : si close() était rejoué (retry client, double
         // clic), BullMQ dédoublonne au lieu d'empiler deux déclarations pour le
         // même exercice.
-        jobId: `${closing.organizationId}:${closing.year}`,
+        //
+        // TIRET ET NON DEUX-POINTS. BullMQ réserve « : » pour ses propres clés
+        // Redis et REJETTE tout jobId qui en contient (« Custom Id cannot
+        // contain : »). Avec un deux-points, queue.add() levait — et comme
+        // cette méthode ne lève jamais, l'échec était absorbé : aucune clôture
+        // ne s'enfilait, silencieusement. Constaté en réel le 2026-09-08.
+        jobId: `closing-${closing.organizationId}-${closing.year}`,
       });
       this.logger.log(`Déclaration eTax enfilée — exercice ${closing.year}, organisation ${closing.organizationId}`);
     } catch (error) {

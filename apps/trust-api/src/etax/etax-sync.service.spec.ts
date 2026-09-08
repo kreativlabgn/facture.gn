@@ -114,7 +114,12 @@ describe("EtaxSyncService.enqueueForClosing", () => {
 
     await service.enqueueForClosing(CLOTURE);
 
-    expect(queue.add.mock.calls[0][2]).toMatchObject({ jobId: `${ORG}:2025` });
+    expect(queue.add.mock.calls[0][2]).toMatchObject({ jobId: `closing-${ORG}-2025` });
+    // BullMQ réserve « : » pour ses clés Redis et REJETTE tout jobId qui en
+    // contient. Le jobId portait un deux-points : queue.add() levait, et comme
+    // enqueueForClosing() n avale ses erreurs, AUCUNE clôture ne s enfilait —
+    // silencieusement. La file étant mockée ici, rien ne le disait.
+    expect(queue.add.mock.calls[0][2].jobId).not.toContain(":");
   });
 
   // LE POINT CRITIQUE de l'enfilement. Une clôture d'exercice est un acte
