@@ -24,6 +24,7 @@ import { PaymentLinkNotificationService } from "../notifications/payment-link-no
 import { PaymentReminderService } from "../notifications/payment-reminder.service";
 import { isOverdue } from "./overdue";
 import { CreditsService } from "../credits/credits.service";
+import { EtaxInvoiceService } from "../etax/etax-invoice.service";
 import { canauxFactures, type CanalFacturable } from "../credits/credits.constants";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
@@ -96,6 +97,12 @@ export class InvoicesService {
     // relance bloquée par une dépendance non câblée. En application complète,
     // CreditsModule étant @Global(), le service est bel et bien injecté.
     @Optional() private readonly credits?: CreditsService,
+    // Transmission unitaire e-TVA (LFI 2025) — EN DERNIÈRE POSITION et
+    // @Optional(), même précédent que les trois services ci-dessus : les 65+
+    // tests de ce fichier construisent InvoicesService positionnellement.
+    // Absent, l'émission se déroule normalement sans transmission — jamais une
+    // facture bloquée par une dépendance non câblée.
+    @Optional() private readonly etaxInvoice?: EtaxInvoiceService,
   ) {}
 
   // Lot D — channel est un argument SERVEUR, jamais dans CreateInvoiceDto : un
@@ -461,6 +468,20 @@ export class InvoicesService {
       throw error;
     }
     const { issuedInvoice, organization } = transactionResult;
+
+    // ── Transmission unitaire e-TVA (LFI 2025) ──────────────────────────────
+    //
+    // ICI, ET SURTOUT PAS DANS LA TRANSACTION CI-DESSUS. Redis ne participe pas
+    // au commit Postgres : un job enfilé à l'intérieur survivrait à un rollback,
+    // et les chemins d'annulation sont bien réels quelques lignes plus haut
+    // (collision de numéro, collision d'identifiant de certification,
+    // expiration du verrou). On aurait alors déclaré à la DGI une facture qui
+    // n'existe pas — et une transmission fiscale ne se retire pas.
+    //
+    // enqueueForInvoice() NE LÈVE JAMAIS : la facture est certifiée et
+    // committée, le commerçant a son document. Redis éteint doit laisser une
+    // trace à rattraper, pas casser une émission déjà acquise.
+    await this.etaxInvoice?.enqueueForInvoice(issuedInvoice.id, organizationId);
 
     // Meilleur effort, jamais couplé à la certification (déjà committée ci-dessus) :
     // DAT §12 fixe deux SLA distinctes ("Émission facture < 2s" / "Génération lien

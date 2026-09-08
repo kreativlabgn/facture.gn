@@ -15,3 +15,12 @@ export const ETAX_FAILURES_METRIC = "trust_api_etax_declarations_failed_total";
  *  donc aucun réessai BullMQ ne viendra — seul un rattrapage sur
  *  etax_submitted_at IS NULL les récupérera. */
 export const ETAX_ENQUEUE_FAILURES_METRIC = "trust_api_etax_enqueue_failed_total";
+
+/** Factures transmises unitairement et acquittées par le guichet (LFI 2025).
+ *  Compteur SÉPARÉ des déclarations périodiques : ce sont deux obligations
+ *  distinctes, et les confondre rendrait toute alerte illisible — quelques
+ *  dizaines de déclarations par an contre des milliers de factures par jour. */
+export const ETAX_INVOICES_TRANSMITTED_METRIC = "trust_api_etax_invoices_transmitted_total";
+
+/** Factures dont la transmission a définitivement échoué, par cause. */
+export const ETAX_INVOICE_FAILURES_METRIC = "trust_api_etax_invoices_failed_total";

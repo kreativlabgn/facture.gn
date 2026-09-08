@@ -55,6 +55,11 @@ const EVENT_CATEGORY_BY_TYPE: Record<InvoiceEventType, "facture" | "paiement"> =
   // K4/K5, ADR-088/089 — avance d'un montant réel par un partenaire financier :
   // un mouvement d'argent, pas un événement de cycle de vie du document.
   financing_disbursed: "paiement",
+  // Transmission unitaire e-TVA (LFI 2025) — « facture » et non « paiement » :
+  // ce qui part chez la DGI est le DOCUMENT et sa certification, pas un
+  // mouvement d'argent. Une facture transmise peut n'être jamais payée.
+  etax_transmitted: "facture",
+  etax_transmission_failed: "facture",
   liquidation_validated: "facture",
 };
 

@@ -7,8 +7,11 @@ import { ETAX_JOB_OPTIONS, ETAX_QUEUE } from "./etax.constants";
 import {
   ETAX_ENQUEUE_FAILURES_METRIC,
   ETAX_FAILURES_METRIC,
+  ETAX_INVOICE_FAILURES_METRIC,
+  ETAX_INVOICES_TRANSMITTED_METRIC,
   ETAX_SUBMITTED_METRIC,
 } from "./etax.metrics";
+import { EtaxInvoiceService } from "./etax-invoice.service";
 import { EtaxSyncProcessor } from "./etax-sync.processor";
 import { EtaxSyncService } from "./etax-sync.service";
 
@@ -31,6 +34,7 @@ import { EtaxSyncService } from "./etax-sync.service";
   ],
   providers: [
     EtaxSyncService,
+    EtaxInvoiceService,
     EtaxSyncProcessor,
     EtaxClient,
     makeCounterProvider({
@@ -44,10 +48,20 @@ import { EtaxSyncService } from "./etax-sync.service";
     }),
     makeCounterProvider({
       name: ETAX_ENQUEUE_FAILURES_METRIC,
-      help: "Nombre de clôtures qui n'ont pas pu être enfilées (Redis indisponible)",
+      help: "Nombre d'enfilements eTax perdus (Redis indisponible) — clôtures et factures",
+    }),
+    makeCounterProvider({
+      name: ETAX_INVOICES_TRANSMITTED_METRIC,
+      help: "Nombre de factures transmises unitairement et acquittées par la DGI (LFI 2025)",
+    }),
+    makeCounterProvider({
+      name: ETAX_INVOICE_FAILURES_METRIC,
+      help: "Nombre d'échecs de transmission unitaire e-TVA, par cause",
+      labelNames: ["reason"],
     }),
   ],
-  // FiscalPeriodsModule injecte EtaxSyncService pour enfiler à la clôture.
-  exports: [EtaxSyncService],
+  // FiscalPeriodsModule injecte EtaxSyncService pour enfiler à la clôture ;
+  // InvoicesModule injecte EtaxInvoiceService pour enfiler à l'émission.
+  exports: [EtaxSyncService, EtaxInvoiceService],
 })
 export class EtaxModule {}

@@ -203,6 +203,20 @@ enum DepositType {
 }
 
 // 7 valeurs — DAT §4 : invoice.status
+// Transmission unitaire d'une facture au guichet e-TVA (LFI 2025). Distinct du
+// statut de la facture : une facture parfaitement émise et payée peut n'avoir
+// jamais été transmise, et l'inverse n'existe pas.
+enum EtaxTransmissionStatus {
+  // Mise en file, la DGI n'a pas encore acquitté.
+  pending
+  // Acquittée : etax_receipt_number porte le reçu officiel.
+  transmitted
+  // Backoff épuisé, ou refus définitif du guichet. La facture reste ÉMISE et
+  // valide — un échec de télétransmission n'annule aucune certification. Cette
+  // valeur existe pour le rattrapage, pas pour bloquer le commerçant.
+  failed
+}
+
 enum InvoiceStatus {
   draft
   issued
@@ -289,6 +303,11 @@ enum InvoiceEventType {
   // pour le Rail B (ADR-088 : "la PME n'utilise aucun financement", absence
   // d'action, jamais un événement).
   financing_disbursed
+  // Transmission unitaire e-TVA (LFI 2025). L'acquittement de la DGI et son
+  // échec sont tous deux journalisés : le journal WORM doit retracer ce que
+  // l'administration a reçu, pas seulement ce qu'on a certifié.
+  etax_transmitted
+  etax_transmission_failed
 }
 
 model User {
@@ -1248,6 +1267,17 @@ model Invoice {
 
   issuedAt  DateTime? @map("issued_at")
   createdAt DateTime  @default(now()) @map("created_at")
+
+  // ── Transmission unitaire e-TVA (LFI 2025) ──────────────────────────────
+  // NULL = hors périmètre, et c'est la valeur de l'immense majorité des lignes :
+  // tout brouillon, et toute facture émise pendant que ETAX_ENABLED est à false.
+  // Un défaut `pending` aurait menti — il aurait présenté comme « en attente de
+  // la DGI » des factures que personne n'a jamais mises en file.
+  etaxStatus        EtaxTransmissionStatus? @map("etax_status")
+  // Le reçu officiel de la DGI. C'est LA preuve de dépôt : sans lui, la facture
+  // n'a pas été transmise, quoi que dise le statut.
+  etaxReceiptNumber String?                 @map("etax_receipt_number")
+  etaxTransmittedAt DateTime?               @map("etax_transmitted_at")
 
   organization  Organization            @relation(fields: [organizationId], references: [id])
   branch        Branch?                 @relation(fields: [branchId], references: [id])

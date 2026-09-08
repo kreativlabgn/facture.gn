@@ -5,9 +5,17 @@
  *  dans Redis au moment du déploiement. */
 export const ETAX_QUEUE = "etax-synchronization";
 
-/** Nom du job. Un seul type pour l'instant, mais nommé plutôt qu'anonyme : les
- *  jobs restent lisibles dans Redis et dans une future UI d'exploitation. */
+/** Déclaration périodique : un job par exercice clos. */
 export const ETAX_SYNC_JOB = "declare-fiscal-period";
+
+/** Transmission unitaire (LFI 2025) : un job par facture émise.
+ *
+ *  MÊME FILE que la déclaration périodique, à dessein — même guichet, même
+ *  profil de panne, même budget de réessais. Deux files auraient dédoublé la
+ *  connexion Redis et la supervision sans rien séparer d'utile. Le prix est que
+ *  le processeur DOIT désormais discriminer sur job.name : sans cela, une
+ *  facture serait traitée comme une déclaration d'exercice. */
+export const ETAX_INVOICE_JOB = "transmit-invoice";
 
 /** Profil d'échec. eTax est un service public dont les fenêtres de maintenance
  *  ne nous sont pas annoncées : 5 tentatives espacées exponentiellement à partir

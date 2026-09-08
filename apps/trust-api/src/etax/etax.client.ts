@@ -2,10 +2,22 @@ import { createHmac } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import { ETAX_REQUEST_TIMEOUT_MS } from "./etax.constants";
 import type { EtaxDeclarationPayload } from "./etax-declaration";
+import type { EtaxInvoicePayload } from "./etax-invoice";
 
 export interface EtaxSubmissionResult {
   /** Référence d'acquittement rendue par eTax — la preuve de dépôt. */
   submissionRef: string;
+}
+
+/** Refus DÉFINITIF du guichet : le payload est invalide, le rejouer à
+ *  l'identique le sera tout autant. Distinguée d'une panne passagère pour que
+ *  l'appelant arrête le backoff au lieu de marteler la DGI pendant deux heures
+ *  avec la même facture rejetée. */
+export class EtaxRejetDefinitif extends Error {
+  constructor(readonly status: number) {
+    super(`eTax a rejeté définitivement (${status})`);
+    this.name = "EtaxRejetDefinitif";
+  }
 }
 
 // Chantier 5, étape 3 — appel sortant vers le guichet eTax de la DGI.
@@ -77,6 +89,75 @@ export class EtaxClient {
         throw new Error("eTax a acquitté sans référence de dépôt");
       }
       return { submissionRef: data.submissionRef };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // ── Transmission unitaire (LFI 2025) ──────────────────────────────────────
+  //
+  // Même guichet, autre point d'entrée. Deux différences assumées avec submit() :
+  //
+  //   • la clé d'idempotence est le HASH DE CERTIFICATION de la facture, pas le
+  //     sceau d'un exercice — deux transmissions de la même facture le portent
+  //     forcément à l'identique, et le guichet peut donc reconnaître le doublon ;
+  //
+  //   • un 4xx lève EtaxRejetDefinitif. Un exercice rejeté vaut la peine d'être
+  //     rejoué (le guichet peut être en train de basculer une version) ; une
+  //     facture rejetée pour payload invalide le sera toujours, et s'acharner
+  //     bloquerait la file derrière des milliers de factures par jour.
+  async submitInvoice(payload: EtaxInvoicePayload): Promise<EtaxSubmissionResult> {
+    const baseUrl = process.env.ETAX_API_URL;
+    const apiKey = process.env.ETAX_API_KEY;
+    if (!baseUrl || !apiKey) {
+      throw new Error("ETAX_API_URL / ETAX_API_KEY non configurés — facture non transmise");
+    }
+
+    const corps = JSON.stringify(payload);
+    const signature = createHmac("sha256", apiKey).update(corps).digest("hex");
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ETAX_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${baseUrl}/invoices`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Etax-Signature": signature,
+          "X-Idempotency-Key": payload.hash,
+        },
+        body: corps,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        // NI LE CORPS NI LES IDENTIFIANTS FISCAUX ne sont journalisés — un
+        // guichet qui rejette renvoie typiquement l'écho du payload, donc le
+        // numéro eTax et les montants. La rédaction pino (logging.config.ts)
+        // porte sur des propriétés d'objet : elle ne voit rien de ce qu'on
+        // interpole dans une chaîne. L'identifiant interne de la facture suffit
+        // à diagnostiquer, et il ne dit rien à qui lit le journal.
+        this.logger.warn(
+          `eTax a rejeté (${response.status}) la facture ${payload.invoiceId} de l'organisation ${payload.organizationId}`,
+        );
+        // 4xx = le payload est en cause. 429 excepté : c'est un « revenez plus
+        // tard », pas un refus — le rejouer est exactement ce qu'il demande.
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          throw new EtaxRejetDefinitif(response.status);
+        }
+        throw new Error(`eTax a répondu ${response.status}`);
+      }
+
+      const data = (await response.json()) as { receiptNumber?: string; submissionRef?: string };
+      // Le guichet nomme « receiptNumber » le reçu unitaire et « submissionRef »
+      // l'acquittement d'une déclaration. On accepte les deux plutôt que de
+      // parier sur un seul : un acquittement perdu faute d'un nom de champ
+      // ferait retransmettre une facture que la DGI a déjà enregistrée.
+      const reference = data.receiptNumber ?? data.submissionRef;
+      if (!reference) {
+        throw new Error("eTax a acquitté sans numéro de reçu");
+      }
+      return { submissionRef: reference };
     } finally {
       clearTimeout(timer);
     }
