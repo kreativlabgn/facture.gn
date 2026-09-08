@@ -2,7 +2,10 @@
 // suppose un compte, et son Server Action appelle POST /organizations avec le
 // Bearer du cookie de session. Sans session, l'écran s'afficherait pour finir
 // sur une erreur au moment de soumettre.
-export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding"];
+// /daf — console de l'acheteur public. Route de premier niveau au même titre
+// que /cabinet : son occupant n'est membre d'aucune organisation PME, ni
+// /dashboard ni /cabinet ne le concerne.
+export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/daf"];
 
 // Logique pure isolée du glue Next.js (middleware.ts) pour rester testable sans
 // mocker next/server — le runtime edge de middleware.ts, lui, n'est pas testé

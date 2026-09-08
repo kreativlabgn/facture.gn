@@ -23,5 +23,5 @@ export const config = {
   // un préfixe absent d'ici n'est JAMAIS gardé, quoi qu'en dise cette liste.
   // route-protection.spec.ts vérifie l'alignement — /onboarding est arrivé
   // dans la liste sans arriver ici, et l'écran s'est cru protégé pour rien.
-  matcher: ["/dashboard/:path*", "/cabinet/:path*", "/onboarding/:path*"],
+  matcher: ["/dashboard/:path*", "/cabinet/:path*", "/onboarding/:path*", "/daf/:path*"],
 };

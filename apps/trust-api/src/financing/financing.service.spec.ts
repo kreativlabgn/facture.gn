@@ -305,4 +305,53 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     ).rejects.toThrow(ConflictException);
     expect(prisma.__tx.invoiceEvent.create).not.toHaveBeenCalled();
   });
+
+  // K5 — DOUBLE CLIC RÉELLEMENT CONCURRENT, et le CODE HTTP qu'il produit.
+  //
+  // Le test au-dessus fige déjà le comportement (la seconde demande échoue),
+  // mais il l'obtient d'un `updateManyCount: 0` posé d'avance : il n'exécute
+  // jamais deux appels en même temps, et n'assure que la CLASSE de l'exception.
+  // Or ce qui est promis au client, c'est un 409 — pas un 500 opaque. Cette
+  // application n'a AUCUN ExceptionFilter (constat repris dans
+  // public-buyer-portal.service.ts) : seule la nature HttpException de
+  // ConflictException garantit le code rendu. Une refonte qui lèverait une
+  // erreur maison non-HttpException passerait le `toThrow(ConflictException)`
+  // d'à côté tout en dégradant la réponse en 500 — d'où l'assertion sur
+  // getStatus() ici, et le lancement simultané des deux demandes.
+  it("sur deux demandes simultanées, une seule aboutit et l'autre rend un 409 explicite (jamais un 500)", async () => {
+    const prisma = createFakePrisma();
+    // La clause `where` de l'updateMany est le SEUL point de sérialisation réel
+    // (voir chooseFinancing) : on la rend stateful pour que la première
+    // revendication gagne et que la seconde trouve count === 0 — exactement ce
+    // que ferait Postgres sur deux transactions concurrentes.
+    let dejaRevendiquee = false;
+    prisma.__tx.invoice.updateMany.mockImplementation(() => {
+      if (dejaRevendiquee) {
+        return Promise.resolve({ count: 0 });
+      }
+      dejaRevendiquee = true;
+      return Promise.resolve({ count: 1 });
+    });
+    const service = new FinancingService(prisma as any);
+    const dto = { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" as const };
+
+    const resultats = await Promise.allSettled([
+      service.chooseFinancing("inv-1", dto, "user-1", "org-1"),
+      service.chooseFinancing("inv-1", dto, "user-1", "org-1"),
+    ]);
+
+    const aboutis = resultats.filter((r) => r.status === "fulfilled");
+    const rejetes = resultats.filter((r) => r.status === "rejected");
+    expect(aboutis).toHaveLength(1);
+    expect(rejetes).toHaveLength(1);
+
+    const erreur = (rejetes[0] as PromiseRejectedResult).reason as ConflictException;
+    expect(erreur).toBeInstanceOf(ConflictException);
+    // LE point de ce test : le code réellement rendu au client.
+    expect(erreur.getStatus()).toBe(409);
+
+    // K5 — une seule cession, donc une seule trace d'audit : jamais deux
+    // financing_disbursed sur la même facture.
+    expect(prisma.__tx.invoiceEvent.create).toHaveBeenCalledTimes(1);
+  });
 });
