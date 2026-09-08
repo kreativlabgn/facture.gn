@@ -7,6 +7,10 @@ import type {
 } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { assertPracticeAdmin } from "../common/rbac/practice-access";
+import {
+  getPartnerTierMaxOrganizations,
+  tierAccepteOrganisations,
+} from "./partner-tier-grid";
 import type { CreatePracticeDto } from "./dto/create-practice.dto";
 import type { InviteMemberDto } from "./dto/invite-member.dto";
 
@@ -123,6 +127,49 @@ export class PracticesService {
     });
   }
 
+  // DÉPART D'UN COLLABORATEUR — la contrepartie du mandat accordé à l'ENTITÉ.
+  //
+  // C'est ce qui donne son sens à toute l'architecture (ADR-068) : l'accès aux
+  // clients ne passe par aucune membership individuelle, donc faire partir un
+  // collaborateur coupe TOUS ses accès d'un seul coup, sans avoir à parcourir
+  // les mandats un par un. Encore fallait-il pouvoir le faire partir : rien
+  // n'écrivait jamais `leftAt` — dix lectures dans le dépôt, aucune écriture.
+  // La garantie était énoncée, pas outillée.
+  //
+  // On POSE une date, on ne SUPPRIME pas la ligne. Un cabinet doit pouvoir dire
+  // qui suivait tel dossier l'an dernier ; effacer l'appartenance effacerait
+  // aussi cette réponse.
+  async revokeMember(practiceId: string, memberUserId: string, requesterUserId: string) {
+    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "retirer un collaborateur");
+
+    const membership = await this.prisma.practiceMember.findFirst({
+      where: { practiceId, userId: memberUserId, leftAt: null },
+    });
+    if (!membership) {
+      throw new NotFoundException("Ce collaborateur n'est pas membre actif du cabinet");
+    }
+
+    // Retirer le DERNIER administrateur laisserait un cabinet que plus personne
+    // ne peut administrer : ni inviter, ni demander un mandat, ni changer de
+    // palier. Le cas est atteignable en un clic (un associé unique qui se
+    // retire lui-même), et il est irréversible sans intervention manuelle.
+    if (membership.role === "practice_admin") {
+      const autresAdmins = await this.prisma.practiceMember.count({
+        where: { practiceId, role: "practice_admin", leftAt: null, userId: { not: memberUserId } },
+      });
+      if (autresAdmins === 0) {
+        throw new ConflictException(
+          "Ce cabinet n'aurait plus aucun administrateur — nommez-en un autre avant de retirer celui-ci",
+        );
+      }
+    }
+
+    return this.prisma.practiceMember.update({
+      where: { id: membership.id },
+      data: { leftAt: new Date() },
+    });
+  }
+
   // F12, ADR-078 — "liste des CGA actifs" : ProfessionalPractice n'a aucun
   // concept "actif/inactif" scaffoldé, toute practice existante du type demandé
   // est retournée. Scope à "cga" uniquement pour cette story (jamais généralisé).
@@ -182,6 +229,27 @@ export class PracticesService {
   // à create() (voir schema.prisma) mais changeable ici après coup.
   async upgradePartnerTier(practiceId: string, tier: ProfessionalPracticeTier, requesterUserId: string) {
     await assertPracticeAdmin(this.prisma, practiceId, requesterUserId);
+
+    // LE SENS DESCENDANT COMPTE AUTANT QUE L'ASCENDANT. Sans ce garde, un
+    // partenaire Pro suivant quatre-vingts entreprises pouvait retomber en Free
+    // et les garder toutes : le plafond posé à la demande de mandat aurait été
+    // contourné par la porte de derrière, en une requête.
+    //
+    // On ne révoque AUCUN mandat pour faire rentrer le cabinet dans son
+    // nouveau palier : couper l'accès d'un comptable à ses clients parce qu'il
+    // a changé d'abonnement serait une décision commerciale déguisée en effet
+    // de bord. On refuse le changement, et on dit ce qu'il faudrait faire.
+    const suivies = await this.prisma.mandate.count({
+      where: { practiceId, status: { in: ["pending", "active"] } },
+    });
+    if (!tierAccepteOrganisations(tier, suivies)) {
+      const plafond = getPartnerTierMaxOrganizations(tier);
+      throw new ConflictException(
+        `Le palier ${tier} est limité à ${plafond} entreprise${(plafond ?? 0) > 1 ? "s" : ""}, ` +
+          `et ce cabinet en suit ${suivies}. Révoquez des mandats avant de rétrograder.`,
+      );
+    }
+
     return this.prisma.professionalPractice.update({ where: { id: practiceId }, data: { tier } });
   }
 

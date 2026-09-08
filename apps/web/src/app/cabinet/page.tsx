@@ -4,7 +4,7 @@ import { chargerConsoleCabinet, type ClientSousMandat } from "@/lib/cabinet";
 import { formatDate, formatGnf } from "@/lib/format";
 import { practiceMemberRoleLabel } from "@/lib/practice";
 import { resolveActivePractice } from "@/lib/active-practice";
-import { canManageMandates } from "@/lib/cabinet-nav";
+import { canRequestMandate } from "@/lib/cabinet-nav";
 import { requireSessionToken } from "@/lib/session";
 import { type PracticeMemberItem } from "@/lib/trust-api";
 import { ButtonLink, Card } from "@/components/ui";
@@ -55,22 +55,20 @@ export default async function CabinetHomePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {canManageMandates(practice.role) ? (
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <p className="max-w-prose text-sm text-navy-600">
-            Votre cabinet en un coup d&apos;œil : les entreprises que vous suivez, ce qu&apos;elles
-            ont facturé, et l&apos;équipe qui les accompagne.
-          </p>
+      {/* Demander un mandat est ouvert à tout membre actif : le scope
+          d’accountant_external porte mandate:request (ADR-068/078). Demander
+          n'engage rien — c'est l'organisation qui accepte, et qui révoque. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <p className="max-w-prose text-sm text-navy-600">
+          Votre cabinet en un coup d&apos;œil : les entreprises que vous suivez, ce qu&apos;elles
+          ont facturé, et l&apos;équipe qui les accompagne.
+        </p>
+        {canRequestMandate(practice.role) ? (
           <ButtonLink href="/cabinet/mandates" variant="accent">
             Demander un mandat
           </ButtonLink>
-        </div>
-      ) : (
-        <p className="max-w-prose text-sm text-navy-600">
-          Votre cabinet en un coup d&apos;œil. Demander un mandat engage la structure : seul un
-          administrateur du cabinet peut le faire.
-        </p>
-      )}
+        ) : null}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Chiffre libelle="Entreprises suivies" valeur={String(clients.length)} />

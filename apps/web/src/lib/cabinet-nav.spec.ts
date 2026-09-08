@@ -4,33 +4,54 @@ import {
   CABINET_NAV_GROUPS,
   cabinetPageTitle,
   canInviteMembers,
-  canManageMandates,
+  canRequestMandate,
+  canRevokeMandate,
   canManagePractice,
   isCabinetNavActive,
   practiceRoleLabel,
   visibleCabinetGroups,
 } from "./cabinet-nav";
 
-describe("cabinet-nav — droits, miroir d'assertPracticeAdmin", () => {
-  it("seul practice_admin engage le cabinet (mandats, invitations)", () => {
-    expect(canManageMandates("practice_admin")).toBe(true);
+describe("cabinet-nav — droits, miroir des gardes serveur", () => {
+  it("seul practice_admin engage le cabinet (révocation, invitations)", () => {
+    expect(canRevokeMandate("practice_admin")).toBe(true);
     expect(canInviteMembers("practice_admin")).toBe(true);
   });
 
   it("un comptable externe consulte mais n'engage pas", () => {
-    expect(canManageMandates("accountant_external")).toBe(false);
+    expect(canRevokeMandate("accountant_external")).toBe(false);
     expect(canInviteMembers("accountant_external")).toBe(false);
   });
 
   it("un gestionnaire d'affaires non plus", () => {
-    expect(canManageMandates("business_manager")).toBe(false);
+    expect(canRevokeMandate("business_manager")).toBe(false);
     expect(canInviteMembers("business_manager")).toBe(false);
   });
 
+  // LA RÈGLE (ADR-068/078) : le scope d'accountant_external porte
+  // `mandate:request`. DEMANDER un mandat n'engage rien — c'est l'organisation
+  // qui accepte, explicitement, et qui révoque quand elle veut. Exiger un
+  // practice_admin pour une simple demande suspendait le travail quotidien d'un
+  // collaborateur à la disponibilité d'un associé.
+  it("tout membre actif peut DEMANDER un mandat", () => {
+    expect(canRequestMandate("practice_admin")).toBe(true);
+    expect(canRequestMandate("accountant_external")).toBe(true);
+    expect(canRequestMandate("business_manager")).toBe(true);
+  });
+
+  // Demander et révoquer ne sont pas le même geste : l'un sollicite, l'autre
+  // retire un accès déjà consenti.
+  it("mais seul un administrateur peut le RÉVOQUER", () => {
+    expect(canRevokeMandate("accountant_external")).toBe(false);
+    expect(canRequestMandate("accountant_external")).toBe(true);
+  });
+
   // Un rôle inconnu (nouveau rôle backend pas encore recopié ici) ne doit
-  // jamais ouvrir un droit par défaut.
+  // jamais ouvrir un droit par défaut — pas même le plus anodin.
   it("un rôle inconnu n'ouvre aucun droit", () => {
-    expect(canManageMandates("owner")).toBe(false);
+    expect(canRevokeMandate("owner")).toBe(false);
+    expect(canRequestMandate("owner")).toBe(false);
+    expect(canRequestMandate("")).toBe(false);
     expect(canInviteMembers("")).toBe(false);
   });
 

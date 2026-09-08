@@ -31,6 +31,8 @@ function createFakePrisma(overrides: {
   organization?: any;
   existingMandate?: any;
   createImpl?: ReturnType<typeof vi.fn>;
+  tier?: string;
+  organisationsSuivies?: number;
 } = {}) {
   const prisma: any = auClientScope({
     practiceMember: {
@@ -42,9 +44,18 @@ function createFakePrisma(overrides: {
       findUnique: vi.fn().mockResolvedValue(
         overrides.organization !== undefined ? overrides.organization : { id: ORG_ID },
       ),
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.organization !== undefined ? overrides.organization : { id: ORG_ID },
+      ),
+    },
+    // Le palier du cabinet et son portefeuille : c'est le couple qui décide si
+    // une entreprise de plus est permise (ADR-071, Grille-Offres).
+    professionalPractice: {
+      findUnique: vi.fn().mockResolvedValue({ id: PRACTICE_ID, tier: overrides.tier ?? "partner_pro" }),
     },
     mandate: {
       findFirst: vi.fn().mockResolvedValue(overrides.existingMandate ?? null),
+      count: vi.fn().mockResolvedValue(overrides.organisationsSuivies ?? 0),
       create: overrides.createImpl ?? vi.fn().mockResolvedValue({ id: "mandate-1" }),
     },
   });
@@ -74,16 +85,67 @@ describe("MandatesService", () => {
 
     await expect(
       service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID),
-    ).rejects.toThrow(/practice_admin/);
+    ).rejects.toThrow(/membre du cabinet/);
   });
 
-  it("refuse si l'appelant est PracticeMember mais pas practice_admin", async () => {
+  // LA RÈGLE (ADR-068/078) : le scope d'accountant_external porte
+  // `mandate:request`. Demander n'engage rien — c'est l'organisation qui
+  // accepte, explicitement, et qui révoque quand elle veut. Exiger un
+  // practice_admin pour une simple demande suspendait le travail quotidien d'un
+  // collaborateur à la disponibilité d'un associé.
+  it("un accountant_external PEUT demander un mandat", async () => {
     const prisma = createFakePrisma({ member: { id: "member-1", role: "accountant_external" } });
+    const service = new MandatesService(prisma as any);
+
+    await service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID);
+    expect(prisma.mandate.create).toHaveBeenCalled();
+  });
+
+  // ── Plafond d'organisations du palier partenaire (ADR-071) ────────────────
+  //
+  // RIEN NE L'APPLIQUAIT : un partenaire Free pouvait mandater deux cents PME
+  // sans jamais payer. Ce n'était pas seulement un manque à gagner — c'est la
+  // règle de gestion elle-même qui n'était pas tenue.
+  it("refuse une entreprise de trop sur un palier plafonné", async () => {
+    const prisma = createFakePrisma({ tier: "partner_free", organisationsSuivies: 5 });
     const service = new MandatesService(prisma as any);
 
     await expect(
       service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID),
-    ).rejects.toThrow(/practice_admin/);
+    ).rejects.toThrow(/limité à 5/);
+    expect(prisma.mandate.create).not.toHaveBeenCalled();
+  });
+
+  it("accepte la dernière entreprise que le palier autorise", async () => {
+    const prisma = createFakePrisma({ tier: "partner_free", organisationsSuivies: 4 });
+    const service = new MandatesService(prisma as any);
+
+    await service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID);
+    expect(prisma.mandate.create).toHaveBeenCalled();
+  });
+
+  it("un palier illimité ne plafonne rien", async () => {
+    const prisma = createFakePrisma({ tier: "partner_pro", organisationsSuivies: 10_000 });
+    const service = new MandatesService(prisma as any);
+
+    await service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID);
+    expect(prisma.mandate.create).toHaveBeenCalled();
+  });
+
+  // Les demandes EN ATTENTE comptent autant que les mandats actifs : sans cela
+  // il suffirait d'empiler des demandes pour franchir le plafond, l'acceptation
+  // venant ensuite du côté de l'organisation, hors de portée de ce garde.
+  it("compte les mandats pending autant que les actifs", async () => {
+    const prisma = createFakePrisma({ tier: "partner_starter", organisationsSuivies: 0 });
+    const service = new MandatesService(prisma as any);
+
+    await service.create(PRACTICE_ID, { organizationId: ORG_ID, grantedRole: "accountant_external" }, REQUESTER_ID);
+
+    expect(prisma.mandate.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ["pending", "active"] } }),
+      }),
+    );
   });
 
   it("refuse (404) si l'organisation ciblée n'existe pas", async () => {

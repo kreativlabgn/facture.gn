@@ -111,6 +111,19 @@ export class PracticesController {
     return this.mandatesService.listAccessibleOrganizations(practiceId, user.id);
   }
 
+  // Départ d'un collaborateur. POST .../revoke plutôt que DELETE, même style
+  // que POST :id/pending-invites/:inviteId/revoke : ce n'est pas une
+  // suppression — la ligne d'appartenance reste, datée. Aucun @Roles()
+  // (practice_admin n'est pas un OrganizationRole), garde en ligne.
+  @Post(":id/members/:memberUserId/revoke")
+  revokeMember(
+    @Param("id") practiceId: string,
+    @Param("memberUserId") memberUserId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.practicesService.revokeMember(practiceId, memberUserId, user.id);
+  }
+
   // Écran "Collaborateurs" du dashboard cabinet — manquait jusqu'ici (seul
   // POST :id/members existait). Aucun @Roles() : tout membre actif suffit
   // (autorisation en ligne dans PracticesService.listMembers()).

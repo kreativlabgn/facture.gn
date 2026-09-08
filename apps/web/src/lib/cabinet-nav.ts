@@ -78,9 +78,21 @@ export function practiceRoleLabel(role: string): string {
   return PRACTICE_ROLE_LABELS[role as PracticeRole] ?? role;
 }
 
-// Miroir d'assertPracticeAdmin : demander ou révoquer un mandat engage le
-// cabinet vis-à-vis d'une organisation cliente. Réservé à practice_admin.
-export function canManageMandates(role: string): boolean {
+// Miroir d'assertPracticeMember. DEMANDER un mandat n'engage rien : c'est
+// l'organisation qui accepte, explicitement, et qui révoque quand elle veut.
+// Le scope d'accountant_external porte `mandate:request` (ADR-068/078) —
+// suspendre le travail quotidien d'un collaborateur à la disponibilité d'un
+// associé n'était pas une garantie de sécurité, seulement une gêne.
+//
+// Tout membre actif, donc — mais un rôle INCONNU n'ouvre rien : un rôle ajouté
+// côté serveur sans être recopié ici ne doit pas hériter d'un droit par défaut.
+export function canRequestMandate(role: string): boolean {
+  return PRACTICE_ROLES.includes(role as PracticeRole);
+}
+
+// Miroir d'assertPracticeAdmin. RÉVOQUER, en revanche, engage le cabinet : il
+// retire un accès que l'organisation lui avait consenti.
+export function canRevokeMandate(role: string): boolean {
   return role === "practice_admin";
 }
 

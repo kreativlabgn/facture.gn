@@ -138,7 +138,7 @@ describe("PracticesService — inviter un collaborateur (F8, ADR-068)", () => {
   });
 });
 
-function createFakePrismaForUpgrade(requesterRole: string | null) {
+function createFakePrismaForUpgrade(requesterRole: string | null, organisationsSuivies = 0) {
   const prisma: any = {
     practiceMember: {
       findFirst: vi.fn().mockResolvedValue(requesterRole ? { id: "member-admin", role: requesterRole } : null),
@@ -146,6 +146,9 @@ function createFakePrismaForUpgrade(requesterRole: string | null) {
     professionalPractice: {
       update: vi.fn().mockImplementation(({ where, data }: any) => Promise.resolve({ id: where.id, ...data })),
     },
+    // Le décompte des entreprises suivies : c'est lui qui décide si le palier
+    // visé est tenable.
+    mandate: { count: vi.fn().mockResolvedValue(organisationsSuivies) },
   };
   return prisma;
 }
@@ -177,6 +180,132 @@ describe("PracticesService.upgradePartnerTier (H3, ADR-071)", () => {
     const service = new PracticesService(prisma as any);
 
     await expect(service.upgradePartnerTier(PRACTICE_ID, "partner_pro", ADMIN_ID)).rejects.toThrow(/practice_admin/);
+  });
+
+  // LE SENS DESCENDANT. Sans ce garde, un partenaire Pro suivant quatre-vingts
+  // entreprises retombait en Free et les gardait toutes : le plafond posé à la
+  // demande de mandat était contourné par la porte de derrière, en une requête.
+  it("refuse une rétrogradation qui laisserait le cabinet au-dessus de son plafond", async () => {
+    const prisma = createFakePrismaForUpgrade("practice_admin", 80);
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.upgradePartnerTier(PRACTICE_ID, "partner_free", ADMIN_ID)).rejects.toThrow(
+      /limité à 5/,
+    );
+    expect(prisma.professionalPractice.update).not.toHaveBeenCalled();
+  });
+
+  it("accepte la rétrogradation quand le portefeuille tient dans le palier visé", async () => {
+    const prisma = createFakePrismaForUpgrade("practice_admin", 4);
+    const service = new PracticesService(prisma as any);
+
+    await service.upgradePartnerTier(PRACTICE_ID, "partner_free", ADMIN_ID);
+    expect(prisma.professionalPractice.update).toHaveBeenCalled();
+  });
+
+  it("monter vers un palier illimité ne compte rien", async () => {
+    const prisma = createFakePrismaForUpgrade("practice_admin", 10_000);
+    const service = new PracticesService(prisma as any);
+
+    await service.upgradePartnerTier(PRACTICE_ID, "partner_pro", ADMIN_ID);
+    expect(prisma.professionalPractice.update).toHaveBeenCalled();
+  });
+
+  // On ne révoque AUCUN mandat pour faire rentrer le cabinet dans son nouveau
+  // palier : couper l'accès d'un comptable à ses clients parce qu'il a changé
+  // d'abonnement serait une décision commerciale déguisée en effet de bord.
+  it("ne révoque aucun mandat pour faire tenir le palier", async () => {
+    const prisma = createFakePrismaForUpgrade("practice_admin", 80);
+    prisma.mandate.updateMany = vi.fn();
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.upgradePartnerTier(PRACTICE_ID, "partner_free", ADMIN_ID)).rejects.toThrow();
+    expect(prisma.mandate.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+// LE DÉPART D'UN COLLABORATEUR — la contrepartie du mandat accordé à l'ENTITÉ
+// (ADR-068). C'est lui qui coupe tous les accès d'un seul coup. Rien n'écrivait
+// jamais `leftAt` : dix lectures dans le dépôt, aucune écriture. La garantie
+// était énoncée, pas outillée.
+describe("PracticesService.revokeMember — départ d'un collaborateur", () => {
+  const MEMBRE_ID = "user-collaborateur";
+
+  function fakePrisma(options: {
+    demandeur: string | null;
+    cible: { id: string; role: string } | null;
+    autresAdmins?: number;
+  }) {
+    const prisma: any = {
+      practiceMember: {
+        findFirst: vi
+          .fn()
+          // 1er appel : assertPracticeAdmin sur le demandeur.
+          .mockResolvedValueOnce(options.demandeur ? { id: "m-dem", role: options.demandeur } : null)
+          // 2e appel : la cible.
+          .mockResolvedValueOnce(options.cible),
+        count: vi.fn().mockResolvedValue(options.autresAdmins ?? 1),
+        update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "m-cible", ...data })),
+      },
+    };
+    return prisma;
+  }
+
+  it("pose une date de départ, sans supprimer la ligne", async () => {
+    const prisma = fakePrisma({ demandeur: "practice_admin", cible: { id: "m-cible", role: "accountant_external" } });
+    const service = new PracticesService(prisma as any);
+
+    await service.revokeMember(PRACTICE_ID, MEMBRE_ID, ADMIN_ID);
+
+    const appel = prisma.practiceMember.update.mock.calls[0][0];
+    expect(appel.data.leftAt).toBeInstanceOf(Date);
+    // Un cabinet doit pouvoir dire qui suivait tel dossier l'an dernier :
+    // effacer l'appartenance effacerait aussi cette réponse.
+    expect(prisma.practiceMember.delete).toBeUndefined();
+  });
+
+  it("refuse un demandeur qui n'est pas administrateur", async () => {
+    const prisma = fakePrisma({ demandeur: "accountant_external", cible: { id: "m-cible", role: "accountant_external" } });
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.revokeMember(PRACTICE_ID, MEMBRE_ID, ADMIN_ID)).rejects.toThrow(/practice_admin/);
+    expect(prisma.practiceMember.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse un collaborateur qui n'est pas membre actif", async () => {
+    const prisma = fakePrisma({ demandeur: "practice_admin", cible: null });
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.revokeMember(PRACTICE_ID, MEMBRE_ID, ADMIN_ID)).rejects.toThrow(/pas membre actif/);
+  });
+
+  // Atteignable en un clic — un associé unique qui se retire lui-même — et
+  // irréversible sans intervention manuelle : le cabinet n'aurait plus personne
+  // pour inviter, demander un mandat ou changer de palier.
+  it("refuse de retirer le dernier administrateur", async () => {
+    const prisma = fakePrisma({
+      demandeur: "practice_admin",
+      cible: { id: "m-cible", role: "practice_admin" },
+      autresAdmins: 0,
+    });
+    const service = new PracticesService(prisma as any);
+
+    await expect(service.revokeMember(PRACTICE_ID, MEMBRE_ID, ADMIN_ID)).rejects.toThrow(
+      /plus aucun administrateur/,
+    );
+    expect(prisma.practiceMember.update).not.toHaveBeenCalled();
+  });
+
+  it("accepte de retirer un administrateur s'il en reste un autre", async () => {
+    const prisma = fakePrisma({
+      demandeur: "practice_admin",
+      cible: { id: "m-cible", role: "practice_admin" },
+      autresAdmins: 1,
+    });
+    const service = new PracticesService(prisma as any);
+
+    await service.revokeMember(PRACTICE_ID, MEMBRE_ID, ADMIN_ID);
+    expect(prisma.practiceMember.update).toHaveBeenCalled();
   });
 });
 

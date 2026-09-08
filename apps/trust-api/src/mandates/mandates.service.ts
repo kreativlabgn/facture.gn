@@ -8,7 +8,11 @@ import {
 } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { mandateNotExpiredWhere } from "../common/rbac/mandate-expiration";
-import { assertPracticeAdmin } from "../common/rbac/practice-access";
+import { assertPracticeAdmin, assertPracticeMember } from "../common/rbac/practice-access";
+import {
+  getPartnerTierMaxOrganizations,
+  tierAccepteOrganisations,
+} from "../practices/partner-tier-grid";
 import type { CreateMandateDto } from "./dto/create-mandate.dto";
 
 @Injectable()
@@ -46,7 +50,13 @@ export class MandatesService {
   // (pending → active) et la révocation (F6) sont des stories séparées, aucune
   // transition de status n'est construite ici.
   async create(practiceId: string, dto: CreateMandateDto, requesterUserId: string) {
-    await assertPracticeAdmin(this.prisma, practiceId, requesterUserId, "demander un mandat au nom de celui-ci");
+    // TOUT MEMBRE ACTIF, pas seulement un practice_admin : le scope
+    // d'accountant_external porte `mandate:request` (ADR-068/078). Demander
+    // n'engage rien — c'est l'organisation qui accepte, explicitement, et qui
+    // révoque quand elle veut. La révocation, elle, reste administrative.
+    await assertPracticeMember(this.prisma, practiceId, requesterUserId, "demander un mandat au nom de celui-ci");
+
+    await this.assertPlafondPalier(practiceId);
 
     // Scope CABINET : c'est le cabinet qui demande le mandat.
     const scoped = practiceScopedClient(this.prisma, practiceId);
@@ -87,6 +97,41 @@ export class MandatesService {
         initiatedBy: "practice",
       },
     });
+  }
+
+  // Plafond d'organisations du palier partenaire (ADR-071, Grille-Offres).
+  //
+  // RIEN NE L'APPLIQUAIT : un partenaire Free pouvait mandater deux cents PME
+  // sans jamais payer. On compte AVANT la création, et on compte les mandats
+  // pending comme les actifs — sans quoi il suffirait d'empiler des demandes en
+  // attente pour franchir le plafond, l'acceptation venant ensuite du côté de
+  // l'organisation, hors de portée de ce garde.
+  //
+  // Lecture NON SCOPÉE : le palier est une donnée du cabinet, et le décompte
+  // porte sur ses propres mandats — pas sur ceux d'un autre.
+  private async assertPlafondPalier(practiceId: string): Promise<void> {
+    const practice = await this.prisma.professionalPractice.findUnique({
+      where: { id: practiceId },
+      select: { tier: true },
+    });
+    if (!practice) {
+      throw new NotFoundException(`Cabinet ${practiceId} introuvable`);
+    }
+
+    const plafond = getPartnerTierMaxOrganizations(practice.tier);
+    if (plafond === null) {
+      return;
+    }
+
+    const actuels = await this.prisma.mandate.count({
+      where: { practiceId, status: { in: ["pending", "active"] } },
+    });
+    if (!tierAccepteOrganisations(practice.tier, actuels + 1)) {
+      throw new ConflictException(
+        `Palier ${practice.tier} limité à ${plafond} entreprise${plafond > 1 ? "s" : ""} — ` +
+          `${actuels} déjà suivie${actuels > 1 ? "s" : ""}. Changez de palier pour en suivre davantage.`,
+      );
+    }
   }
 
   // F1, ADR-069 — "accorder l'accès" = l'action d'acceptation elle-même

@@ -914,6 +914,26 @@ export interface PracticeMemberItem {
   user: { id: string; name: string };
 }
 
+/** POST /practices/:id/members/:userId/revoke — départ d'un collaborateur.
+ *  Ce n'est PAS une suppression : la ligne d'appartenance reste, datée. Le
+ *  mandat étant accordé à l'entité et jamais à l'individu, ce seul geste coupe
+ *  tous ses accès aux clients du cabinet. */
+export async function revokePracticeMember(
+  token: string,
+  practiceId: string,
+  memberUserId: string,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/members/${encodeURIComponent(memberUserId)}/revoke`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Retrait impossible", response.status);
+  }
+}
+
 export async function listPracticeMembers(token: string, practiceId: string): Promise<PracticeMemberItem[]> {
   const response = await authenticatedFetch(`/practices/${encodeURIComponent(practiceId)}/members`, token);
   if (!response.ok) {
