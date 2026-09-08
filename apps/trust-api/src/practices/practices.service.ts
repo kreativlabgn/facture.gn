@@ -126,8 +126,31 @@ export class PracticesService {
   // F12, ADR-078 — "liste des CGA actifs" : ProfessionalPractice n'a aucun
   // concept "actif/inactif" scaffoldé, toute practice existante du type demandé
   // est retournée. Scope à "cga" uniquement pour cette story (jamais généralisé).
+  // ANNUAIRE PUBLIC : lisible par n'importe quel utilisateur authentifié, sans
+  // aucune appartenance. La projection est donc EXPLICITE, jamais la ligne
+  // entière — un findMany nu exposait `tier` et `revenueShareSettlementMode`,
+  // c'est-à-dire le palier commercial d'un partenaire et la façon dont il est
+  // rémunéré. Ce sont ses conditions d'affaires : un concurrent inscrit sur la
+  // plateforme pouvait les lire d'une requête.
+  //
+  // Ce qui reste est ce qu'un adhérent doit voir pour CHOISIR un CGA : de quoi
+  // l'identifier (nom, agrément), savoir s'il est vérifié, et le contacter.
   async findAllByType(type: ProfessionalPracticeType) {
-    return this.prisma.professionalPractice.findMany({ where: { type } });
+    return this.prisma.professionalPractice.findMany({
+      where: { type },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        // Numéro d'agrément et vérification par l'Ordre : des signaux de
+        // confiance, publics par nature — c'est leur raison d'être.
+        registrationNumber: true,
+        ordreVerified: true,
+        phone: true,
+        email: true,
+      },
+      orderBy: { name: "asc" },
+    });
   }
 
   // Distinct de findAllByType("cga") ci-dessus (liste TOUTES les CGA de la
@@ -140,6 +163,16 @@ export class PracticesService {
     const memberships = await this.prisma.practiceMember.findMany({
       where: { userId, leftAt: null },
       include: { practice: true },
+      // ORDRE DÉTERMINISTE, et ce n'est pas cosmétique. Sans orderBy, Postgres
+      // rend les lignes dans l'ordre qui l'arrange, et il peut changer d'une
+      // requête à l'autre. Or l'appelant se pose sur le PREMIER cabinet : un
+      // collaborateur membre de deux structures atterrissait donc tantôt dans
+      // la sienne, tantôt dans celle d'un confrère où il n'est qu'invité —
+      // sans rien avoir demandé, et sans que l'écran le dise.
+      //
+      // Le plus ancien rattachement d'abord : c'est le cabinet d'origine, celui
+      // qu'on a rejoint en premier, et il ne bouge plus.
+      orderBy: { joinedAt: "asc" },
     });
     return memberships.map((membership) => ({ ...membership.practice, role: membership.role }));
   }

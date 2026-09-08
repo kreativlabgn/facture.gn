@@ -222,6 +222,7 @@ describe("PracticesService — lister les practices dont je suis membre", () => 
     expect(prisma.practiceMember.findMany).toHaveBeenCalledWith({
       where: { userId: "user-1", leftAt: null },
       include: { practice: true },
+      orderBy: { joinedAt: "asc" },
     });
     expect(result).toEqual([
       { id: "practice-1", name: "Cabinet Mamadou & Associés", type: "cabinet_comptable", role: "practice_admin" },
@@ -281,6 +282,23 @@ describe("PracticesService — lister les collaborateurs d'un cabinet", () => {
   });
 });
 
+// SANS TRI, Postgres rend les lignes dans l'ordre qui l'arrange, et il peut
+// changer d'une requête à l'autre. Or l'appelant — le layout de l'espace
+// cabinet — se pose sur le PREMIER élément : un collaborateur membre de deux
+// structures atterrissait tantôt dans la sienne, tantôt dans celle d'un
+// confrère. L'accès était légitime dans les deux cas, mais l'effet à l'écran
+// était celui d'une fuite.
+describe("PracticesService.listMine — l'ordre est le contrat", () => {
+  it("trie par ancienneté de rattachement, le cabinet d'origine d'abord", async () => {
+    const prisma: any = {
+      practiceMember: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    await new PracticesService(prisma as any).listMine("user-1");
+
+    expect(prisma.practiceMember.findMany.mock.calls[0][0].orderBy).toEqual({ joinedAt: "asc" });
+  });
+});
+
 describe("PracticesService — lister par type (F12, ADR-078)", () => {
   it("liste les practices du type demandé", async () => {
     const prisma: any = {
@@ -292,8 +310,30 @@ describe("PracticesService — lister par type (F12, ADR-078)", () => {
 
     const result = await service.findAllByType("cga");
 
-    expect(prisma.professionalPractice.findMany).toHaveBeenCalledWith({ where: { type: "cga" } });
+    expect(prisma.professionalPractice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { type: "cga" } }),
+    );
     expect(result).toEqual([{ id: "cga-1", type: "cga", name: "CGA Kaloum" }]);
+  });
+
+  // CET ANNUAIRE EST LISIBLE PAR TOUT COMPTE AUTHENTIFIÉ, sans appartenance.
+  // Un findMany nu rendait la ligne entière, donc `tier` et
+  // `revenueShareSettlementMode` : le palier commercial d'un partenaire et la
+  // façon dont il est rémunéré. Un concurrent inscrit les lisait d'une requête.
+  it("n'expose jamais les conditions commerciales d'un partenaire", async () => {
+    const prisma: any = {
+      professionalPractice: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    await new PracticesService(prisma as any).findAllByType("cga");
+
+    const { select } = prisma.professionalPractice.findMany.mock.calls[0][0];
+    // Projection EXPLICITE, jamais implicite : c'est elle qui garantit qu'un
+    // champ ajouté demain au modèle ne se retrouve pas publié par accident.
+    expect(select).toBeDefined();
+    expect(select.tier).toBeUndefined();
+    expect(select.revenueShareSettlementMode).toBeUndefined();
+    // Ce qui reste est ce qu'un adhérent doit voir pour choisir un CGA.
+    expect(select).toMatchObject({ id: true, name: true, ordreVerified: true });
   });
 });
 
