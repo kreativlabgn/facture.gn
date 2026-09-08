@@ -54,6 +54,17 @@ const EVENT_LABELS: Record<string, EventLabel> = {
   mandate_revoked: { label: "Mandat révoqué", ton: "attention" },
   mandate_expired: { label: "Mandat expiré", ton: "attention" },
 
+  // Télétransmission e-TVA (LFI 2025). Le libellé dit ce que la DGI a fait, pas
+  // ce que le système a tenté : « transmise » est un fait acquitté par un reçu.
+  etax_transmitted: { label: "Facture transmise à la DGI (e-TVA)", ton: "bon" },
+  // « attention » et non « alerte » : la facture reste ÉMISE et parfaitement
+  // valide — un échec de télétransmission n'annule aucune certification. Le
+  // signaler en rouge laisserait croire au commerçant que sa facture est nulle.
+  etax_transmission_failed: {
+    label: "Transmission à la DGI non aboutie",
+    ton: "attention",
+  },
+
   // Configuration
   regime_change: { label: "Changement de régime fiscal", ton: "neutre" },
   delegated_key_tier_changed: { label: "Palier de délégation de clé modifié", ton: "neutre" },
