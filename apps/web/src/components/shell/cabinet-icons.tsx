@@ -78,20 +78,12 @@ export function PracticeIcon() {
   );
 }
 
-/** Retour à l'espace marchand — une flèche qui sort. */
-export function ExitIcon() {
-  return (
-    <svg {...COMMON_PROPS}>
-      <path d="M14 4h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14" />
-      <path d="M10 8 6 12l4 4" />
-      <path d="M6 12h9" />
-    </svg>
-  );
-}
+// ExitIcon (« retour à mon commerce ») a été retirée avec le lien qu'elle
+// portait : l'espace cabinet n'a plus de sortie latérale vers l'espace
+// marchand, seulement la fermeture de session. Garder le glyphe « au cas où »
+// aurait invité à recâbler le raccourci sans repasser par la question.
 
-/** Fermeture de session. Distincte d'ExitIcon : sortir vers son commerce et
- *  fermer sa session ne sont pas la même action, et les confondre dans un même
- *  glyphe ferait cliquer sur l'une en croyant faire l'autre. */
+/** Fermeture de session — la seule sortie de l'espace cabinet. */
 export function LogoutIcon() {
   return (
     <svg {...COMMON_PROPS}>

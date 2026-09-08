@@ -120,6 +120,35 @@ export function visibleCabinetGroups(role: string): CabinetNavGroup[] {
   })).filter((groupe) => groupe.entries.length > 0);
 }
 
+// ── Onglets de la console (/cabinet?tab=) ───────────────────────────────────
+//
+// L'onglet courant vit dans l'URL, jamais dans un état React : sans JavaScript
+// un onglet piloté par useState ne s'ouvre pas, un lien s'envoie et se met en
+// favori, et le bouton Retour du navigateur refait le chemin inverse.
+//
+// La résolution est ICI et non dans page.tsx pour la même raison que le reste
+// de ce module : c'est de la logique pure, elle se teste sans rendu.
+
+export const CABINET_TABS = [
+  { cle: "portefeuille", label: "Portefeuille" },
+  { cle: "structure", label: "Le cabinet" },
+] as const;
+
+export type CabinetTab = (typeof CABINET_TABS)[number]["cle"];
+
+/** Le portefeuille par défaut : c'est le travail quotidien d'un cabinet.
+ *
+ *  Toute valeur inconnue y retombe. `?tab=` vient de l'URL — donc de n'importe
+ *  où, y compris d'un lien fabriqué — et un écran vide serait une façon
+ *  gratuite de faire croire à une panne. Le tableau `string[]` est le cas
+ *  `?tab=a&tab=b` : Next rend alors un tableau, et `Array.isArray` évite de
+ *  comparer un objet à une chaîne (qui échouerait silencieusement). */
+export function resolveCabinetTab(valeur: string | string[] | undefined): CabinetTab {
+  const brut = Array.isArray(valeur) ? valeur[0] : valeur;
+  const trouve = CABINET_TABS.find((onglet) => onglet.cle === brut);
+  return trouve ? trouve.cle : "portefeuille";
+}
+
 // `/cabinet` est un préfixe de toutes les autres entrées : sans égalité stricte
 // pour la racine, « Vue d'ensemble » resterait actif sur /cabinet/mandates et
 // deux entrées seraient annoncées `aria-current` en même temps.

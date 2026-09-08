@@ -829,6 +829,72 @@ export async function upgradeSettlementMode(
   }
 }
 
+// Mirroir de GET /practices/:id/revenue-share (revenue-share.service.ts:
+// listByPractice). Le partage d'honoraires — la commission d'apporteur du
+// cabinet, 10 % plafonnés à 5 000 GNF/mois/client (H4, ADR-071) — était calculé,
+// stocké et exposé côté trust-api, mais AUCUN écran ne le lisait : un partenaire
+// ne pouvait connaître ce qui lui revenait qu'en interrogeant l'API à la main.
+//
+// Les montants sont des BigInt côté Prisma, sérialisés en chaîne par le
+// BigInt.prototype.toJSON de trust-api/src/main.ts — jamais un number, qui
+// perdrait de la précision au-delà de Number.MAX_SAFE_INTEGER. Ils restent donc
+// des chaînes ici, comme totalTtc partout ailleurs.
+export interface RevenueShareCreditItem {
+  id: string;
+  organizationId: string;
+  /** Format "YYYY-MM". */
+  periodMonth: string;
+  grossCommissionCentimes: string;
+  creditedAmountCentimes: string;
+  status: string;
+  createdAt: string;
+}
+
+/** GET /practices/:id/revenue-share — tout membre actif suffit (consultation).
+ *  Rend TOUTES les périodes : le filtrage par mois se fait à l'affichage,
+ *  l'endpoint n'accepte aucun paramètre de période. */
+export async function listPracticeRevenueShare(
+  token: string,
+  practiceId: string,
+): Promise<RevenueShareCreditItem[]> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/revenue-share`,
+    token,
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger le partage d'honoraires", response.status);
+  }
+  return response.json();
+}
+
+// Mirroir de GET /practices/:id/partner-subscription/:periodMonth. Vue CALCULÉE
+// à la demande, jamais une entité persistée (H3, ADR-071) : ce n'est pas une
+// facture d'abonnement, c'est ce qui resterait dû ce mois-ci.
+export interface PartnerSubscriptionStatus {
+  practiceId: string;
+  periodMonth: string;
+  tier: string;
+  /** `null` sur un palier dont le prix est « sur devis » (institutional) —
+   *  distinct de "0", qui voudrait dire « plus rien à payer ». Les deux méritent
+   *  une phrase différente à l'écran. */
+  amountDueCentimes: string | null;
+}
+
+export async function getPartnerSubscriptionStatus(
+  token: string,
+  practiceId: string,
+  periodMonth: string,
+): Promise<PartnerSubscriptionStatus> {
+  const response = await authenticatedFetch(
+    `/practices/${encodeURIComponent(practiceId)}/partner-subscription/${encodeURIComponent(periodMonth)}`,
+    token,
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger l'abonnement partenaire", response.status);
+  }
+  return response.json();
+}
+
 export interface CreatePracticeInput {
   name: string;
   type: string;

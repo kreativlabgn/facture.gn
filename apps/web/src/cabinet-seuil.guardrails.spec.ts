@@ -28,6 +28,7 @@ const SRC = path.resolve(__dirname);
 const HORS_PERIMETRE = [
   path.join(SRC, "app", "cabinet"),
   path.join(SRC, "components", "shell", "CabinetShell.tsx"),
+  path.join(SRC, "components", "shell", "CabinetSidebar.tsx"),
   path.join(SRC, "components", "shell", "CabinetNav.tsx"),
   path.join(SRC, "lib", "cabinet-nav.ts"),
   // Le tunnel de création et la page d'accueil publique orientent vers
@@ -90,5 +91,70 @@ describe("Seuil cabinet — aucun saut direct depuis l'espace marchand", () => {
     expect(seuil).toContain('type="submit"');
     // Aucun <Link> vers /cabinet : ce serait exactement le saut qu'on retire.
     expect(stripComments(seuil)).not.toMatch(/href=["'`]\/cabinet/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L'AUTRE SENS DU SEUIL — et c'est celui qui manquait.
+//
+// L'entrée dans le cabinet était tenue (bloc ci-dessus) ; la sortie ne l'était
+// pas : la barre latérale portait « Retour à mon commerce », et l'écran « Aucun
+// cabinet » un bouton vers /dashboard. Une porte à sens unique n'étanche rien —
+// le compte qui possède le même numéro pour son commerce et pour son cabinet
+// repassait de l'un à l'autre en un clic, dans le sens où le contexte change
+// justement sans prévenir.
+//
+// Changer d'univers exige désormais de FERMER SA SESSION : le cookie est
+// détruit, on repasse par le hub d'aiguillage. Ces deux règles vont ensemble —
+// la seconde interdit l'impasse que la première créerait seule.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Les fichiers qui composent l'espace cabinet, vus depuis l'intérieur.
+const ESPACE_CABINET = [
+  path.join(SRC, "app", "cabinet"),
+  path.join(SRC, "components", "shell", "CabinetShell.tsx"),
+  path.join(SRC, "components", "shell", "CabinetSidebar.tsx"),
+  path.join(SRC, "components", "shell", "CabinetNav.tsx"),
+];
+
+const fichiersCabinet = walk(SRC).filter(
+  (f) => !f.endsWith(".spec.ts") && ESPACE_CABINET.some((dedans) => f.startsWith(dedans)),
+);
+
+describe("Seuil cabinet — aucune sortie latérale vers l'espace marchand", () => {
+  it("aucune destination /dashboard depuis l'espace cabinet", () => {
+    // `href="/dashboard…"` comme `redirect("/dashboard…")` : les deux mènent au
+    // même endroit, et une Server Action qui redirige est la façon la plus
+    // discrète de recâbler le raccourci qu'on vient de retirer.
+    const hits: { file: string; line: number; match: string }[] = [];
+    for (const file of fichiersCabinet) {
+      stripComments(readFileSync(file, "utf8"))
+        .split("\n")
+        .forEach((text, i) => {
+          const m = text.match(/(?:href=|redirect\()\s*["'`]\/dashboard(\/[^"'`]*)?["'`]/);
+          if (m) {
+            hits.push({ file: path.relative(SRC, file), line: i + 1, match: m[0] });
+          }
+        });
+    }
+    expect(
+      hits,
+      `Sortie directe du cabinet vers l'espace marchand — la sortie est la\nfermeture de session (logoutAction) :\n${JSON.stringify(hits, null, 2)}`,
+    ).toEqual([]);
+  });
+
+  it("la barre latérale offre bien la fermeture de session", () => {
+    // Contrepartie de la règle ci-dessus : interdire la sortie latérale sans
+    // vérifier qu'il en reste UNE ferait de l'espace cabinet un piège.
+    const barre = readFileSync(path.join(SRC, "components", "shell", "CabinetSidebar.tsx"), "utf8");
+    expect(barre).toContain("logoutAction");
+    expect(stripComments(barre)).toMatch(/<form\s+action=\{logoutAction\}>/);
+  });
+
+  it("l'écran « Aucun cabinet » n'est pas une impasse", () => {
+    // Ce layout ne rend PAS la barre latérale — sans cette assertion, retirer
+    // le lien vers /dashboard y laissait un écran dont on ne peut plus sortir.
+    const layout = readFileSync(path.join(SRC, "app", "cabinet", "layout.tsx"), "utf8");
+    expect(stripComments(layout)).toMatch(/<form\s+action=\{logoutAction\}>/);
   });
 });

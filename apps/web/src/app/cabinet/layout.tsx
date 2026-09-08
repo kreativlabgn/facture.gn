@@ -1,9 +1,9 @@
+import { logoutAction } from "@/app/(app)/actions";
 import { CabinetShell } from "@/components/shell/CabinetShell";
 import { Wordmark } from "@/components/Wordmark";
-import { ButtonLink } from "@/components/ui";
+import { Button, ButtonLink } from "@/components/ui";
 import { resolveActivePractice } from "@/lib/active-practice";
 import { requireSessionToken } from "@/lib/session";
-import { listMyOrganizations } from "@/lib/trust-api";
 
 // Route de premier niveau distincte de /dashboard — un membre de cabinet n'a
 // pas nécessairement sa propre organisation PME (PracticeMember est un concept
@@ -23,13 +23,11 @@ import { listMyOrganizations } from "@/lib/trust-api";
 // non-membre en 403 (assertPracticeAdmin, practice-access.ts).
 export default async function CabinetLayout({ children }: { children: React.ReactNode }) {
   const token = await requireSessionToken();
-  const [{ practices, active }, organizations] = await Promise.all([
-    resolveActivePractice(token),
-    // Sert uniquement à décider si « Retour à mon commerce » a un sens. Un
-    // échec ne doit pas faire tomber tout l'espace cabinet pour un lien
-    // secondaire : on retombe sur « aucune organisation », le lien disparaît.
-    listMyOrganizations(token).catch(() => []),
-  ]);
+  // Plus aucune lecture des organisations marchandes du compte : elle ne
+  // servait qu'à décider si « Retour à mon commerce » avait un sens, et ce lien
+  // n'existe plus (voir l'en-tête de CabinetSidebar). Un écran de cabinet n'a
+  // désormais aucune raison de savoir si son occupant tient aussi un commerce.
+  const { practices, active } = await resolveActivePractice(token);
 
   // Sans cabinet, il n'y a rien à naviguer : on rend l'explication seule plutôt
   // qu'une coquille dont chaque entrée mènerait à une page vide.
@@ -60,11 +58,16 @@ export default async function CabinetLayout({ children }: { children: React.Reac
                 Si un collègue a déjà créé le cabinet, demandez-lui de vous inviter : c&apos;est lui
                 qui vous y rattache, depuis l&apos;onglet Collaborateurs.
               </p>
-              {organizations.length > 0 ? (
-                <ButtonLink href="/dashboard" variant="ghost">
-                  Retour à mon commerce
-                </ButtonLink>
-              ) : null}
+              {/* La sortie de cet écran est la fermeture de session, jamais un
+                  lien vers /dashboard : l'espace cabinet est étanche dans les
+                  deux sens, et il l'est aussi quand il est vide. Le geste est
+                  offert sans condition — le proposer seulement à qui possède un
+                  commerce laissait les autres dans une impasse. */}
+              <form action={logoutAction}>
+                <Button type="submit" variant="ghost">
+                  Fermer la session
+                </Button>
+              </form>
             </div>
           </div>
         </main>
@@ -91,7 +94,6 @@ export default async function CabinetLayout({ children }: { children: React.Reac
         role: active.role,
         ordreVerified: active.ordreVerified === true,
       }}
-      aUneOrganisation={organizations.length > 0}
     >
       {children}
     </CabinetShell>
