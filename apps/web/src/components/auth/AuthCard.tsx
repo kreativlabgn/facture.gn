@@ -17,7 +17,11 @@ export function AuthCard({
   children: ReactNode;
 }) {
   return (
-    <Card>
+    // La carte porte sa PROPRE largeur. Le layout `(auth)` a dû s'élargir pour
+    // accueillir le sélecteur de profils — une grille de quatre cartes ne tient
+    // pas dans une colonne de 28rem. Sans cette contrainte ici, les trois
+    // formulaires qui passent par AuthCard se seraient étalés avec lui.
+    <Card className="mx-auto w-full max-w-md">
       <CardBody className="p-6 sm:p-7">
         <h1 className="font-display text-xl font-bold text-navy-950">{title}</h1>
         {description ? <p className="mt-2 text-sm leading-relaxed text-navy-600">{description}</p> : null}
