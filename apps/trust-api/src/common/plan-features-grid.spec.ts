@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER,
   isAdvancedCustomerManagementAllowed,
+  isPdpGatewayAllowed,
   isRoleAllowedForTier,
   maxBranchesForTier,
   maxMembersForTier,
+  PDP_GATEWAY_MIN_TIER,
   TIER_ORDER,
 } from "./plan-features-grid";
 
@@ -83,5 +85,41 @@ describe("isAdvancedCustomerManagementAllowed (H1, Grille §2 — dépend de app
 
   it("ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER vaut pro", () => {
     expect(ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER).toBe("pro");
+  });
+});
+
+describe("isPdpGatewayAllowed (ADR-107, passerelle PDP)", () => {
+  it.each(["freemium", "starter", "starter_plus", "pro"] as const)("refuse le palier %s", (tier) => {
+    expect(isPdpGatewayAllowed(tier)).toBe(false);
+  });
+
+  it.each(["enterprise", "custom"] as const)("autorise le palier %s", (tier) => {
+    expect(isPdpGatewayAllowed(tier)).toBe(true);
+  });
+
+  it("PDP_GATEWAY_MIN_TIER vaut enterprise", () => {
+    expect(PDP_GATEWAY_MIN_TIER).toBe("enterprise");
+  });
+
+  // La raison d'être du SEUIL plutôt que d'une liste ["enterprise", "custom"] :
+  // tout palier ajouté AU-DESSUS d'enterprise hérite automatiquement de l'accès,
+  // là où une liste devrait être retrouvée et complétée — et l'oublier ferait
+  // silencieusement perdre l'accès à un client qui vient de monter en gamme.
+  it("tout palier au-dessus du seuil est autorisé, sans énumération à maintenir", () => {
+    const seuil = TIER_ORDER.indexOf(PDP_GATEWAY_MIN_TIER);
+    for (const tier of TIER_ORDER.slice(seuil)) {
+      expect(isPdpGatewayAllowed(tier)).toBe(true);
+    }
+    for (const tier of TIER_ORDER.slice(0, seuil)) {
+      expect(isPdpGatewayAllowed(tier)).toBe(false);
+    }
+  });
+
+  // La passerelle est un accès DISTINCT du rôle developer_api (pro) : une clé
+  // fabriquée par un membre pour ses propres scripts n'ouvre pas la porte à un
+  // éditeur externe déposant des documents fiscaux au nom de la PME.
+  it("n'est pas ouverte par le seul rôle developer_api, disponible dès pro", () => {
+    expect(isRoleAllowedForTier("developer_api", "pro")).toBe(true);
+    expect(isPdpGatewayAllowed("pro")).toBe(false);
   });
 });
