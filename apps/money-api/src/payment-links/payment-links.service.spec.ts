@@ -48,6 +48,7 @@ describe("PaymentLinksService — checkout public (C19)", () => {
       paymentLinkUrl: "https://stub.djomy.africa/pay/djomy-ref",
       amountGnf: 100_000_000n,
       feeGateway: 1_000_000n,
+      feePlatform: 2_100_000n,
       expiresAt: new Date("2026-09-07T00:00:00.000Z"),
     });
     const service = new PaymentLinksService({} as any, prisma as any);
@@ -63,8 +64,32 @@ describe("PaymentLinksService — checkout public (C19)", () => {
       paymentLinkUrl: "https://stub.djomy.africa/pay/djomy-ref",
       amountGnf: 100_000_000n,
       feeGatewayGnf: 1_000_000n,
+      feePlatformGnf: 2_100_000n,
       expiresAt: new Date("2026-09-07T00:00:00.000Z"),
     });
+  });
+
+  // `amountGnf` n'est PAS le prix de la marchandise : InvoicesService.issue()
+  // transmet `totalTtc + platformFee`. Sans `feePlatformGnf`, le payeur ne peut
+  // pas distinguer ce qui va au commerçant de ce qui va à facture.gn — et
+  // l'écran de checkout affichait cette somme sous le libellé « Montant de la
+  // facture », ce qui était faux.
+  it("expose la commission plateforme persistée, pour que le payeur puisse la distinguer de la marchandise", async () => {
+    const prisma = createFakePrisma({
+      provider: "djomy",
+      paymentLinkUrl: "https://stub.djomy.africa/pay/djomy-ref",
+      amountGnf: 102_100_000n,
+      feeGateway: 1_429_400n,
+      feePlatform: 2_100_000n,
+      expiresAt: null,
+    });
+    const service = new PaymentLinksService({} as any, prisma as any);
+
+    const result = await service.getPublicCheckout(INVOICE_ID);
+
+    expect(result.feePlatformGnf).toBe(2_100_000n);
+    // La marchandise se retrouve par soustraction, et elle doit tomber juste.
+    expect(result.amountGnf - result.feePlatformGnf).toBe(100_000_000n);
   });
 
   it("lève NotFoundException si aucune tentative réussie n'existe pour cette facture", async () => {

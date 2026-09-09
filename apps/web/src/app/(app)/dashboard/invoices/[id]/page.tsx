@@ -4,8 +4,10 @@ import { notFound } from "next/navigation";
 import { resolveActiveOrganization } from "@/lib/active-organization";
 import { doitInterrogerLesRails, etatArbitrage } from "@/lib/financing";
 import { formatDate, formatGnf, uniteDeSaisie } from "@/lib/format";
+import { etapesDuCycle } from "@/lib/invoice-lifecycle";
 import { invoiceEventLabel, type EventTone } from "@/lib/invoice-events";
 import { hasPermission } from "@/lib/permissions";
+import { pourcentage, ventilationFrais, COMMISSION_BPS, FRAIS_PASSERELLE_BPS, type Tier } from "@/lib/plans";
 import { requireSessionToken } from "@/lib/session";
 import {
   getFinancingOptions,
@@ -15,8 +17,10 @@ import {
   type InvoiceFullDetail,
 } from "@/lib/trust-api";
 import { DisputeStatusPill, StatusPill } from "@/components/StatusPill";
+import { LifecyclePills } from "@/components/LifecyclePills";
 import { Card } from "@/components/ui";
 import { ArbitrageMarchandForm } from "./ArbitrageMarchandForm";
+import { AvoirRectificatifForm } from "./AvoirRectificatifForm";
 import {
   IssueInvoiceForm,
   RegenerateLinkForm,
@@ -61,6 +65,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
   // un 403 n'a rien à faire à l'écran.
   const { active: organization } = await resolveActiveOrganization(token);
   const role = organization?.role ?? "";
+  // Aucun appel réseau de plus : OrganizationSummary porte déjà le palier.
+  // Sans organisation active, on retombe sur le barème le plus DÉFAVORABLE au
+  // commerçant — annoncer un peu trop cher, jamais un tarif non pratiqué.
+  const palier = (organization?.commercialTier ?? "freemium") as Tier;
 
   const brouillon = invoice.status === "draft";
   const emise = invoice.issuedAt !== null;
@@ -70,6 +78,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
   const peutAnnuler =
     (invoice.status === "draft" || invoice.status === "issued") && hasPermission(role, "invoices:void");
   const peutRelancer = emise && !soldee && hasPermission(role, "invoices:relance");
+  // Un avoir corrige une facture ÉMISE : sur un brouillon il n'y a rien à
+  // corriger (le document se modifie encore), sur une annulée il n'y a plus
+  // rien à opposer. Les lignes sont indispensables — un avoir crédite des
+  // lignes, jamais un montant libre.
+  const peutAvoir =
+    emise &&
+    invoice.status !== "voided" &&
+    invoice.lines.length > 0 &&
+    hasPermission(role, "invoices:credit_note");
 
   // ── Rails de financement B2G (ADR-088/089, K4/K5) ────────────────────────
   // Le verdict d'éligibilité vient de trust-api, jamais d'une règle recopiée
@@ -108,6 +125,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
             <StatusPill status={invoice.status} />
             <DisputeStatusPill disputeStatus={invoice.disputeStatus} />
           </div>
+          {/* Le parcours LÉGAL, à côté du statut de document : « puis-je encore
+              modifier cette facture » et « où en est-elle vis-à-vis de
+              l'administration » sont deux questions distinctes. */}
+          <LifecyclePills facture={invoice} />
           <p className="text-sm text-navy-600">
             {invoice.customer ? invoice.customer.name : "Client non renseigné"}
             {invoice.customer?.nif ? ` · NIF ${invoice.customer.nif}` : ""}
@@ -132,6 +153,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
             facture reste émise et conserve son numéro tant qu&apos;elle n&apos;est pas annulée ou
             avoirée.
           </p>
+          {/* C7, ADR-034/040 — la seule correction possible d'une facture émise.
+              Le formulaire est REPLIÉ : un litige ouvert n'appelle pas
+              forcément un avoir, le désaccord peut se régler par une
+              discussion. Déplier est un geste, émettre en est un second. */}
+          {peutAvoir ? (
+            <div className="mt-4 border-t border-bad/20 pt-4">
+              <AvoirRectificatifForm invoiceId={invoice.id} lignes={invoice.lines} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -149,6 +179,23 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
           }
           ton={brouillon || peutRelancer ? "attention" : "neutre"}
         />
+      ) : null}
+
+      {/* ── Parcours légal ─────────────────────────────────────────────── */}
+      {/* Les pastilles de l'en-tête se repèrent ; ici elles s'EXPLIQUENT. Le
+          numéro de reçu DGI y figure en clair : c'est la pièce que le
+          commerçant devra produire en cas de contrôle. La section disparaît
+          quand aucune étape n'est franchie — une rangée vide inventerait un
+          signal là où il n'y a qu'une facture émise ce matin. */}
+      {etapesDuCycle(invoice).length > 0 ? (
+        <section>
+          <h2 className="mb-3 font-display text-lg font-semibold text-navy-950">Parcours légal</h2>
+          <Card>
+            <div className="p-5">
+              <LifecyclePills facture={invoice} detaille />
+            </div>
+          </Card>
+        </section>
       ) : null}
 
       {/* ── Montants ───────────────────────────────────────────────────── */}
@@ -174,6 +221,31 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
           ) : null}
         </dl>
       </Card>
+
+      {/* ── Ventilation des frais ──────────────────────────────────────── */}
+      {/* « facture.gn + Djomy » en un bloc opaque ne dit ni qui prend quoi, ni
+          combien. Trois montants distincts, en chasse fixe, sous le total.
+
+          Une PROJECTION, et elle le dit : aucune tentative de paiement n'existe
+          encore à ce stade, donc rien n'est persisté. Elle disparaît dès que la
+          facture est soldée ou annulée — les frais réellement prélevés vivent
+          alors sur la tentative, et une projection qui la contredirait serait
+          pire que pas de projection du tout.
+
+          Elle ne vaut QUE pour un règlement par lien de paiement : l'espèce et
+          le virement ne portent aucune commission (commission-grid.ts, portée).
+          Le dire évite de faire croire à un prélèvement sur un paiement en
+          liquide au comptoir. */}
+      {invoice.status !== "paid" && invoice.status !== "voided" && BigInt(invoice.totalTtc) > BigInt(0) ? (
+        <VentilationFrais
+          // Base identique à celle du serveur : totalTtc à l'émission,
+          // amountDue quand un lien est REGÉNÉRÉ sur un reste à payer
+          // (invoices.service.ts). Prendre totalTtc dans ce second cas
+          // annoncerait des frais sur une somme déjà encaissée en partie.
+          montantCentimes={invoice.status === "partially_paid" ? invoice.amountDue : invoice.totalTtc}
+          palier={palier}
+        />
+      ) : null}
 
       {/* ── Financement de la créance ──────────────────────────────────── */}
       {/* Placé juste après les montants : ce que la PME touchera, et quand,
@@ -454,6 +526,74 @@ const MARQUEUR: Record<EventTone, string> = {
   attention: "bg-amber",
   alerte: "bg-bad",
 };
+
+// Les trois montants que supporte le payeur, jamais fondus en un seul.
+// `font-mono` sur toute la colonne : ce sont des sommes à comparer chiffre à
+// chiffre, et la chasse fixe est ce qui aligne les unités.
+function VentilationFrais({ montantCentimes, palier }: { montantCentimes: string; palier: Tier }) {
+  const v = ventilationFrais(montantCentimes, palier);
+
+  return (
+    <section>
+      <h2 className="mb-1 font-display text-lg font-semibold text-navy-950">
+        Si cette facture est réglée par lien de paiement
+      </h2>
+      <p className="mb-3 text-sm text-navy-600">
+        Estimation au barème de votre palier. Un règlement en espèces ou par virement ne porte
+        aucun de ces frais.
+      </p>
+      <Card>
+        <dl className="divide-y divide-navy-50">
+          <LigneFrais
+            libelle="Montant de la marchandise"
+            aide="100 % net pour vous"
+            valeur={v.marchandise}
+            fort
+          />
+          <LigneFrais
+            libelle="Frais d'infrastructure facture.gn"
+            aide={`${pourcentage(COMMISSION_BPS[palier] ?? COMMISSION_BPS.freemium)} du montant, plafonnés`}
+            valeur={v.infrastructure}
+          />
+          <LigneFrais
+            libelle="Frais réseau Djomy"
+            // La cascade, dite plutôt que masquée : la passerelle facture sur le
+            // montant DÉJÀ majoré de notre commission, pas sur la marchandise.
+            aide={`${pourcentage(FRAIS_PASSERELLE_BPS)} du montant majoré de la commission`}
+            valeur={v.passerelle}
+          />
+          <LigneFrais libelle="Total réglé par le client" valeur={v.totalPayeur} fort />
+        </dl>
+      </Card>
+    </section>
+  );
+}
+
+function LigneFrais({
+  libelle,
+  aide,
+  valeur,
+  fort = false,
+}: {
+  libelle: string;
+  aide?: string;
+  valeur: string;
+  fort?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-3">
+      <div>
+        <dt className={`text-sm ${fort ? "font-semibold text-navy-950" : "text-navy-600"}`}>{libelle}</dt>
+        {aide ? <p className="text-xs text-navy-600">{aide}</p> : null}
+      </div>
+      <dd
+        className={`font-mono tabular-nums text-navy-950 ${fort ? "text-base font-bold" : "text-sm"}`}
+      >
+        {formatGnf(valeur)}
+      </dd>
+    </div>
+  );
+}
 
 function Montant({ libelle, valeur, fort = false }: { libelle: string; valeur: string; fort?: boolean }) {
   return (

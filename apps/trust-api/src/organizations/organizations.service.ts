@@ -622,6 +622,101 @@ export class OrganizationsService {
     }
   }
 
+  // ── Gestion d'équipe : voir et retirer les accès (RBAC V1) ────────────────
+  //
+  // inviteMember() donnait des droits depuis F14 ; rien ne permettait de voir à
+  // QUI, ni de les reprendre. Une organisation pouvait accorder un accès sans
+  // jamais pouvoir le retirer autrement qu'en base.
+  //
+  // Le `include` ne descend QUE { id, name } : la liste répond à « qui a accès,
+  // et comment le lui retirer », jamais « quel est le numéro de mes
+  // collaborateurs ». msisdn vit sur UserPhone et n'a rien à faire ici — un
+  // `include: { user: true }` en ferait un annuaire de données personnelles que
+  // personne n'a demandé.
+  //
+  // Les membres révoqués RESTENT dans la liste (aucun filtre `revokedAt`) :
+  // c'est ce qui permet de répondre « qui avait accès l'an dernier », et
+  // l'écran les distingue visuellement. Les masquer donnerait l'illusion qu'ils
+  // n'ont jamais existé — alors que la contrainte unique (organizationId,
+  // userId) fait toujours barrage à une réinvitation.
+  async listMembers(organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    return scoped.organizationMember.findMany({
+      where: { organizationId },
+      include: { user: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  // Retire l'accès d'un membre. DATE la ligne, ne la supprime jamais : la
+  // contrainte unique (organizationId, userId) est permanente (voir
+  // inviteMember()), et une ligne effacée effacerait aussi la réponse à « qui
+  // avait accès quand ».
+  async revokeMember(organizationId: string, memberId: string, requesterUserId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+
+    // Le `organizationId` du where n'est pas redondant avec le client scopé :
+    // les politiques RLS ne sont pas encore actives (rollout étape 1), et sans
+    // lui un memberId d'une AUTRE organisation serait révocable depuis ici.
+    const member = await scoped.organizationMember.findFirst({
+      where: { id: memberId, organizationId },
+    });
+    if (!member) {
+      throw new NotFoundException(`Membre ${memberId} introuvable dans l'organisation ${organizationId}`);
+    }
+    if (member.revokedAt) {
+      // Réécrire la date écraserait la vraie : le départ a eu lieu une fois.
+      throw new ConflictException(`Ce membre est déjà révoqué`);
+    }
+
+    // Security Audit 2026-08-23, finding #12 — MIROIR EXACT de la garde
+    // d'inviteMember() : @Roles("owner","admin") laisse un simple admin appeler
+    // cette route, mais si seul un owner peut DONNER le rôle admin ou approver,
+    // lui seul peut le reprendre. Sans cette symétrie, un admin dégraderait ses
+    // pairs — et le rôle owner, qu'inviteMember() ne sait même pas accorder,
+    // serait retirable par plus petit que lui.
+    if (member.role === "owner" || member.role === "admin" || member.role === "approver") {
+      // `revokedAt: null` en défense en profondeur — et c'est le seul écart
+      // assumé avec inviteMember(), qui s'en remet entièrement au garde.
+      // RolesGuard refuse déjà tout membership révoqué (404) : un demandeur
+      // révoqué n'arrive jamais ici. Mais cette ligne-ci est une décision
+      // d'AUTORISATION, et elle doit rester juste lue seule : sans la clause,
+      // un ancien owner dont l'accès a été retiré resterait « owner » aux yeux
+      // de cette méthode le jour où elle serait appelée d'ailleurs.
+      const requesterMembership = await scoped.organizationMember.findFirst({
+        where: { organizationId, userId: requesterUserId, revokedAt: null },
+      });
+      if (requesterMembership?.role !== "owner") {
+        throw new ForbiddenException(`Seul le owner peut révoquer un membre avec le rôle ${member.role}`);
+      }
+    }
+
+    // Une organisation sans owner actif est un cul-de-sac : plus personne ne
+    // peut inviter, changer de palier, ni révoquer — y compris pour réparer.
+    // On n'en sort que par une intervention en base.
+    if (member.role === "owner") {
+      const activeOwners = await scoped.organizationMember.count({
+        where: { organizationId, role: "owner", revokedAt: null },
+      });
+      if (activeOwners <= 1) {
+        throw new ForbiddenException(
+          "Impossible de révoquer le dernier propriétaire actif — nommez d'abord un autre owner",
+        );
+      }
+    }
+
+    // updateMany et non update : `where` porte alors les DEUX colonnes. Un
+    // update() par clé primaire seule rendrait le filtre organisation
+    // inexprimable, et c'est lui qui empêche la révocation croisée.
+    await scoped.organizationMember.updateMany({
+      where: { id: memberId, organizationId },
+      data: { revokedAt: new Date() },
+    });
+
+    // La ligne relue, jamais celle du updateMany (qui ne renvoie qu'un compte).
+    return scoped.organizationMember.findFirst({ where: { id: memberId, organizationId } });
+  }
+
   // H2, ADR-049 — "palier commercial gouverne l'accès aux fonctionnalités,
   // jamais dépendant de DGI" : contrairement à verifyDgi()/velocity_tier, cette
   // méthode ne lit JAMAIS dgiVerificationStatus. Aucun traitement de paiement

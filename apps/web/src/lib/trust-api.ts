@@ -211,6 +211,16 @@ export interface InvoiceListItem {
   totalTtc: string;
   certificationId: string | null;
   createdAt: string;
+
+  // Les quatre colonnes du parcours LÉGAL (voir lib/invoice-lifecycle.ts).
+  // Elles traversaient DÉJÀ l'API — InvoicesService.findAllByOrganization() ne
+  // pose aucun `select` de premier niveau, la ligne Invoice entière est
+  // sérialisée — elles n'étaient simplement pas déclarées ici. Aucune route
+  // nouvelle, aucun appel de plus : seulement la fin d'un oubli de typage.
+  disputeStatus: string;
+  validatedByAdministration: boolean;
+  etaxStatus: string | null;
+  etaxReceiptNumber: string | null;
 }
 
 export async function listInvoices(
@@ -266,6 +276,29 @@ export interface CreateCustomerInput {
   phone?: string;
   nif?: string;
   notificationChannel?: "sms" | "whatsapp" | "both";
+}
+
+// ADR-106 — vente au comptoir : renvoie le client de ce numéro, ou en crée un
+// (« Client +224XXXXXXXXX ») s'il n'existe pas encore. Le dédoublonnage est fait
+// côté serveur, sous verrou consultatif : deux caisses qui encaissent le même
+// numéro à la même seconde obtiennent la MÊME fiche, jamais deux.
+//
+// `phone` doit déjà être canonique — normaliserMsisdnGn() (lib/phone-gn.ts) est
+// le seul endroit qui normalise, et le serveur refuse tout le reste.
+export async function resolveCustomerByPhone(
+  token: string,
+  organizationId: string,
+  phone: string,
+): Promise<CustomerListItem> {
+  const response = await authenticatedFetch("/customers/resolve-by-phone", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ organizationId, phone }),
+  });
+  if (!response.ok) {
+    throw new TrustApiError("Ce numéro n'a pas pu être rattaché à un client", response.status);
+  }
+  return response.json();
 }
 
 export async function createCustomer(token: string, input: CreateCustomerInput): Promise<CustomerListItem> {
@@ -501,6 +534,12 @@ export interface InvoiceFullDetail {
   issuedAt: string | null;
   createdAt: string;
 
+  // LFI 2025 — dépôt e-TVA (SAFIG 2). Le REÇU est la preuve, pas le statut :
+  // un `transmitted` sans numéro ne prouve rien (voir invoice-lifecycle.ts et
+  // le commentaire du schéma sur etax_receipt_number).
+  etaxStatus: string | null;
+  etaxReceiptNumber: string | null;
+
   // K5, ADR-089 — état de cession de la créance. `GET /invoices/:id` renvoie la
   // ligne Invoice entière (InvoicesService.findOne n'applique aucun `select` de
   // premier niveau) : ces deux colonnes arrivaient déjà, elles n'étaient
@@ -518,6 +557,39 @@ export async function getInvoice(token: string, invoiceId: string): Promise<Invo
   const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}`, token);
   if (!response.ok) {
     throw new TrustApiError("Impossible de charger la facture", response.status);
+  }
+  return response.json();
+}
+
+// C7, ADR-034/040 — l'avoir rectificatif. Une facture émise est IMMUABLE
+// (« Une facture issued est immuable — toute correction passe par un avoir »,
+// invoices.service.ts) : c'est le seul geste qui corrige un document contesté
+// sans toucher à la séquence légale — il lui en oppose un second.
+//
+// `amount` n'est jamais envoyé : le serveur le calcule depuis
+// quantityReturned × invoiceLine.unitPrice. Le laisser au client ferait du
+// montant d'un avoir une valeur de confiance externe.
+export interface CreateCreditNoteInput {
+  reason: string;
+  lines: { invoiceLineId: string; quantityReturned: number }[];
+}
+
+export async function createCreditNote(
+  token: string,
+  invoiceId: string,
+  input: CreateCreditNoteInput,
+): Promise<{ id: string }> {
+  const response = await authenticatedFetch(
+    `/invoices/${encodeURIComponent(invoiceId)}/credit-notes`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    throw new TrustApiError(await messageDErreur(response, "Émission de l'avoir impossible"), response.status);
   }
   return response.json();
 }
@@ -1324,5 +1396,189 @@ export async function confirmCustomerLink(token: string, customerId: string): Pr
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new TrustApiError(body?.message ?? "Confirmation impossible", response.status);
+  }
+}
+
+// ── Onglets des paramètres marchands ────────────────────────────────────────
+//
+// Trois modules de trust-api servis jusqu'ici sans aucune interface. Chaque
+// fonction relaie le message du serveur tel quel quand il en donne un : il est
+// déjà écrit pour être lu par un humain (« Palier freemium limité à
+// 1 succursale(s) — upgrade requis »), et le remplacer par un texte générique
+// ferait disparaître la seule explication utile.
+
+export interface BranchItem {
+  id: string;
+  name: string;
+  type: string;
+  createdAt: string;
+}
+
+export async function listBranches(token: string, organizationId: string): Promise<BranchItem[]> {
+  const params = new URLSearchParams({ organizationId });
+  const response = await authenticatedFetch(`/branches?${params.toString()}`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les succursales", response.status);
+  }
+  return response.json();
+}
+
+export type BranchType = "boutique" | "entrepot" | "agence" | "en_ligne";
+
+export async function createBranch(
+  token: string,
+  organizationId: string,
+  input: { name: string; type: BranchType },
+): Promise<BranchItem> {
+  const response = await authenticatedFetch("/branches", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ organizationId, ...input }),
+  });
+  if (!response.ok) {
+    // 403 porte ici le refus de QUOTA, pas un refus d'accès : c'est le seul
+    // message qui explique au commerçant pourquoi le bouton n'a rien fait.
+    throw new TrustApiError(
+      await messageDErreur(response, "Création de la succursale impossible"),
+      response.status,
+    );
+  }
+  return response.json();
+}
+
+/** Le téléphone du membre n'est PAS renvoyé par le serveur, à dessein : cette
+ *  liste sert à savoir qui a accès et à le lui retirer, jamais à constituer un
+ *  annuaire de numéros. */
+export interface OrganizationMemberItem {
+  id: string;
+  userId: string;
+  role: string;
+  revokedAt: string | null;
+  createdAt: string;
+  user: { id: string; name: string };
+}
+
+export async function listOrganizationMembers(
+  token: string,
+  organizationId: string,
+): Promise<OrganizationMemberItem[]> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/members`,
+    token,
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger l'équipe", response.status);
+  }
+  return response.json();
+}
+
+export async function inviteOrganizationMember(
+  token: string,
+  organizationId: string,
+  input: { msisdn: string; role: string },
+): Promise<OrganizationMemberItem> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/members`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    throw new TrustApiError(
+      await messageDErreur(response, "Invitation impossible"),
+      response.status,
+    );
+  }
+  return response.json();
+}
+
+/** POST .../revoke et non DELETE : la ligne est DATÉE, jamais supprimée — c'est
+ *  ce qui permet de répondre « qui avait accès l'an dernier ». */
+export async function revokeOrganizationMember(
+  token: string,
+  organizationId: string,
+  memberId: string,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(memberId)}/revoke`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new TrustApiError(
+      await messageDErreur(response, "Révocation impossible"),
+      response.status,
+    );
+  }
+}
+
+/** `label` est déjà masqué côté serveur (`fg_live_••••1234`) : le secret n'est
+ *  jamais relu, il n'existe en clair qu'une fois, à la création. */
+export interface ApiKeyItem {
+  id: string;
+  label: string;
+  environment: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export async function listApiKeys(token: string, organizationId: string): Promise<ApiKeyItem[]> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/api-keys`,
+    token,
+  );
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les clés API", response.status);
+  }
+  return response.json();
+}
+
+export interface CreatedApiKey {
+  id: string;
+  secret: string;
+  environment: string;
+}
+
+export async function createApiKey(
+  token: string,
+  organizationId: string,
+  environment: "production" | "sandbox",
+): Promise<CreatedApiKey> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/api-keys`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ environment }),
+    },
+  );
+  if (!response.ok) {
+    throw new TrustApiError(
+      await messageDErreur(response, "Génération de la clé impossible"),
+      response.status,
+    );
+  }
+  return response.json();
+}
+
+export async function revokeApiKey(
+  token: string,
+  organizationId: string,
+  apiKeyId: string,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/api-keys/${encodeURIComponent(apiKeyId)}/revoke`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new TrustApiError(
+      await messageDErreur(response, "Révocation impossible"),
+      response.status,
+    );
   }
 }

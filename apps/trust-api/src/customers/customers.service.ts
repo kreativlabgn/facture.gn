@@ -109,6 +109,49 @@ export class CustomersService {
     });
   }
 
+  // ── Vente au comptoir sur un simple numéro (ADR-106) ──────────────────────
+  //
+  // Variante de create() pour un parcours où le commerçant n'a QUE le numéro de
+  // son client — la file d'une boutique n'est pas le moment de saisir une fiche.
+  //
+  // La différence avec create() est délibérée et tient en une ligne : ici on
+  // RENVOIE l'existant au lieu de créer à côté en le marquant `possibleDuplicateOf`.
+  // Le marquage est le bon comportement pour une saisie humaine (deux clients
+  // peuvent légitimement partager un téléphone — un couple, une boutique et son
+  // gérant) ; il serait le mauvais ici, où encaisser trois fois le même numéro
+  // fabriquerait trois fiches que personne n'a demandées.
+  //
+  // ATOMICITÉ — même verrou consultatif que create(), et c'est lui qui compte :
+  // deux caisses qui encaissent le même numéro à la même seconde sérialisent
+  // dessus, et la seconde lit la ligne écrite par la première. Sans ce verrou,
+  // les deux liraient « aucun client » et créeraient chacune la leur.
+  async resolveByPhone(organizationId: string, phone: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // RLS (rls-rollout.md, étape 1) — première ligne du bloc, comme create().
+      await setOrganizationScope(tx, organizationId);
+
+      // $executeRaw et non $queryRaw : pg_advisory_xact_lock() renvoie void
+      // (voir create()).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${organizationId}:${phone}`}))`;
+
+      const existant = await tx.customer.findFirst({
+        // J2, ADR-116 — une ligne anonymisée est GELÉE. On ne la réveille pas :
+        // rendre à un client le contact qu'il a demandé d'effacer serait une
+        // violation, et une fiche neuve sera simplement créée à côté.
+        where: { organizationId, phone, anonymizedAt: null },
+      });
+      if (existant) {
+        // Jamais de renommage : un client enregistré sous son vrai nom le garde.
+        // Le nom fabriqué ci-dessous n'est qu'un pis-aller pour un inconnu.
+        return existant;
+      }
+
+      return tx.customer.create({
+        data: { organizationId, name: `Client ${phone}`, phone },
+      });
+    });
+  }
+
   // C6, ADR-039 — running_balance n'est jamais stocké : agrégé à la demande sur
   // les factures encore dues (issued/partially_paid). paid/voided/draft exclus
   // (respectivement soldée, sans effet, ou pas encore une dette réelle).

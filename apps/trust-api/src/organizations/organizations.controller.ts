@@ -134,6 +134,34 @@ export class OrganizationsController {
     return this.organizationsService.inviteMember(organizationId, dto, user.id);
   }
 
+  // Onglet Gestion d'équipe des paramètres — même trio owner/admin que la route
+  // d'invitation ci-dessus : qui peut donner un accès peut voir la liste de
+  // ceux qui l'ont.
+  @Get(":id/members")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  listMembers(@Param("id") organizationId: string) {
+    return this.organizationsService.listMembers(organizationId);
+  }
+
+  // POST .../revoke et non DELETE : convention 100 % POST du dépôt (voir
+  // pending-invites/:inviteId/revoke juste dessous), et surtout la ligne est
+  // DATÉE, jamais supprimée.
+  //
+  // Trio owner/admin comme inviteMember() — la garde owner-only sur les rôles
+  // owner/admin/approver est posée DANS le service, où le rôle du membre visé
+  // est connu (le décorateur ne voit que celui du demandeur).
+  @Post(":id/members/:memberId/revoke")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  revokeMember(
+    @Param("id") organizationId: string,
+    @Param("memberId") memberId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.organizationsService.revokeMember(organizationId, memberId, user.id);
+  }
+
   // F10 — mécanisme distinct de POST :id/members ci-dessus : inviter un
   // collaborateur qui n'a PAS encore de compte facture.gn (inviteMember()
   // exige déjà un compte, résolu par UserPhone). Aucun accès accordé avant

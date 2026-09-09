@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
 import { CurrentOrganizationId } from "../common/rbac/current-organization-id.decorator";
 import { OrganizationIdSource } from "../common/rbac/organization-id-source.decorator";
+import { organizationScopedListQuerySchema } from "../common/dto/organization-scoped-list-query.dto";
 import { createBranchSchema, type CreateBranchDto } from "./dto/create-branch.dto";
 import { BranchesService } from "./branches.service";
 
@@ -22,6 +23,23 @@ export class BranchesController {
     @CurrentOrganizationId() organizationId: string,
   ) {
     return this.branchesService.create(dto, organizationId);
+  }
+
+  // Onglet Succursales des paramètres. Même trio que POST /branches : voir la
+  // structure de son organisation n'est pas un droit plus étroit que la créer.
+  //
+  // Le schéma partagé est repris en .pick() plutôt qu'en entier : take/skip y
+  // sont optionnels, et les accepter ici les ferait ignorer en silence — le
+  // quota de palier borne les succursales à quelques unités, cette liste n'a
+  // pas de seconde page. organizationId reste résolu depuis la query par
+  // RolesGuard, comme GET /customers (aucun params.id à déclarer).
+  @Get()
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
+  findAll(
+    @Query(new ZodValidationPipe(organizationScopedListQuerySchema.pick({ organizationId: true })))
+    query: { organizationId: string },
+  ) {
+    return this.branchesService.findAllByOrganization(query.organizationId);
   }
 
   // E1 — idSource "branch" (jamais "invoice", :id n'est PAS une facture ici).

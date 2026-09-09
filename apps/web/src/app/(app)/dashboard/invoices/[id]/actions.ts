@@ -5,6 +5,7 @@ import { DISBURSEMENT_METHODS } from "@/lib/financing";
 import { requireSessionToken } from "@/lib/session";
 import {
   chooseFinancing,
+  createCreditNote,
   issueInvoice,
   regeneratePaymentLink,
   sendInvoiceReminder,
@@ -177,4 +178,57 @@ export async function chooseFinancingAction(
   revalidatePath("/dashboard");
 
   return { ok: "Créance cédée. L'avance vous est versée par l'établissement financier." };
+}
+
+// ── Avoir rectificatif (C7, ADR-034/040) ────────────────────────────────────
+//
+// Le seul geste qui corrige une facture émise : elle est immuable, un avoir lui
+// oppose un second document plutôt que de la réécrire. C'est ce que le bloc
+// « Litige » de l'écran de détail ouvre.
+//
+// Le MONTANT n'est jamais envoyé : trust-api le calcule depuis
+// quantityReturned × invoiceLine.unitPrice. Ce qui remonte d'ici, ce sont des
+// QUANTITÉS et un motif — jamais une somme que le client aurait décidée.
+export async function createCreditNoteAction(
+  _prevState: InvoiceActionState,
+  formData: FormData,
+): Promise<InvoiceActionState> {
+  const invoiceId = String(formData.get("invoiceId") ?? "");
+  if (!invoiceId) {
+    return { error: "Action impossible : identifiant de facture manquant" };
+  }
+
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!reason) {
+    return { error: "Le motif de l'avoir est obligatoire — il figure sur le document remis au client" };
+  }
+
+  let lines: { invoiceLineId: string; quantityReturned: number }[];
+  try {
+    lines = JSON.parse(String(formData.get("linesJson") ?? "[]"));
+  } catch {
+    return { error: "Lignes de l'avoir illisibles" };
+  }
+  // Le formulaire filtre déjà les quantités nulles ; ce test attrape le cas où
+  // il n'en resterait AUCUNE — un avoir vide serait accepté par Zod comme un
+  // tableau, puis refusé par `.min(1)` avec un message technique.
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return { error: "Indiquez au moins une quantité à créditer" };
+  }
+
+  const token = await requireSessionToken();
+  try {
+    await createCreditNote(token, invoiceId, { reason, lines });
+  } catch (error) {
+    if (error instanceof TrustApiError) {
+      return { error: error.message };
+    }
+    return { error: "Émission de l'avoir temporairement indisponible" };
+  }
+
+  revalidatePath(`/dashboard/invoices/${invoiceId}`);
+  revalidatePath("/dashboard/invoices");
+  revalidatePath("/dashboard");
+
+  return { ok: "Avoir rectificatif émis. Il figure au journal de la facture." };
 }

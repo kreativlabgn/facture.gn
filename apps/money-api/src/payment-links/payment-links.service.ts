@@ -7,8 +7,16 @@ import type { CreatePaymentLinkResult } from "../payment-orchestrator/provider.i
 export interface PublicCheckout {
   provider: string;
   paymentLinkUrl: string | null;
+  /** ATTENTION — ce n'est PAS le prix de la marchandise. InvoicesService.issue()
+   *  transmet `totalTtc + platformFee` : ce montant porte déjà la commission
+   *  facture.gn. Le prix de la marchandise vaut `amountGnf - feePlatformGnf`. */
   amountGnf: bigint;
   feeGatewayGnf: bigint;
+  /** Commission facture.gn effectivement prélevée sur cette tentative (ADR-074).
+   *  Déjà persistée depuis l'origine ; elle n'était simplement pas exposée, ce
+   *  qui laissait le payeur devant un « Montant de la facture » qui n'en était
+   *  pas un — la marchandise et notre commission y étaient fondues. */
+  feePlatformGnf: bigint;
   expiresAt: Date | null;
 }
 
@@ -41,6 +49,7 @@ export class PaymentLinksService {
       paymentLinkUrl: attempt.paymentLinkUrl,
       amountGnf: attempt.amountGnf,
       feeGatewayGnf: attempt.feeGateway,
+      feePlatformGnf: attempt.feePlatform,
       expiresAt: attempt.expiresAt,
     };
   }
