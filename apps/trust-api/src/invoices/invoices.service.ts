@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
-import type { EmissionChannel, Prisma, PrismaClient } from "@facture-gn/db";
+import type { EmissionChannel, Prisma, PrismaClient, SaisieRegime } from "@facture-gn/db";
 import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isTransactionTimeout, isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -212,6 +212,13 @@ export class InvoicesService {
             taxRateBps,
             productId: line.productId,
             productCode: line.productCode,
+            // ADR-108 — posé EXPLICITEMENT, alors que la colonne le porte en
+            // défaut. Ce chemin est celui qui DÉFINIT la convention TTC-first
+            // (totalTtcBrut = Σ quantité × unitPrice, quelques lignes plus haut) :
+            // laisser le défaut de la base l'écrire rendrait invisible, à la
+            // lecture, que ce prix unitaire est un TTC. Le seul autre canal
+            // (PdpConsolidationService, HT_FIRST) est tout aussi explicite.
+            saisieRegime: "TTC_FIRST",
             // undefined si pas de productId (pas de champ envoyé, cohérent avec
             // referenceCurrency etc. plus haut) ; costPriceByProductId.get() peut
             // légitimement retourner null (E6, cost_price jamais renseigné) —
@@ -626,12 +633,25 @@ export class InvoicesService {
           // création du proforma/devis et sa conversion — jamais reconduit tel quel,
           // l'organisation doit le ressaisir si toujours pertinent.
           lines: {
-            create: proforma.lines.map((line: { description: string; quantity: number; unitPrice: bigint }) => ({
-              description: line.description,
-              quantity: line.quantity,
-              unitPrice: line.unitPrice,
-              taxRateBps,
-            })),
+            create: proforma.lines.map(
+              (line: {
+                description: string;
+                quantity: number;
+                unitPrice: bigint;
+                saisieRegime: SaisieRegime;
+              }) => ({
+                description: line.description,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                taxRateBps,
+                // ADR-108 — RECOPIÉ de la source, jamais forcé à TTC_FIRST. Le
+                // prix unitaire est copié tel quel juste au-dessus : le régime
+                // qui le qualifie doit suivre le même chemin, sinon la
+                // conversion d'un proforma changerait l'unité annoncée de
+                // montants inchangés.
+                saisieRegime: line.saisieRegime,
+              }),
+            ),
           },
         },
       });

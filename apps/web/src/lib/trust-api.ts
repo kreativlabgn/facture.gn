@@ -441,14 +441,25 @@ export async function issueInvoice(token: string, invoiceId: string): Promise<In
 // ancrage Merkle, cadre B2G…) dont l'écran n'affiche rien. Déclarer ici les
 // seules consommées documente ce que la page utilise réellement.
 
+/** ADR-108 — dit dans quelle unité `unitPrice` est exprimé. TTC_FIRST : parcours
+ *  marchand (PWA, USSD, agent terrain). HT_FIRST : passerelle PDP, prix hors
+ *  taxes déclarés par un ERP tiers. */
+export type SaisieRegime = "TTC_FIRST" | "HT_FIRST";
+
 export interface InvoiceLineItem {
   id: string;
   description: string;
   quantity: number;
-  /** Centimes GNF, sérialisé en chaîne — voir formatGnf. */
+  /** Centimes GNF, sérialisé en chaîne — voir formatGnf. TTC ou HT selon
+   *  `saisieRegime` : l'afficher sans lire ce champ intitule « TTC » des
+   *  montants qui peuvent être HT (ADR-108). */
   unitPrice: string;
   taxRateBps: number;
   productCode: string | null;
+  /** Absent des factures sérialisées avant l'ADR-108 : optionnel côté type,
+   *  et l'écran retombe alors sur la convention historique plutôt que de
+   *  planter sur une valeur qu'aucune API n'a encore envoyée. */
+  saisieRegime?: SaisieRegime;
 }
 
 // La trace WORM (ADR-015) : append-only, jamais modifiée ni supprimée. C'est

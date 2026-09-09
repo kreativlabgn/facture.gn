@@ -269,6 +269,13 @@ export class PdpConsolidationService {
               quantity: l.quantity,
               unitPrice: l.unitPrice,
               taxRateBps,
+              // ADR-108 — CE QUI REND LA DIVERGENCE LISIBLE. unitPrice est ici un
+              // prix HORS TAXES (standard des ERP tiers), là où le parcours
+              // marchand y met un TTC. Sans ce marquage, le rendu PDF
+              // intitulerait « P.U. TTC » un montant HT et sommerait les lignes
+              // en un « Sous-total TTC » qui vaudrait le HT — exactement le
+              // micro-écart visuel que l'ADR-108 supprime.
+              saisieRegime: "HT_FIRST",
             })),
           },
         },

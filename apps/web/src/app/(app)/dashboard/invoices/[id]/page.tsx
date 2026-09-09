@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolveActiveOrganization } from "@/lib/active-organization";
 import { doitInterrogerLesRails, etatArbitrage } from "@/lib/financing";
-import { formatDate, formatGnf } from "@/lib/format";
+import { formatDate, formatGnf, uniteDeSaisie } from "@/lib/format";
 import { invoiceEventLabel, type EventTone } from "@/lib/invoice-events";
 import { hasPermission } from "@/lib/permissions";
 import { requireSessionToken } from "@/lib/session";
@@ -218,11 +218,16 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
                     <th className="px-5 py-3 text-right text-xs font-semibold tracking-wide text-navy-600 uppercase">
                       Qté
                     </th>
+                    {/* ADR-108 — l'unité suit la provenance des lignes : TTC pour
+                        le parcours marchand, HT pour la passerelle PDP. Un
+                        « P.U. » nu laissait le lecteur additionner des HT sous
+                        un total TTC sans jamais voir pourquoi ça ne tombait
+                        pas juste. */}
                     <th className="px-5 py-3 text-right text-xs font-semibold tracking-wide text-navy-600 uppercase">
-                      P.U.
+                      P.U.{uniteDeSaisie(invoice.lines)}
                     </th>
                     <th className="px-5 py-3 text-right text-xs font-semibold tracking-wide text-navy-600 uppercase">
-                      Total
+                      Total{uniteDeSaisie(invoice.lines)}
                     </th>
                   </tr>
                 </thead>

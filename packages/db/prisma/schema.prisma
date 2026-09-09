@@ -185,6 +185,26 @@ enum InvoiceCadre {
 // agent_terrain : aligné sur RegistrationSource.agent_terrain / User.isCommercialAgent
 // (ADR-107). api : modélisé pour le futur (auth par clé API, F15) — aucun code
 // ne le pose encore, même précédent que payment_link/bank_transfer avant câblage.
+// ADR-108 — régime de saisie d'une ligne de facture. Décrit COMMENT le prix
+// unitaire a été capturé, jamais ce qu'il vaut : les totaux de la facture sont
+// scellés par la certification et ne dépendent pas de cette colonne.
+//
+// TTC_FIRST : convention historique du parcours marchand (PWA, USSD, agent
+// terrain, récurrent). unit_price est TTC, et InvoicesService.createDraft()
+// dérive HT/TVA du total par computeTaxBreakdown().
+// HT_FIRST : standard international des ERP tiers, entré par la passerelle PDP
+// (ADR-107). unit_price est HORS TAXES et la TVA est déclarée globalement par
+// le connecteur ; PdpConsolidationService écrit les totaux DÉCLARÉS sans
+// repasser par le normalisateur TTC — sans quoi le TTC certifié vaudrait le HT.
+//
+// VALEURS EN MAJUSCULES, seul enum du schéma dans ce cas : elles sont fixées
+// telles quelles par l'ADR-108 et lues par le rendu PDF comme par le front.
+// Les aligner en snake_case aurait divergé du texte approuvé.
+enum SaisieRegime {
+  TTC_FIRST
+  HT_FIRST
+}
+
 enum EmissionChannel {
   pwa
   ussd
@@ -1479,6 +1499,18 @@ model InvoiceLine {
   quantity    Int
   unitPrice   BigInt @map("unit_price")
   taxRateBps  Int    @default(0) @map("tax_rate_bps")
+
+  // ADR-108 — dit si unitPrice ci-dessus est TTC (parcours marchand) ou HT
+  // (passerelle PDP). SANS EFFET SUR LES MONTANTS : c'est un indicateur de
+  // PROVENANCE, lu par le rendu PDF et le front pour intituler correctement les
+  // colonnes et sommer les lignes dans la bonne unité. Les totaux généraux
+  // (totalHt/totalTva/totalTtc) restent ceux scellés sur la facture.
+  //
+  // Défaut TTC_FIRST : toutes les lignes antérieures à l'ADR-108 viennent du
+  // parcours marchand, la valeur est donc exacte pour l'historique — jamais un
+  // simple remplissage. Non-nullable pour cette raison : une ligne dont on
+  // ignorerait le régime serait inaffichable sans deviner.
+  saisieRegime SaisieRegime @default(TTC_FIRST) @map("saisie_regime")
 
   costPriceAtTime BigInt? @map("cost_price_at_time")
 

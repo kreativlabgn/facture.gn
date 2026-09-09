@@ -19,8 +19,8 @@ function invoiceInput(overrides: Partial<InvoiceRenderInput> = {}): InvoiceRende
     status: "issued",
     discountPct: 0,
     lines: [
-      { description: "Sac de riz 25kg", quantity: 3, unitPrice: 350_000_00n },
-      { description: "Bidon d'huile 5L", quantity: 2, unitPrice: 75_000_00n },
+      { description: "Sac de riz 25kg", quantity: 3, unitPrice: 350_000_00n, saisieRegime: "TTC_FIRST" as const },
+      { description: "Bidon d'huile 5L", quantity: 2, unitPrice: 75_000_00n, saisieRegime: "TTC_FIRST" as const },
     ],
     // valeurs indicatives — le renderer ne recalcule rien, il affiche ce qu'on lui passe
     totalHt: 1_016_949_15n,
