@@ -538,6 +538,48 @@ describe("PaymentsService — chute du ratio non-cash (G3, ADR-091)", () => {
     );
   });
 
+  // ADR-119 — LE test qui protège les marchands à caisse d'une accusation
+  // automatique. Un Z de caisse s'apure tout seul à l'émission par un règlement
+  // `cash` que personne n'a choisi. Le cron de regroupement tournant toutes les
+  // heures, ce sont ~24 règlements `cash` par jour et par marchand qui
+  // entreraient au dénominateur : le ratio non-cash s'effondrerait
+  // mécaniquement, et « chute du ratio non-cash » est précisément le motif
+  // d'ouverture d'un CommissionBypassCase. Un commerçant parfaitement honnête,
+  // dont le seul tort est d'avoir branché sa caisse, partirait en revue Squad
+  // Money.
+  it("exclut les apurements de Z de caisse des DEUX comptages du ratio", async () => {
+    const prisma = createFakePrismaForRatioDrop({
+      priorTotal: 10,
+      priorNonCash: 8,
+      recentTotal: 10,
+      recentNonCash: 3,
+    });
+    const service = new PaymentsService(
+      prisma as any,
+      createFakePaymentLinkClient() as any,
+      createFakeCommissionBypassEscalation() as any,
+    );
+
+    await service.recordCashPayment("inv-1", "org-1", { amount: 100_000n, method: "cash" as const }, "idem-zr-exclu");
+
+    // Les comptages du ratio (2 fenêtres × total/non-cash) portent tous
+    // l'exclusion. Le filtre `amount` isole le comptage « récurrence sous
+    // seuil », qui n'est pas concerné.
+    const comptagesDuRatio = prisma.payment.count.mock.calls
+      .map((appel: any[]) => appel[0].where)
+      .filter((where: any) => where.amount === undefined);
+
+    expect(comptagesDuRatio.length).toBeGreaterThan(0);
+    for (const where of comptagesDuRatio) {
+      expect(where.invoice).toEqual({ organizationId: "org-1", reportingSeriesNumber: null });
+    }
+    // L'exclusion porte AUSSI sur le numérateur, pas seulement le dénominateur :
+    // ces règlements sont `cash` aujourd'hui, mais un filtre posé d'un seul côté
+    // deviendrait faux le jour où le connecteur transmettrait un mode par ticket.
+    const numerateurs = comptagesDuRatio.filter((where: any) => where.method?.not === "cash");
+    expect(numerateurs.length).toBeGreaterThan(0);
+  });
+
   it("ignore une chute légère du ratio non-cash (< 50% relatif)", async () => {
     const prisma = createFakePrismaForRatioDrop({
       priorTotal: 10,

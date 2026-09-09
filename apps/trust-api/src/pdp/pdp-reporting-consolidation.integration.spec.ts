@@ -203,6 +203,8 @@ describe("PdpConsolidationService — Z de caisse e-Reporting (Postgres réel)",
     // Ordre imposé par les FK — toutes en onDelete: Restrict, précisément pour
     // qu'une pièce fiscale ne disparaisse jamais dans le sillage d'autre chose.
     await prisma.pdpRawTransaction.deleteMany({ where: { organizationId } });
+    // Les règlements d'apurement ADR-119 — un par Z émis.
+    await prisma.payment.deleteMany({ where: { invoice: { organizationId } } });
     await prisma.invoiceEvent.deleteMany({ where: { invoice: { organizationId } } });
     await prisma.invoiceLine.deleteMany({ where: { invoice: { organizationId } } });
     await prisma.invoice.deleteMany({ where: { organizationId } });
@@ -271,7 +273,9 @@ describe("PdpConsolidationService — Z de caisse e-Reporting (Postgres réel)",
     it("certifie le Z par le chemin d'émission légal", async () => {
       const facture = await prisma.invoice.findFirstOrThrow({ where: { organizationId } });
 
-      expect(facture.status).toBe("issued");
+      // `paid` et non `issued` — ADR-119 : les micro-ventes sont encaissées au
+      // comptoir AVANT que le Z n'existe, le règlement précède donc l'émission.
+      expect(facture.status).toBe("paid");
       // Numéro Article 23, pris dans la séquence de l'organisation.
       expect(facture.number).toMatch(/^FG-\d{4}-\d{6}$/);
       expect(facture.certificationId).toMatch(/^GN-.+-\d{4}-.+$/);
@@ -321,6 +325,61 @@ describe("PdpConsolidationService — Z de caisse e-Reporting (Postgres réel)",
       expect(lignes[0].taxRateBps).toBe(1800);
       expect(lignes[0].description).toContain(facture.reportingSeriesNumber);
       expect(lignes[0].description).toContain(`${NOMBRE_DE_TICKETS} ticket(s)`);
+    });
+
+    // ══ ADR-119 — apurement automatique ══════════════════════════════════
+    //
+    // Sans lui, chaque Z gonflerait le poste clients d'un montant que personne
+    // ne doit : les ventes ont été réglées au comptoir avant même que le
+    // document n'existe.
+    it("apure le Z intégralement dès l'émission", async () => {
+      const facture = await prisma.invoice.findFirstOrThrow({ where: { organizationId } });
+
+      expect(facture.amountDue).toBe(BigInt(0));
+      expect(facture.amountPaid).toBe(facture.totalTtc);
+      // Le trop-perçu C14 ne s'active pas : on solde exactement, jamais au-delà.
+      expect(facture.overpaymentAmount).toBe(BigInt(0));
+    });
+
+    it("écrit un règlement d'apurement lisible par l'export FEC", async () => {
+      const facture = await prisma.invoice.findFirstOrThrow({ where: { organizationId } });
+      const reglements = await prisma.payment.findMany({ where: { invoiceId: facture.id } });
+
+      expect(reglements).toHaveLength(1);
+      const [reglement] = reglements;
+      expect(reglement.amount).toBe(facture.totalTtc);
+      expect(reglement.amountCollected).toBe(facture.totalTtc);
+      // `completed` + depositType null : les deux conditions d'isSettledPayment
+      // (fec-generation.ts). Sans elles, l'apurement serait invisible de
+      // l'export comptable légal.
+      expect(reglement.status).toBe("completed");
+      expect(reglement.depositType).toBeNull();
+      // Journal de caisse, comme le ferait un Z papier.
+      expect(reglement.method).toBe("cash");
+      // Aucune commission : facture.gn n'a servi d'intermédiaire à aucune de ces
+      // ventes, les facturer serait facturer un service jamais rendu.
+      expect(reglement.platformFeeAmount).toBe(BigInt(0));
+      expect(reglement.gatewayFeeAmount).toBe(BigInt(0));
+      // Clé déterministe : c'est elle qui empêche de créditer le Z deux fois.
+      expect(reglement.idempotencyKey).toBe(`zr-apurement-${facture.id}`);
+    });
+
+    // ADR-119 point 3 — aucun lien de paiement. Un lien provoquerait un DOUBLE
+    // encaissement chez un client final qui a déjà payé au comptoir.
+    it("n'attache aucun lien de paiement au Z", async () => {
+      const facture = await prisma.invoice.findFirstOrThrow({ where: { organizationId } });
+
+      expect(facture.paymentLinkUrl).toBeNull();
+      expect(facture.paymentLinkId).toBeNull();
+      expect(facture.paymentLinkExpiresAt).toBeNull();
+    });
+
+    // Le statut `paid` ferme la porte au second encaissement sans garde
+    // supplémentaire : PAYABLE_STATUSES n'admet que `issued` et `partially_paid`.
+    it("laisse le Z hors des statuts encaissables", async () => {
+      const facture = await prisma.invoice.findFirstOrThrow({ where: { organizationId } });
+
+      expect(["issued", "partially_paid"]).not.toContain(facture.status);
     });
 
     // La piste d'audit DESCENDANTE : d'un Z certifié vers les tickets bruts.
