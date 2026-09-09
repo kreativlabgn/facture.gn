@@ -10,9 +10,13 @@ import { InvoicesService } from "../invoices/invoices.service";
 import { resolveTaxRateBps } from "../invoices/tax-regime";
 import { createPdpInvoiceSchema, type CreatePdpInvoiceDto } from "./dto/create-pdp-invoice.dto";
 import type { PdpInvoicingJobPayload } from "./pdp-invoice.service";
+import { PdpReportingNumberingService } from "./pdp-reporting-numbering.service";
+import { PDP_REPORTING_BATCH_MAX, PDP_REPORTING_FANOUT_MAX } from "./pdp.constants";
 import {
   PDP_CONSOLIDATED_METRIC,
   PDP_CONSOLIDATION_FAILURES_METRIC,
+  PDP_REPORTING_BATCHES_METRIC,
+  PDP_REPORTING_TICKETS_METRIC,
 } from "./pdp.metrics";
 
 /** Ce que le worker rend à BullMQ. `skipped` distingue un vrai travail d'une
@@ -23,6 +27,33 @@ export interface PdpConsolidationResult {
   rawTransactionId: string;
   invoiceId: string | null;
   certificationId: string | null;
+  skipped: boolean;
+}
+
+/** Charge utile d'un job ETAX_REPORTING_PERIODIC — un organizationId, rien de
+ *  plus, même discipline que PdpInvoicingJobPayload. Les lignes tampons sont la
+ *  source de vérité ; le job n'est qu'un déclencheur, et un payload gras se
+ *  périmerait au premier rejeu. */
+export interface PdpReportingJobPayload {
+  organizationId: string;
+}
+
+/** Ce qu'un passage de consolidation périodique rend.
+ *
+ *  Les totaux sont RENDUS, et pas seulement journalisés : c'est ce que le test
+ *  d'intégration compare au centime près, et ce qu'un opérateur lit dans le
+ *  retour du job pour rapprocher un Z de ses tickets sans requête SQL. */
+export interface PdpReportingConsolidationResult {
+  organizationId: string;
+  invoiceId: string | null;
+  certificationId: string | null;
+  /** ZR-YYYY-NNNNNN — la série dédiée, distincte du numéro légal Article 23. */
+  reportingSeriesNumber: string | null;
+  /** Nombre de micro-ventes embarquées dans ce Z. */
+  ticketCount: number;
+  totalHtCentimes: bigint;
+  totalVatCentimes: bigint;
+  /** true = rien à compiler pour cette organisation, aucune facture émise. */
   skipped: boolean;
 }
 
@@ -68,8 +99,11 @@ export class PdpConsolidationService {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     private readonly invoices: InvoicesService,
+    private readonly reportingNumbering: PdpReportingNumberingService,
     @InjectMetric(PDP_CONSOLIDATED_METRIC) private readonly consolidated: Counter<string>,
     @InjectMetric(PDP_CONSOLIDATION_FAILURES_METRIC) private readonly failures: Counter<string>,
+    @InjectMetric(PDP_REPORTING_BATCHES_METRIC) private readonly reportingBatches: Counter<string>,
+    @InjectMetric(PDP_REPORTING_TICKETS_METRIC) private readonly reportingTickets: Counter<string>,
   ) {}
 
   /**
@@ -167,6 +201,450 @@ export class PdpConsolidationService {
         `Document PDP ${ligne.clientUniqueId} (organisation ${organizationId}) refusé définitivement : ${motif}`,
       );
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // e-REPORTING PÉRIODIQUE (B2C / CAISSES) — ADR-107 tranche 3, LFI 2025
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Les organisations qui ont réellement des tickets à compiler.
+   *
+   * LECTURE VOLONTAIREMENT TRANSVERSE — la seule de tout ce module, et il faut
+   * savoir pourquoi elle l'est. Le cron d'éventail doit décider QUELS locataires
+   * visiter : la question précède le scope, elle ne peut pas être posée depuis
+   * l'intérieur d'un scope. Trois choses la rendent tenable :
+   *
+   *   • elle ne rend que des identifiants d'organisation. Aucun montant, aucun
+   *     client, aucune référence de marché ne traverse cette requête ;
+   *   • chaque job qu'elle produit REENTRE sous scope strict
+   *     (consolidatePeriodicReporting pose setOrganizationScope en première
+   *     ligne de chacune de ses transactions) ;
+   *   • le résultat n'est jamais rendu à un appelant HTTP — il ne sort pas du
+   *     processeur.
+   *
+   * `organization` N'EST PAS BALAYÉE. Le modèle ne porte aucune colonne
+   * « active », et lire tous les locataires pour n'en retenir qu'une poignée
+   * coûterait plus cher que le travail lui-même. « Active » se lit ici au seul
+   * sens qui compte pour ce cron : « a des lignes e-reporting en attente » —
+   * servi par l'index (organization_id, flow, status) posé pour ça.
+   *
+   * Littéraux d'enum CASTÉS (`'e_reporting'::"PdpFlow"`), jamais paramétrés : un
+   * paramètre Prisma arrive en `text`, et Postgres refuse `PdpFlow = text`.
+   */
+  async listOrganizationsWithPendingReporting(
+    limit: number = PDP_REPORTING_FANOUT_MAX,
+  ): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<{ organization_id: string }[]>`
+      SELECT DISTINCT organization_id
+      FROM pdp_raw_transaction
+      WHERE flow = 'e_reporting'::"PdpFlow"
+        AND status = 'pending'::"PdpTransactionStatus"
+      ORDER BY organization_id
+      LIMIT ${limit}
+    `;
+    return rows.map((row) => row.organization_id);
+  }
+
+  /**
+   * Compile les micro-ventes de caisse en attente d'UNE organisation en un Z de
+   * caisse unique, certifié et remis au circuit e-TVA.
+   *
+   * ── POURQUOI TROIS TRANSACTIONS ET PAS UNE ────────────────────────────────
+   * InvoicesService.issue() OUVRE SA PROPRE TRANSACTION. Envelopper la sélection
+   * verrouillée et l'émission dans un seul $transaction serait une transaction
+   * imbriquée — Prisma ne le permet pas, et le découpage n'est donc pas un
+   * choix. Chaque coupure est en revanche un point de reprise explicite :
+   *
+   *   TX-A  verrou + somme + brouillon Z + rattachement des tickets + n° ZR
+   *   TX-B  issue() — n° Article 23, Ed25519, chaînage, enfilement e-TVA
+   *   TX-C  bascule des tickets en `certified`
+   *
+   * Une interruption entre A et B laisse des tickets `pending` DÉJÀ RATTACHÉS au
+   * brouillon : le passage suivant les retrouve par ce rattachement et REPREND ce
+   * Z-là (ouvrirOuReprendreLot), au lieu d'en ouvrir un second sur les mêmes
+   * ventes. Une interruption entre B et C laisse un Z émis et des tickets encore
+   * `pending` : emettre() relit la facture, la voit hors `draft`, et reprend SA
+   * certification plutôt que d'en demander une seconde.
+   *
+   * LÈVE À DESSEIN sur panne passagère — c'est l'exception qui remonte qui
+   * déclenche le backoff de la file. L'avaler marquerait le job « completed »
+   * alors qu'aucun Z n'a été certifié.
+   */
+  async consolidatePeriodicReporting(
+    organizationId: string,
+  ): Promise<PdpReportingConsolidationResult> {
+    const lot = await this.ouvrirOuReprendreLot(organizationId);
+
+    // Rien en attente : le cas NORMAL sur une organisation sans caisse, et sur
+    // toutes celles que l'éventail vient déjà de vider. Aucune facture, aucun
+    // numéro consommé.
+    if (lot === null) {
+      return this.decrireLot(organizationId, null, null, null, 0, BigInt(0), BigInt(0), true);
+    }
+
+    try {
+      const emise = await this.emettre(lot.invoiceId, organizationId);
+      const bascules = await this.marquerLotConsolide(
+        organizationId,
+        lot.invoiceId,
+        emise.certificationId,
+      );
+
+      this.reportingBatches.inc();
+      this.reportingTickets.inc(bascules);
+      this.logger.log(
+        `Z de caisse ${lot.reportingSeriesNumber ?? "(série absente)"} certifié pour l'organisation ${organizationId} — ` +
+          `${bascules} ticket(s) consolidé(s), facture ${emise.id}, certification ${emise.certificationId}` +
+          (lot.reprise ? " (lot repris après interruption)" : ""),
+      );
+
+      return this.decrireLot(
+        organizationId,
+        emise.id,
+        emise.certificationId,
+        lot.reportingSeriesNumber,
+        bascules,
+        lot.totalHtCentimes,
+        lot.totalVatCentimes,
+        false,
+      );
+    } catch (error) {
+      const motif = motifDe(error);
+
+      // Panne passagère : AUCUNE écriture d'état. Les tickets restent `pending`,
+      // rattachés au brouillon — c'est exactement ce que la reprise ci-dessus
+      // attend. Écrire `failed` ici condamnerait tout un lot de caisse pour un
+      // Redis qui tousse ou un verrou expiré.
+      if (!estRefusDefinitif(error)) {
+        throw error;
+      }
+
+      const abandonnes = await this.marquerLotEchoue(organizationId, lot.invoiceId, motif);
+      this.failures.inc({ reason: raisonMetrique(error) });
+      throw new UnrecoverableError(
+        `Z de caisse de l'organisation ${organizationId} refusé définitivement (${abandonnes} ticket(s) abandonné(s)) : ${motif}`,
+      );
+    }
+  }
+
+  // ── TX-A : verrou, sommation, brouillon Z ─────────────────────────────────
+  //
+  // Rend `null` quand il n'y a rien à compiler — jamais une exception : une
+  // organisation sans vente de caisse depuis la dernière heure est le cas
+  // nominal, pas une anomalie.
+  private async ouvrirOuReprendreLot(organizationId: string): Promise<LotReporting | null> {
+    return this.prisma.$transaction(async (tx) => {
+      // PREMIÈRE ligne du bloc, sans exception. Ce processus n'a NI session, NI
+      // RolesGuard, NI requête HTTP : rien ne pose de scope pour lui, et une
+      // sommation de TVA qui déborderait sur un autre NIF est irrattrapable une
+      // fois certifiée.
+      await setOrganizationScope(tx, organizationId);
+
+      // ── Reprise d'un lot interrompu ────────────────────────────────────────
+      // Des tickets `pending` DÉJÀ rattachés à un brouillon : une tentative
+      // précédente s'est arrêtée entre TX-A et TX-C. On repart de SON Z.
+      const rattaches = await tx.pdpRawTransaction.findMany({
+        where: {
+          organizationId,
+          flow: "e_reporting",
+          status: "pending",
+          consolidatedInvoiceId: { not: null },
+        },
+        select: { id: true, consolidatedInvoiceId: true, totalHtCentimes: true, totalVatCentimes: true },
+        orderBy: { receivedAt: "asc" },
+      });
+
+      if (rattaches.length > 0) {
+        return this.reprendreLot(tx, organizationId, rattaches);
+      }
+
+      // ── Sélection VERROUILLÉE ──────────────────────────────────────────────
+      //
+      // SELECT ... FOR UPDATE en SQL brut : Prisma n'expose aucun verrou de
+      // ligne, et sans lui deux passages concurrents (cron rejoué, deux
+      // instances du worker) embarqueraient les mêmes tickets dans deux Z
+      // distincts — la même TVA déclarée deux fois à la DGI.
+      //
+      // Le verrou porte AUSSI le filtre organisation, comme dans
+      // InvoicesService.issue() : sous RLS appliqué la politique le ferait, mais
+      // tant qu'elle dort ce SQL brut verrouillerait sinon les tickets d'un
+      // autre locataire.
+      //
+      // `consolidated_invoice_id IS NULL` n'est pas redondant avec la reprise
+      // ci-dessus : c'est ce prédicat qui garantit qu'un ticket déjà embarqué
+      // dans un Z en cours ne peut pas être ramassé une seconde fois, y compris
+      // par une transaction qui aurait démarré avant lui.
+      //
+      // ORDER BY received_at, id : deux passages concurrents prennent les lignes
+      // dans le MÊME ordre. Sans cela, deux verrous croisés se bloquent
+      // mutuellement et Postgres tue l'un des deux en deadlock.
+      const verrouillees = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM pdp_raw_transaction
+        WHERE organization_id = ${organizationId}
+          AND flow = 'e_reporting'::"PdpFlow"
+          AND status = 'pending'::"PdpTransactionStatus"
+          AND consolidated_invoice_id IS NULL
+        ORDER BY received_at, id
+        LIMIT ${PDP_REPORTING_BATCH_MAX}
+        FOR UPDATE
+      `;
+
+      if (verrouillees.length === 0) {
+        return null;
+      }
+
+      const ids = verrouillees.map((row) => row.id);
+      const tickets = await tx.pdpRawTransaction.findMany({
+        where: { id: { in: ids }, organizationId },
+        select: {
+          id: true,
+          totalHtCentimes: true,
+          totalVatCentimes: true,
+          totalTtcCentimes: true,
+          receivedAt: true,
+        },
+        orderBy: { receivedAt: "asc" },
+      });
+
+      const { totalHtCentimes, totalVatCentimes } = sommerTickets(tickets);
+
+      // « Si la somme des transactions PENDING est supérieure à zéro » — le Z
+      // n'est émis QUE dans ce cas. Un lot intégralement à zéro (caisse de test,
+      // connecteur mal configuré) ne consomme ni numéro Article 23 ni rang de
+      // série. Les tickets restent `pending`, non rattachés : le passage suivant
+      // les reverra, et l'avertissement horaire est le signal qui fait remonter
+      // le connecteur fautif. Les basculer en `certified` serait pire — ce serait
+      // déclarer à la DGI un reporting qui n'a jamais eu lieu.
+      if (totalHtCentimes + totalVatCentimes === BigInt(0)) {
+        this.logger.warn(
+          `Organisation ${organizationId} — ${tickets.length} ticket(s) e-reporting en attente pour un total nul, aucun Z émis`,
+        );
+        return null;
+      }
+
+      const organization = await tx.organization.findFirstOrThrow({
+        where: { id: organizationId },
+        select: { regimeFiscal: true },
+      });
+
+      // Le rang de série AVANT la création : il fait partie du document, et le
+      // consommer dans cette transaction garantit qu'un rollback le rend. Un
+      // rang consommé hors transaction serait un trou définitif dans la suite
+      // des Z — voir la note de PdpReportingNumberingService sur `tx`.
+      const reportingSeriesNumber = await this.reportingNumbering.nextNumber(
+        organizationId,
+        new Date().getFullYear(),
+        tx,
+      );
+
+      const brouillon = await tx.invoice.create({
+        data: {
+          organizationId,
+          documentType: "invoice",
+          // Canal SERVEUR, jamais déclaré par l'appelant — identique au chemin
+          // unitaire : ce document vient de l'API, pas d'un comptoir.
+          emissionChannel: "api",
+          status: "draft",
+          // Ventes de caisse ANONYMES. On n'invente pas un « client divers » :
+          // Invoice.customerId est nullable précisément pour ce cas.
+          customerId: null,
+          totalHt: totalHtCentimes,
+          totalTva: totalVatCentimes,
+          totalTtc: totalHtCentimes + totalVatCentimes,
+          amountDue: totalHtCentimes + totalVatCentimes,
+          cadreFacturation: "standard",
+          reportingSeriesNumber,
+          lines: {
+            create: [
+              {
+                description: decrireSynthese(reportingSeriesNumber, tickets),
+                quantity: 1,
+                // Prix unitaire HORS TAXES — d'où le HT_FIRST juste en dessous.
+                unitPrice: totalHtCentimes,
+                taxRateBps: resolveTaxRateBps(organization.regimeFiscal),
+                // ADR-108. Le cahier demandait ce drapeau « dans la table
+                // Invoice » ; la colonne vit sur invoice_line, où elle décrit la
+                // PROVENANCE du prix unitaire ci-dessus. Sans lui, le rendu PDF
+                // intitulerait « P.U. TTC » un montant HT et afficherait un
+                // sous-total TTC qui vaudrait le HT — exactement l'écart visuel
+                // que l'ADR-108 supprime.
+                saisieRegime: "HT_FIRST",
+              },
+            ],
+          },
+        },
+        select: { id: true },
+      });
+
+      // LE RATTACHEMENT EST POSÉ ICI, SUR LE BROUILLON. C'est l'ancre
+      // d'idempotence du lot, exactement comme invoiceId l'est pour le chemin
+      // unitaire : sans elle, une interruption avant la certification laisserait
+      // un brouillon orphelin invisible et le passage suivant émettrait un
+      // SECOND Z sur les mêmes ventes — la même TVA déclarée deux fois.
+      await tx.pdpRawTransaction.updateMany({
+        where: { id: { in: ids }, organizationId },
+        data: { consolidatedInvoiceId: brouillon.id },
+      });
+
+      return {
+        invoiceId: brouillon.id,
+        reportingSeriesNumber,
+        totalHtCentimes,
+        totalVatCentimes,
+        ticketCount: tickets.length,
+        reprise: false,
+      };
+    });
+  }
+
+  // Reprise : les tickets sont déjà rattachés, le Z existe. On ne recalcule pas
+  // depuis zéro — on resomme CES tickets-là, et on relit le numéro de série sur
+  // la facture plutôt que d'en consommer un second.
+  private async reprendreLot(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    rattaches: { id: string; consolidatedInvoiceId: string | null; totalHtCentimes: bigint; totalVatCentimes: bigint }[],
+  ): Promise<LotReporting> {
+    // Tous rattachés au MÊME Z par construction (la sélection exclut les lignes
+    // déjà rattachées, donc un seul lot peut être en vol). Si ce n'était pas le
+    // cas, poursuivre mélangerait deux Z : refus définitif, pas cinq réessais.
+    const invoiceIds = [...new Set(rattaches.map((ligne) => ligne.consolidatedInvoiceId))];
+    const invoiceId = invoiceIds[0];
+    if (invoiceIds.length > 1 || invoiceId === null || invoiceId === undefined) {
+      throw new UnrecoverableError(
+        `Organisation ${organizationId} — tickets e-reporting en attente rattachés à ${invoiceIds.length} factures de synthèse distinctes, incohérence à instruire`,
+      );
+    }
+
+    const facture = await tx.invoice.findFirst({
+      where: { id: invoiceId, organizationId },
+      select: { reportingSeriesNumber: true },
+    });
+
+    const { totalHtCentimes, totalVatCentimes } = sommerTickets(rattaches);
+    this.logger.log(
+      `Organisation ${organizationId} — reprise du Z de caisse ${facture?.reportingSeriesNumber ?? invoiceId} interrompu (${rattaches.length} ticket(s))`,
+    );
+
+    return {
+      invoiceId,
+      reportingSeriesNumber: facture?.reportingSeriesNumber ?? null,
+      totalHtCentimes,
+      totalVatCentimes,
+      ticketCount: rattaches.length,
+      reprise: true,
+    };
+  }
+
+  // ── TX-C : bascule des tickets ────────────────────────────────────────────
+  //
+  // `certified` et non « CONSOLIDATED » : c'est la valeur que porte l'enum
+  // PdpTransactionStatus, dont le commentaire de schéma la définit déjà comme
+  // « facture émise et certifiée (e-invoicing) OU ligne intégrée à un Z de caisse
+  // (e-reporting) ». Inventer un synonyme aurait coûté une migration d'enum.
+  //
+  // Le `where` porte sur le rattachement, pas sur la liste d'identifiants : un
+  // ticket qu'une transaction concurrente aurait accroché à ce même Z est
+  // basculé lui aussi, et un rejeu de TX-C ne bascule rien (le filtre `pending`
+  // ne matche plus). Rend le nombre de lignes réellement basculées — c'est lui
+  // qui alimente la métrique, jamais une estimation.
+  private async marquerLotConsolide(
+    organizationId: string,
+    invoiceId: string,
+    certificationId: string,
+  ): Promise<number> {
+    return this.prisma.$transaction(async (tx) => {
+      await setOrganizationScope(tx, organizationId);
+      const bascules = await tx.pdpRawTransaction.updateMany({
+        where: { organizationId, consolidatedInvoiceId: invoiceId, status: "pending" },
+        data: {
+          status: "certified",
+          certificationId,
+          processedAt: new Date(),
+          // Un abandon antérieur repris avec succès ne doit pas laisser son motif
+          // derrière lui : failure_reason n'a de sens que sous `failed`.
+          failureReason: null,
+        },
+      });
+      return bascules.count;
+    });
+  }
+
+  // ── Abandon définitif d'un LOT ────────────────────────────────────────────
+  //
+  // NE LÈVE JAMAIS, même discipline que marquerEchec : l'appelant a déjà une
+  // erreur à remonter, et la masquer par une panne d'écriture ferait perdre la
+  // cause.
+  //
+  // C'est l'écriture la plus lourde de conséquences de tout le module : jusqu'à
+  // PDP_REPORTING_BATCH_MAX tickets passent en `failed`, état TERMINAL que plus
+  // rien ne reprend. D'où le `error` et non un `warn` — contrairement au chemin
+  // unitaire, où un abandon ne concerne qu'un document.
+  private async marquerLotEchoue(
+    organizationId: string,
+    invoiceId: string,
+    motif: string,
+  ): Promise<number> {
+    let abandonnes = 0;
+    try {
+      abandonnes = await this.prisma.$transaction(async (tx) => {
+        await setOrganizationScope(tx, organizationId);
+        const echoues = await tx.pdpRawTransaction.updateMany({
+          where: { organizationId, consolidatedInvoiceId: invoiceId, status: "pending" },
+          data: { status: "failed", failureReason: motif, processedAt: new Date() },
+        });
+
+        // Le brouillon Z existe toujours (le rattachement est posé avant
+        // l'émission) : le journal WORM a donc bien un invoice_id auquel
+        // s'accrocher, contrairement au chemin unitaire où la facture peut
+        // n'avoir jamais été créée.
+        await tx.invoiceEvent.create({
+          data: {
+            invoiceId,
+            type: "etax_transmission_failed",
+            // actorId NULL : personne n'a agi, c'est un cron.
+            metadata: { cause: motif, source: "pdp", flow: "e_reporting", tickets: echoues.count },
+          },
+        });
+
+        return echoues.count;
+      });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(
+        `Impossible de consigner l'abandon du Z de caisse ${invoiceId} (organisation ${organizationId})`,
+        err.stack ?? err.message,
+      );
+      return 0;
+    }
+
+    this.logger.error(
+      `Z de caisse ${invoiceId} (organisation ${organizationId}) abandonné définitivement — ${abandonnes} ticket(s) de caisse ne seront JAMAIS déclarés sans intervention : ${motif}`,
+    );
+    return abandonnes;
+  }
+
+  private decrireLot(
+    organizationId: string,
+    invoiceId: string | null,
+    certificationId: string | null,
+    reportingSeriesNumber: string | null,
+    ticketCount: number,
+    totalHtCentimes: bigint,
+    totalVatCentimes: bigint,
+    skipped: boolean,
+  ): PdpReportingConsolidationResult {
+    return {
+      organizationId,
+      invoiceId,
+      certificationId,
+      reportingSeriesNumber,
+      ticketCount,
+      totalHtCentimes,
+      totalVatCentimes,
+      skipped,
+    };
   }
 
   // ── Création du brouillon, LIÉ DANS LA MÊME TRANSACTION ────────────────────
@@ -501,6 +979,69 @@ type LigneTampon = {
   totalTtcCentimes: bigint;
   payload: unknown;
 };
+
+/** Un lot de caisse en vol : le Z ouvert, et ce qu'il embarque. Type local, comme
+ *  LigneTampon ci-dessus — les helpers n'ont besoin que de ça, et les tests
+ *  unitaires en deviennent lisibles. */
+type LotReporting = {
+  invoiceId: string;
+  reportingSeriesNumber: string | null;
+  totalHtCentimes: bigint;
+  totalVatCentimes: bigint;
+  ticketCount: number;
+  /** true = lot repris après une interruption, jamais ouvert par ce passage. */
+  reprise: boolean;
+};
+
+/**
+ * La sommation du lot. C'est LA ligne de code que le cahier des charges décrit,
+ * et tout y est délibéré.
+ *
+ * BigInt(0) EN AMORCE, JAMAIS LE LITTÉRAL `0n` — discipline de bout en bout du
+ * module (voir pdp-amounts.ts) : trust-api compile en ES2022, mais un helper qui
+ * migrerait vers apps/web (cible ES2017) se transformerait en erreur de syntaxe.
+ *
+ * ET SURTOUT : AUCUN NOMBRE FLOTTANT N'INTERVIENT, à aucun moment. Les colonnes
+ * sont des BIGINT Postgres, Prisma les rend en bigint JavaScript, et l'addition
+ * reste entière du premier au dernier ticket. Un `reduce` sur des `Number`
+ * dériverait au-delà de 2^53 centimes — soit ~90 milliards de GNF, un chiffre
+ * d'affaires de caisse annuel parfaitement atteignable — et la dérive serait
+ * SIGNÉE dans le hash de certification, donc indétectable après coup.
+ *
+ * On somme les colonnes TYPÉES, pas les payloads archivés. Les deux sont
+ * équivalents (les colonnes sont la projection produite par toCentimes() à
+ * l'ingestion, sans flottant intermédiaire), mais rejouer 5 000 payloads dans Zod
+ * coûterait le lot entier si UN seul ticket avait été déposé sous une version
+ * antérieure du contrat — un centime perdu vaut mieux qu'un Z perdu, et ici on ne
+ * perd même pas le centime.
+ */
+function sommerTickets(
+  tickets: { totalHtCentimes: bigint; totalVatCentimes: bigint }[],
+): { totalHtCentimes: bigint; totalVatCentimes: bigint } {
+  let totalHtCentimes = BigInt(0);
+  let totalVatCentimes = BigInt(0);
+  for (const ticket of tickets) {
+    totalHtCentimes += ticket.totalHtCentimes;
+    totalVatCentimes += ticket.totalVatCentimes;
+  }
+  return { totalHtCentimes, totalVatCentimes };
+}
+
+/** Le libellé de l'unique ligne du Z. Il porte le rang de série et les bornes
+ *  réelles du lot — c'est ce que lit un contrôleur qui rapproche le Z des tickets,
+ *  et la seule information de périmètre visible sur le PDF.
+ *
+ *  Les bornes sont les dates de RÉCEPTION par la passerelle, pas les dates
+ *  d'émission déclarées par l'ERP : ce sont les seules dont nous répondons. */
+function decrireSynthese(
+  reportingSeriesNumber: string,
+  tickets: { receivedAt: Date }[],
+): string {
+  const bornes = tickets.map((ticket) => ticket.receivedAt.getTime());
+  const debut = new Date(Math.min(...bornes)).toISOString();
+  const fin = new Date(Math.max(...bornes)).toISOString();
+  return `Ventes de caisse consolidées (e-Reporting ${reportingSeriesNumber}) — ${tickets.length} ticket(s), du ${debut} au ${fin}`;
+}
 
 /**
  * Refus DÉFINITIF = rejouer à l'identique donnera le même refus.
