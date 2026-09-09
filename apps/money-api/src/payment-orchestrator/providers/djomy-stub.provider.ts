@@ -2,13 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import type { PaymentProviderName } from "@facture-gn/db";
 import type {
+  ChargeMobileMoneyRequest,
+  ChargeMobileMoneyResult,
   CreatePaymentLinkRequest,
   CreatePaymentLinkResult,
   NormalizedWebhookResult,
   PaymentProvider,
   VerifyTransactionResult,
 } from "../provider.interface";
-
 const PAYMENT_LINK_TTL_DAYS = 30; // DAT §config : payment_link_ttl_days
 // 1,4% — taux réel confirmé (corrige le 1% initialement "annoncé" d'ADR-072).
 // Djomy applique un barème dégressif par volume, jamais modélisé ici faute de
@@ -44,8 +45,41 @@ export class DjomyStubProvider implements PaymentProvider {
     };
   }
 
-  async verifyTransaction(providerRef: string): Promise<VerifyTransactionResult> {
-    return { status: "success", providerRef, settledAt: new Date() };
+  // Débit poussé (Chantier 3) — l'autre moitié du parcours Mobile Money : ici
+  // facture.gn tient le numéro et demande à Djomy de solliciter le téléphone,
+  // au lieu de rediriger le payeur vers une page hébergée.
+  //
+  // MÊME TAUX que createPaymentLink, et calculé sur le même montant : le canal
+  // d'encaissement ne change pas le barème du gateway. Deux calculs de frais
+  // qui divergeraient selon le bouton cliqué feraient mentir l'écran de
+  // récapitulatif, qui est rendu AVANT que ce choix soit fait.
+  async chargeMobileMoney(request: ChargeMobileMoneyRequest): Promise<ChargeMobileMoneyResult> {
+    if (this.simulatedDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.simulatedDelayMs));
+    }
+
+    // TODO(Djomy réel, ADR-072) : POST /collect puis /confirm_otp — Djomy.africa
+    // expose le débit Orange Money et MTN MoMo Guinée sur le même endpoint, le
+    // réseau étant déduit du préfixe. Stub déterministe faute de credentials
+    // sandbox ; le contrat de sortie ne bougera pas à la bascule.
+    this.logger.log(`Débit Mobile Money simulé (${request.operator}) pour ${request.invoiceId}`);
+
+    return {
+      providerRef: `djomy-stub-charge-${request.idempotencyKey}`,
+      // `pending` et JAMAIS `success` : un débit Mobile Money n'est acquis
+      // qu'une fois le code composé sur le téléphone. Le stub ne prend pas
+      // cette liberté — le webhook reste seul à faire passer la facture à
+      // `paid`, exactement comme en production.
+      status: "pending",
+      feeGatewayGnf: (request.amountGnf * DJOMY_GATEWAY_FEE_BPS) / 10_000n,
+      instruction:
+        request.operator === "orange_money"
+          ? "Composez #144# sur votre téléphone puis validez le paiement avec votre code secret Orange Money."
+          : "Une demande de paiement MTN MoMo vient d'être envoyée sur votre téléphone. Validez-la avec votre code secret.",
+    };
+  }
+
+  async verifyTransaction(providerRef: string): Promise<VerifyTransactionResult> {    return { status: "success", providerRef, settledAt: new Date() };
   }
 
   // TODO(Djomy réel, ADR-075) : remplacer par la vraie vérification HMAC de Djomy
