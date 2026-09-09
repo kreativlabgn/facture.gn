@@ -30,6 +30,19 @@ export const PDP_QUEUE = "pdp-ingestion";
  *  précisément l'agrégation qui est demandée à la DGI. */
 export const ETAX_INVOICING_UNITARY = "etax-invoicing-unitary";
 
+/** Flux e-reporting (B2C/caisses) : compilation PÉRIODIQUE des lignes de caisse
+ *  en un rapport global, JAMAIS un job par micro-vente.
+ *
+ *  NOM RÉSERVÉ, SANS PRODUCTEUR À CE JOUR — et c'est délibéré : l'ingestion
+ *  n'enfile rien pour ce flux (voir PdpInvoiceService.ingest, « Aiguillage »),
+ *  ses lignes attendent en `pending` que le cron de regroupement les reprenne.
+ *  La constante existe pour que ce cron, le jour où il sera écrit, pose un nom
+ *  que le processeur RECONNAÎT. Sans elle son premier job tomberait sur la
+ *  branche « type inconnu » et mourrait en UnrecoverableError — un Z de caisse
+ *  perdu sans réessai, précisément le piège qu'ETAX_QUEUE tend déjà (voir le
+ *  commentaire de PDP_QUEUE, raison n° 1). */
+export const ETAX_REPORTING_PERIODIC = "etax-reporting-periodic";
+
 /** Profil d'échec, calqué sur ETAX_JOB_OPTIONS : même guichet en bout de chaîne,
  *  donc même budget de réessais. removeOnFail généreux à dessein — un job mort
  *  est un document fiscal d'un client tiers resté sans suite, le garder permet

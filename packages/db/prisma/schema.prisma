@@ -2061,8 +2061,15 @@ model PdpRawTransaction {
 
   apiKeyId String @map("api_key_id")
 
-  // Renseignés par le worker e-invoicing une fois la facture réellement certifiée.
-  // @unique sur invoiceId : une facture certifiée ne répond QUE d'un document ERP.
+  // invoiceId est posé par le worker e-invoicing DÈS LA CRÉATION DU BROUILLON,
+  // dans la même transaction — pas à la certification. C'est l'ancre
+  // d'idempotence du worker : un crash entre la création et l'émission laisserait
+  // sinon un brouillon orphelin invisible, et le rejeu du job émettrait DEUX
+  // factures certifiées pour un seul document ERP. Au rejeu, le lien déjà présent
+  // fait reprendre la facture existante (PdpConsolidationService.emettre).
+  // certificationId, lui, n'arrive qu'à l'émission réussie.
+  // @unique sur invoiceId : une facture ne répond QUE d'un document ERP — la base
+  // refuse qu'un second dépôt s'accroche à la même.
   invoiceId       String? @unique @map("invoice_id")
   certificationId String? @map("certification_id")
 

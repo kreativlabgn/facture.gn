@@ -25,3 +25,18 @@ export const PDP_DUPLICATES_METRIC = "trust_api_pdp_duplicates_total";
  *  rattrapage ne le reprend pas. C'est exactement le trou que la ligne restée
  *  en `pending` permet de retrouver. */
 export const PDP_ENQUEUE_FAILURES_METRIC = "trust_api_pdp_enqueue_failed_total";
+
+/** Documents e-invoicing menés jusqu'à la facture certifiée par le worker.
+ *
+ *  Le pendant de PDP_DOCUMENTS_INGESTED_METRIC en SORTIE : l'écart entre les
+ *  deux, à flux `e_invoicing` constant, est le nombre de documents encore en
+ *  vol — file en retard, worker arrêté, ou lignes bloquées en `pending`. */
+export const PDP_CONSOLIDATED_METRIC = "trust_api_pdp_consolidated_total";
+
+/** Consolidations abandonnées DÉFINITIVEMENT, par cause (`reason`).
+ *
+ *  Ne compte QUE les refus définitifs — jamais une panne passagère, que BullMQ
+ *  rejoue et qui ne laisse aucune trace ici. Chaque incrément correspond donc à
+ *  une ligne tampon passée en `failed`, c'est-à-dire à un document fiscal d'un
+ *  client tiers qui ne sera JAMAIS certifié sans intervention. */
+export const PDP_CONSOLIDATION_FAILURES_METRIC = "trust_api_pdp_consolidation_failed_total";
