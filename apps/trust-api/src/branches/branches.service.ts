@@ -41,6 +41,27 @@ export class BranchesService {
     });
   }
 
+  // L'onglet Succursales des paramètres créait à l'aveugle : POST /branches et
+  // GET /branches/:id existaient, aucune liste. Sans elle, un commerçant ne peut
+  // ni voir ce qu'il a déjà, ni savoir combien de son quota il a consommé.
+  //
+  // Aucune pagination, contrairement à CustomersService : le quota de palier
+  // plafonne les succursales à un ordre de grandeur d'unités (grille §2), une
+  // page n'aurait jamais de seconde page.
+  //
+  // Le `where` porte organizationId EN PLUS du client scopé : les politiques RLS
+  // ne sont pas encore actives (rollout étape 1) et le rôle applicatif possède
+  // les tables — le filtre applicatif reste aujourd'hui la seule isolation réelle.
+  async findAllByOrganization(organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    return scoped.branch.findMany({
+      // createdAt ASC : la liste sert à se repérer dans SA structure, dans
+      // l'ordre où elle a été bâtie — pas à mettre en avant la dernière créée.
+      where: { organizationId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
   // E1, ADR-037 — totalRevenue n'est jamais stocké : agrégé à la demande sur les
   // VRAIES factures (documentType "invoice", jamais proforma/devis, qui ne
   // constituent jamais un CA réel) déjà facturées (issued/partially_paid/paid —

@@ -18,6 +18,11 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
     null,
   );
   const [lines, setLines] = useState<LineDraft[]>([{ ...EMPTY_LINE }]);
+  // Le choix d'une fiche client l'emporte sur le champ téléphone (voir
+  // actions.ts). Le champ est donc neutralisé plutôt que laissé actif à ne
+  // rien faire : un champ qu'on remplit sans effet est un piège, pas une
+  // liberté.
+  const [customerId, setCustomerId] = useState("");
 
   const totalGnf = useMemo(
     () =>
@@ -63,7 +68,8 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
           <select
             id="customerId"
             name="customerId"
-            defaultValue=""
+            value={customerId}
+            onChange={(event) => setCustomerId(event.target.value)}
             className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
           >
             <option value="">Facture anonyme</option>
@@ -73,6 +79,33 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* ADR-106 — vente au comptoir : plus besoin d'une fiche client
+            complète. Neuf chiffres suffisent ; le client est retrouvé s'il
+            existe, créé sinon, sans jamais fabriquer un doublon. */}
+        <div className="mb-4">
+          <label
+            htmlFor="customerPhone"
+            className="mb-1.5 block font-sans text-[11px] font-semibold tracking-wide text-navy-950 uppercase"
+          >
+            Ou numéro de téléphone du client
+          </label>
+          <input
+            id="customerPhone"
+            name="customerPhone"
+            type="tel"
+            inputMode="numeric"
+            autoComplete="off"
+            disabled={customerId !== ""}
+            placeholder="622 00 00 00"
+            className="min-h-[44px] w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 font-mono text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none disabled:bg-navy-50 disabled:text-navy-600"
+          />
+          <p className="mt-1 text-xs text-navy-600">
+            {customerId !== ""
+              ? "Une fiche client est déjà sélectionnée."
+              : "Le client sera retrouvé s'il existe déjà, sinon créé sous ce numéro."}
+          </p>
         </div>
 
         <div className="mb-4">

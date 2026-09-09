@@ -31,16 +31,28 @@ export default async function CheckoutPage({ params }: { params: Promise<Params>
 
 function CheckoutSummary({ checkout }: { checkout: NonNullable<Awaited<ReturnType<typeof fetchPublicCheckout>>> }) {
   const amount = BigInt(checkout.amountGnf);
-  const fee = BigInt(checkout.feeGatewayGnf);
-  const total = amount + fee;
+  const feeGateway = BigInt(checkout.feeGatewayGnf);
+  const feePlatform = BigInt(checkout.feePlatformGnf);
+  const total = amount + feeGateway;
+  // `amountGnf` porte DÉJÀ la commission facture.gn : la marchandise, c'est ce
+  // qui reste quand on la retire. L'ancienne ligne « Montant de la facture »
+  // affichait la somme des deux sous le nom de la première — le payeur voyait
+  // un prix et en réglait un autre.
+  const marchandise = amount - feePlatform;
   const expired = checkout.expiresAt !== null && new Date(checkout.expiresAt) < new Date();
 
   return (
     <div className="rounded-2xl border border-navy-100 bg-white p-6">
       <p className="mb-6 font-display text-lg font-bold text-navy-950">Paiement</p>
+      {/* Les trois montants sont RELUS de la tentative de paiement, jamais
+          recalculés depuis le barème : ce qui est affiché est ce qui a été
+          facturé, pas ce que la grille prévoit aujourd'hui. Un barème qui
+          changerait entre la création du lien et son règlement ne doit pas
+          réécrire après coup ce que le payeur voit. */}
       <dl className="space-y-3">
-        <Row label="Montant de la facture" value={formatGnf(checkout.amountGnf)} />
-        <Row label="Frais de paiement" value={formatGnf(checkout.feeGatewayGnf)} />
+        <Row label="Montant de la marchandise" value={formatGnf(marchandise.toString())} />
+        <Row label="Frais d'infrastructure facture.gn" value={formatGnf(checkout.feePlatformGnf)} />
+        <Row label="Frais réseau Djomy" value={formatGnf(checkout.feeGatewayGnf)} />
         <div className="border-t border-navy-100 pt-3">
           <Row label="Total à payer" value={formatGnf(total.toString())} bold />
         </div>

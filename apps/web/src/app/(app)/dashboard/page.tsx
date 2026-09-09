@@ -9,6 +9,7 @@ import { TrustApiError, getTrustScore, listInvoices } from "@/lib/trust-api";
 import { InvoiceList } from "@/components/data/InvoiceList";
 import { KpiRow, type Kpi } from "@/components/data/KpiRow";
 import { ButtonLink } from "@/components/ui";
+import { VenteComptoirForm } from "./VenteComptoirForm";
 
 export const metadata: Metadata = { title: "Accueil — facture.gn" };
 
@@ -79,6 +80,14 @@ export default async function DashboardHomePage() {
       </div>
 
       <KpiRow items={kpis} />
+
+      {/* ADR-106 — la vente au comptoir en une rangée, avant la liste : c'est
+          le geste le plus fréquent d'une boutique, il passe donc avant la
+          consultation. Gaté par invoices:issue (owner/admin/cashier) et non par
+          canEmit : ce bloc ÉMET dans la foulée, il ne prépare pas un brouillon.
+          Le proposer à un rôle qui ne peut que créer mènerait à un 403 après la
+          saisie — la pire place pour l'apprendre. */}
+      {hasPermission(organization.role, "invoices:issue") ? <VenteComptoirForm /> : null}
 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-base font-semibold text-navy-950">Factures récentes</h2>

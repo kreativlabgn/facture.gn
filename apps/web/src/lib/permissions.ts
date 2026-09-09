@@ -35,12 +35,16 @@ export type Permission =
   | "invoices:void"
   | "invoices:relance"
   | "invoices:financing"
+  | "invoices:credit_note"
   | "customers:read"
   | "customers:create"
   | "customers:merge"
   | "products:read"
   | "organization:read"
   | "organization:trust_score"
+  | "organization:branches"
+  | "organization:members"
+  | "organization:api_keys"
   | "payments:record";
 
 const PERMISSION_ROLES: Record<Permission, readonly OrganizationRole[]> = {
@@ -68,6 +72,12 @@ const PERMISSION_ROLES: Record<Permission, readonly OrganizationRole[]> = {
   // de financedByPartnerId bloque définitivement tout second financement).
   // cashier en est absent alors qu'il peut émettre : encaisser n'est pas céder.
   "invoices:financing": ["owner", "admin"],
+  // credit-notes.controller.ts — POST /invoices/:id/credit-notes,
+  // @Roles("owner","admin","cashier") : "portée monétaire similaire, action du
+  // staff au comptoir". C'est le trio d'invoices:issue, PAS celui d'invoices:void :
+  // un avoir ne casse pas la séquence légale, il la prolonge par un second
+  // document. C7/ADR-034 — la correction d'une facture émise ne passe que par là.
+  "invoices:credit_note": ["owner", "admin", "cashier"],
   // customers.controller.ts — GET /customers, GET /customers/:id
   "customers:read": ["owner", "admin", "accountant_internal", "cashier", "field_agent"],
   // customers.controller.ts — POST /customers
@@ -85,6 +95,26 @@ const PERMISSION_ROLES: Record<Permission, readonly OrganizationRole[]> = {
   "organization:read": ["owner", "admin"],
   // organizations.controller.ts — GET /organizations/:id/trust-score (E8)
   "organization:trust_score": ["owner", "admin"],
+  // branches.controller.ts — GET /branches et POST /branches, trio ÉLARGI
+  // comme POST /invoices : structurer son organisation n'est pas un acte
+  // financier. Le QUOTA de palier est appliqué en plus côté trust-api, et son
+  // message d'erreur est la seule explication utile — jamais recopié ici.
+  "organization:branches": ["owner", "admin", "accountant_internal", "cashier", "field_agent"],
+  // organizations.controller.ts — GET/POST :id/members, POST .../revoke : tous
+  // @Roles("owner","admin"). Donner ou retirer un accès est une élévation de
+  // privilège. La garde owner-only sur les rôles owner/admin/approver vit DANS
+  // le service (le rôle du membre visé n'est pas connu du décorateur) — elle
+  // n'est donc pas modélisable ici, et l'API reste seule juge.
+  "organization:members": ["owner", "admin"],
+  // api-keys.controller.ts — @Roles("owner","admin","developer_api"). La seule
+  // permission de developer_api dans toute la coquille.
+  //
+  // Le PALIER n'est pas modélisé ici, et ce n'est pas un oubli : trust-api
+  // n'impose aucun palier à la CRÉATION d'une clé (api-keys.service.ts). Le
+  // seuil Enterprise (PDP_GATEWAY_MIN_TIER) mord au moment de l'USAGE, dans
+  // PdpApiKeyAuthGuard. Bloquer la génération ici afficherait une barrière que
+  // le serveur n'applique pas.
+  "organization:api_keys": ["owner", "admin", "developer_api"],
   // payments.controller.ts — POST /payments, /deposit, /bank-transfer. Aucun
   // écran web ne consomme encore ces routes (voir nav.ts) ; la permission est
   // modélisée parce que c'est la SEULE que delivery_driver possède, et que

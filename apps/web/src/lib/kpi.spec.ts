@@ -10,6 +10,13 @@ function invoice(overrides: Partial<InvoiceListItem>): InvoiceListItem {
     totalTtc: "0",
     certificationId: null,
     createdAt: "2026-09-01T00:00:00.000Z",
+    // Les quatre colonnes du parcours légal : une facture ordinaire n'en porte
+    // aucune. Les KPI de fenêtre ne les lisent pas — elles sont ici pour que le
+    // gabarit reste une InvoiceListItem complète.
+    disputeStatus: "none",
+    validatedByAdministration: false,
+    etaxStatus: null,
+    etaxReceiptNumber: null,
     ...overrides,
   };
 }

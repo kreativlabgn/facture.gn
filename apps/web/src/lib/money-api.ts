@@ -19,8 +19,16 @@ export class MoneyApiError extends Error {
 export interface PublicCheckout {
   provider: string;
   paymentLinkUrl: string | null;
+  /** ATTENTION — ce n'est PAS le prix de la marchandise. InvoicesService.issue()
+   *  transmet `totalTtc + platformFee` : ce montant porte déjà la commission
+   *  facture.gn. Le prix de la marchandise vaut `amountGnf - feePlatformGnf`. */
   amountGnf: string;
   feeGatewayGnf: string;
+  /** Commission facture.gn effectivement prélevée sur CETTE tentative. Déjà
+   *  persistée depuis l'origine (PaymentProviderAttempt.fee_platform), elle
+   *  n'était simplement pas exposée — d'où un « Montant de la facture » qui
+   *  n'en était pas un. */
+  feePlatformGnf: string;
   expiresAt: string | null;
 }
 

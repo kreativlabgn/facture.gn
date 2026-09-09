@@ -2,6 +2,7 @@ import Link from "next/link";
 import { formatDate, formatGnf } from "@/lib/format";
 import type { InvoiceListItem } from "@/lib/trust-api";
 import { StatusPill } from "@/components/StatusPill";
+import { LifecyclePills } from "@/components/LifecyclePills";
 import { Card } from "@/components/ui";
 
 // Liste de factures, extraite de l'accueil pour être partagée avec l'onglet
@@ -45,9 +46,15 @@ export function InvoiceList({
                 <span className="font-mono text-xs text-navy-600">{invoice.number ?? "Brouillon"}</span>
                 <span className="text-xs text-navy-600">{formatDate(invoice.createdAt)}</span>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5">
                 <span className="font-mono text-sm font-bold text-navy-950">{formatGnf(invoice.totalTtc)}</span>
                 <StatusPill status={invoice.status} />
+                {/* Le parcours légal se lit À CÔTÉ du statut de document, jamais
+                    à sa place : « Payée » et « Déposée » ne répondent pas à la
+                    même question. Le retour à la ligne est autorisé — sur un
+                    téléphone, quatre pastilles passent dessous plutôt que de
+                    comprimer le montant jusqu'à l'illisible. */}
+                <LifecyclePills facture={invoice} />
               </div>
             </>
           );

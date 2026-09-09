@@ -1228,3 +1228,178 @@ describe("OrganizationsService — rotation de clé (E3, ADR-114)", () => {
     expect(signingKeyService.getKeyStatus).toHaveBeenCalledWith("org-1");
   });
 });
+
+// ── Gestion d'équipe : lister et retirer un accès (RBAC V1) ─────────────────
+//
+// inviteMember() existait depuis F14 ; rien ne permettait de voir QUI est
+// membre, ni de retirer l'accès accordé. Une organisation pouvait donner des
+// droits sans jamais les reprendre.
+describe("OrganizationsService.listMembers — annuaire des accès", () => {
+  function fauxPrisma(membres: any[] = []) {
+    return auClientScope({
+      organizationMember: { findMany: vi.fn().mockResolvedValue(membres) },
+    });
+  }
+
+  it("liste les membres de l'organisation avec le nom du porteur", async () => {
+    const prisma = fauxPrisma([
+      { id: "m-1", userId: "u-1", role: "owner", revokedAt: null, user: { id: "u-1", name: "Mariama Diallo" } },
+    ]);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    const result = await service.listMembers("org-1");
+
+    expect(prisma.organizationMember.findMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1" },
+      include: { user: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(result[0].user.name).toBe("Mariama Diallo");
+  });
+
+  // Le téléphone n'est PAS remonté : la liste sert à savoir qui a accès et à
+  // le retirer, jamais à constituer un annuaire de numéros — msisdn est une
+  // donnée personnelle, et `include` est le seul endroit qui décide.
+  it("ne remonte jamais le téléphone du membre", async () => {
+    const prisma = fauxPrisma();
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await service.listMembers("org-1");
+
+    const [{ include }] = prisma.organizationMember.findMany.mock.calls[0];
+    expect(include.user.select).toEqual({ id: true, name: true });
+  });
+});
+
+describe("OrganizationsService.revokeMember — retrait d'un accès", () => {
+  function fauxPrisma(
+    opts: { membre?: any; ownersActifs?: number } = {},
+    demandeur: any = { role: "owner" },
+  ) {
+    const prisma: any = auClientScope({
+      organizationMember: {
+        // Deux lectures distinctes : le membre visé (par id) et le demandeur
+        // (par userId). findFirst est appelé avec un `where` différent à chaque
+        // fois — le faux discrimine dessus plutôt que sur l'ordre d'appel, qui
+        // se casserait au premier réarrangement du service.
+        findFirst: vi.fn().mockImplementation(({ where }: any) => {
+          if (where.id) {
+            return Promise.resolve(
+              "membre" in opts
+                ? opts.membre
+                : { id: "m-2", organizationId: "org-1", userId: "u-2", role: "cashier", revokedAt: null },
+            );
+          }
+          return Promise.resolve(demandeur ? { organizationId: "org-1", ...demandeur } : null);
+        }),
+        count: vi.fn().mockResolvedValue(opts.ownersActifs ?? 2),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+    return prisma;
+  }
+
+  it("date la ligne au lieu de la supprimer", async () => {
+    const prisma = fauxPrisma();
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await service.revokeMember("org-1", "m-2", "u-owner");
+
+    const [appel] = prisma.organizationMember.updateMany.mock.calls[0];
+    expect(appel.where).toEqual({ id: "m-2", organizationId: "org-1" });
+    expect(appel.data.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it("refuse un membre appartenant à une AUTRE organisation", async () => {
+    const prisma = fauxPrisma({ membre: null });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await expect(service.revokeMember("org-1", "m-inconnu", "u-owner")).rejects.toThrow(/introuvable/i);
+    expect(prisma.organizationMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuse un membre déjà révoqué — jamais deux dates pour un seul départ", async () => {
+    const prisma = fauxPrisma({
+      membre: { id: "m-2", organizationId: "org-1", userId: "u-2", role: "cashier", revokedAt: new Date() },
+    });
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await expect(service.revokeMember("org-1", "m-2", "u-owner")).rejects.toThrow(/déjà révoqué/i);
+    expect(prisma.organizationMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Miroir EXACT de la garde d'inviteMember() (Security Audit finding #12) :
+  // si seul un owner peut DONNER le rôle admin/approver, lui seul peut le
+  // reprendre. Sans cette symétrie, un admin dégraderait ses pairs.
+  it("refuse à un simple admin de révoquer un admin", async () => {
+    const prisma = fauxPrisma(
+      { membre: { id: "m-3", organizationId: "org-1", userId: "u-3", role: "admin", revokedAt: null } },
+      { role: "admin" },
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await expect(service.revokeMember("org-1", "m-3", "u-admin")).rejects.toThrow(/owner/i);
+    expect(prisma.organizationMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("autorise un owner à révoquer un admin", async () => {
+    const prisma = fauxPrisma(
+      { membre: { id: "m-3", organizationId: "org-1", userId: "u-3", role: "admin", revokedAt: null } },
+      { role: "owner" },
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await service.revokeMember("org-1", "m-3", "u-owner");
+
+    expect(prisma.organizationMember.updateMany).toHaveBeenCalled();
+  });
+
+  // Une organisation sans owner actif ne peut plus rien : ni inviter, ni
+  // changer de palier, ni révoquer. C'est un cul-de-sac dont on ne sort que
+  // par une intervention en base.
+  // Défense en profondeur : RolesGuard refuse DÉJÀ tout membership révoqué par
+  // un 404, un demandeur révoqué n'atteint donc jamais ce service. Mais la
+  // garde owner-only ci-dessus est une décision d'AUTORISATION : elle doit
+  // rester juste si on la lit seule, sans supposer ce que le garde a filtré en
+  // amont. Sans `revokedAt: null`, un ancien owner dont l'accès a été retiré
+  // resterait « owner » aux yeux de cette méthode.
+  it("ne reconnaît comme demandeur qu'un membre ACTIF", async () => {
+    const prisma = fauxPrisma(
+      { membre: { id: "m-3", organizationId: "org-1", userId: "u-3", role: "admin", revokedAt: null } },
+      { role: "owner" },
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await service.revokeMember("org-1", "m-3", "u-owner");
+
+    // La lecture du DEMANDEUR est celle qui porte userId (celle du membre visé
+    // porte id) — discriminée par le contenu, jamais par l'ordre d'appel.
+    const lectureDemandeur = prisma.organizationMember.findFirst.mock.calls
+      .map(([args]: [any]) => args.where)
+      .find((where: any) => where.userId !== undefined);
+    expect(lectureDemandeur).toEqual({ organizationId: "org-1", userId: "u-owner", revokedAt: null });
+  });
+
+  it("refuse de révoquer le DERNIER owner actif", async () => {
+    const prisma = fauxPrisma(
+      { membre: { id: "m-1", organizationId: "org-1", userId: "u-1", role: "owner", revokedAt: null }, ownersActifs: 1 },
+      { role: "owner" },
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await expect(service.revokeMember("org-1", "m-1", "u-1")).rejects.toThrow(/dernier propriétaire/i);
+    expect(prisma.organizationMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("autorise la révocation d'un owner tant qu'il en reste un autre", async () => {
+    const prisma = fauxPrisma(
+      { membre: { id: "m-1", organizationId: "org-1", userId: "u-1", role: "owner", revokedAt: null }, ownersActifs: 2 },
+      { role: "owner" },
+    );
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    await service.revokeMember("org-1", "m-1", "u-1");
+
+    expect(prisma.organizationMember.updateMany).toHaveBeenCalled();
+  });
+});
