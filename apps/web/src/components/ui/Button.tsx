@@ -17,8 +17,15 @@ import type { ComponentProps, ReactNode } from "react";
 // R-11 : `accent` pose du Navy sur l'Or (9.4:1), jamais du blanc (1.8:1). Le
 // focus est tracé en Navy et non en Or — un anneau Or sur blanc plafonne à
 // 1.8:1, sous les 3:1 que WCAG 2.2 demande à un indicateur de focus.
+//
+// `surface` dit sur QUOI le bouton est posé, et ne change que l'anneau de
+// focus. Depuis que l'espace cabinet plonge entièrement dans le Navy, l'anneau
+// Navy y est tracé sur un fond Navy : invisible, donc un échec de la 2.4.11 —
+// et l'inverse exact de la raison pour laquelle il est Navy sur fond clair.
+// Sur `sombre`, l'anneau passe à l'Or (9.4:1 sur le Navy).
 type Variant = "primary" | "accent" | "secondary" | "ghost";
 type Size = "md" | "lg";
+type Surface = "clair" | "sombre";
 
 const VARIANT_CLASSES: Record<Variant, string> = {
   primary: "bg-navy-950 text-white hover:bg-navy-800",
@@ -37,16 +44,30 @@ const SIZE_CLASSES: Record<Size, string> = {
 
 const BASE_CLASSES =
   "inline-flex items-center justify-center gap-2 rounded-[10px] font-display font-semibold transition " +
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950 " +
+  "focus-visible:outline-2 focus-visible:outline-offset-2 " +
   "disabled:cursor-not-allowed disabled:opacity-45";
 
-function classesFor(variant: Variant, size: Size, className?: string): string {
-  return [BASE_CLASSES, VARIANT_CLASSES[variant], SIZE_CLASSES[size], className].filter(Boolean).join(" ");
+// Le token de l'anneau vit ici plutôt que dans BASE_CLASSES : deux utilitaires
+// `outline-*` sur un même élément ne se départagent pas par l'ordre écrit dans
+// l'attribut, mais par l'ordre de la feuille générée. Une classe passée en
+// `className` ne peut donc pas « écraser » celle de la base de façon fiable —
+// on n'en émet qu'une seule.
+const SURFACE_FOCUS: Record<Surface, string> = {
+  clair: "focus-visible:outline-navy-950",
+  sombre: "focus-visible:outline-or",
+};
+
+function classesFor(variant: Variant, size: Size, surface: Surface, className?: string): string {
+  return [BASE_CLASSES, SURFACE_FOCUS[surface], VARIANT_CLASSES[variant], SIZE_CLASSES[size], className]
+    .filter(Boolean)
+    .join(" ");
 }
 
 interface CommonProps {
   variant?: Variant;
   size?: Size;
+  /** Fond sur lequel le bouton est posé. Ne change que l'anneau de focus. */
+  surface?: Surface;
   className?: string;
   children: ReactNode;
 }
@@ -54,12 +75,13 @@ interface CommonProps {
 export function Button({
   variant = "primary",
   size = "md",
+  surface = "clair",
   className,
   children,
   ...props
 }: CommonProps & Omit<ComponentProps<"button">, "className" | "children">) {
   return (
-    <button {...props} className={classesFor(variant, size, className)}>
+    <button {...props} className={classesFor(variant, size, surface, className)}>
       {children}
     </button>
   );
@@ -72,12 +94,13 @@ export function Button({
 export function ButtonLink({
   variant = "primary",
   size = "md",
+  surface = "clair",
   className,
   children,
   ...props
 }: CommonProps & Omit<ComponentProps<typeof Link>, "className" | "children">) {
   return (
-    <Link {...props} className={classesFor(variant, size, className)}>
+    <Link {...props} className={classesFor(variant, size, surface, className)}>
       {children}
     </Link>
   );

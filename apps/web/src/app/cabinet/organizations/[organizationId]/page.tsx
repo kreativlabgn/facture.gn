@@ -47,22 +47,22 @@ export default async function CabinetClientOrganizationPage({ params }: { params
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold text-navy-950">Organisation cliente</h1>
+        <h1 className="font-display text-2xl font-bold text-white">Organisation cliente</h1>
         <div className="flex items-center gap-4">
           <Link
             href={`/cabinet/organizations/${organizationId}/fec`}
-            className="rounded-[10px] bg-navy-950 px-5 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800"
+            className="rounded-[10px] bg-or px-5 py-2.5 font-display text-sm font-semibold text-navy-950 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-or"
           >
             Télécharger le FEC
           </Link>
-          <Link href="/cabinet" className="text-sm font-medium text-navy-600 hover:text-navy-950">
+          <Link href="/cabinet" className="text-sm font-medium text-white/75 hover:text-white">
             ← Retour
           </Link>
         </div>
       </div>
 
       <section className="mb-8">
-        <h2 className="mb-3 font-display text-sm font-semibold text-navy-950">Factures</h2>
+        <h2 className="mb-3 font-display text-sm font-semibold text-white">Factures</h2>
         <div className="rounded-2xl border border-navy-100 bg-white">
           {invoices.length === 0 ? (
             <p className="p-8 text-center text-sm text-navy-600">Aucune facture pour le moment.</p>
@@ -87,7 +87,7 @@ export default async function CabinetClientOrganizationPage({ params }: { params
       </section>
 
       <section>
-        <h2 className="mb-3 font-display text-sm font-semibold text-navy-950">Clients</h2>
+        <h2 className="mb-3 font-display text-sm font-semibold text-white">Clients</h2>
         <div className="rounded-2xl border border-navy-100 bg-white">
           {customers.length === 0 ? (
             <p className="p-8 text-center text-sm text-navy-600">Aucun client pour le moment.</p>

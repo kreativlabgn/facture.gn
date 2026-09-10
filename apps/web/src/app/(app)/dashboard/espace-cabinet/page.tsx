@@ -3,7 +3,7 @@ import { resolveActiveOrganization } from "@/lib/active-organization";
 import { PRACTICE_TYPE_LABELS, practiceRoleLabel } from "@/lib/cabinet-nav";
 import { requireSessionToken } from "@/lib/session";
 import { listMyPractices } from "@/lib/trust-api";
-import { Card, EmptyState } from "@/components/ui";
+import { Button, Card, EmptyState } from "@/components/ui";
 import { entrerDansCabinetAction } from "./actions";
 
 export const metadata: Metadata = { title: "Espace cabinet — facture.gn" };
@@ -87,12 +87,7 @@ export default async function SeuilCabinetPage() {
                 </div>
                 {/* Un <button> de soumission, pas un lien : c'est le geste qui
                     fait la différence entre changer d'entité et y glisser. */}
-                <button
-                  type="submit"
-                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-[10px] bg-navy-950 px-6 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
-                >
-                  Entrer dans cet espace
-                </button>
+                <Button type="submit">Entrer dans cet espace</Button>
               </form>
             </Card>
           ))}

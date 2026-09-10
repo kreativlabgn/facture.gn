@@ -1,0 +1,99 @@
+{
+  "_comment": [
+    "Jeu de données des comptes de DÉMONSTRATION de facture.gn.",
+    "",
+    "Source unique, lue par deux consommateurs qui doivent raconter la même",
+    "histoire : scripts/seed-demo-accounts.mjs (qui crée réellement les comptes",
+    "via trust-api) et la vitrine (apps/web/src/lib/demo-accounts.ts, qui affiche",
+    "les mêmes écrans sans compte). apps/web/src/lib/demo-seed.spec.ts échoue si",
+    "les deux divergent d'un franc — sans quoi le visiteur qui se connecte au",
+    "compte de démonstration verrait d'autres chiffres que ceux de la page qui",
+    "l'y a envoyé.",
+    "",
+    "Les numéros FG-2026-xxxx sont les ÉTIQUETTES de la vitrine. Les factures",
+    "réellement créées par le seed reçoivent leur numéro de la séquence de",
+    "trust-api : une numérotation légale ne se choisit pas depuis un script."
+  ],
+
+  "password": "DemoFacture2026",
+
+  "merchant": {
+    "msisdn": "+224622001122",
+    "userName": "Mamadou Camara",
+    "organization": {
+      "name": "Établissements Camara & Fils",
+      "regimeFiscal": "normal_sans_tva",
+      "legalForm": "commercial"
+    }
+  },
+
+  "practice": {
+    "msisdn": "+224622002233",
+    "userName": "Fatoumata Diakité",
+    "name": "Cabinet Diakité & Associés",
+    "type": "cabinet_comptable",
+    "registrationNumber": "CGA-2026-009"
+  },
+
+  "_mandatesComment": [
+    "Les quatre organisations ci-dessous existent pour que la console cabinet",
+    "affiche cinq mandats réels — le cinquième étant Camara & Fils, qui porte",
+    "les factures. Chacune a son propre compte propriétaire : un mandat",
+    "s'accorde PAR le client, jamais par le cabinet, et le seed respecte ce",
+    "sens (le cabinet demande, l'organisation accepte)."
+  ],
+  "mandatedOrganizations": [
+    {
+      "msisdn": "+224622003301",
+      "userName": "Ibrahima Sow",
+      "name": "Guinée Distribution SARL",
+      "regimeFiscal": "normal_tva",
+      "legalForm": "commercial"
+    },
+    {
+      "msisdn": "+224622003302",
+      "userName": "Aïssatou Barry",
+      "name": "Hôtel Kaloum Palace",
+      "regimeFiscal": "normal_tva",
+      "legalForm": "commercial"
+    },
+    {
+      "msisdn": "+224622003303",
+      "userName": "Alpha Diallo",
+      "name": "Atelier Diallo Métal",
+      "regimeFiscal": "normal_tva",
+      "legalForm": "commercial"
+    },
+    {
+      "msisdn": "+224622003304",
+      "userName": "Mariama Bhoye",
+      "name": "Pharmacie Bhoye",
+      "regimeFiscal": "normal_tva",
+      "legalForm": "commercial"
+    }
+  ],
+
+  "_invoicesComment": [
+    "montantGnf est le montant TTC. L'organisation du marchand est en",
+    "normal_sans_tva : sans cela, trust-api ajouterait 18 % de TVA au-dessus de",
+    "ces lignes et le portefeuille ne totaliserait plus 45 000 000 GNF — le",
+    "chiffre que la page d'accueil, /demo/marchand et le compte réel doivent",
+    "tous les trois afficher."
+  ],
+  "invoices": [
+    { "numero": "FG-2026-0014", "client": "Direction Régionale de la Santé", "emiseLe": "2026-09-04", "montantGnf": 8500000, "approuvee": true, "litige": false, "encaissee": false },
+    { "numero": "FG-2026-0013", "client": "SOGUIPAH SA", "emiseLe": "2026-09-02", "montantGnf": 6200000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0012", "client": "Entreprise Baldé BTP", "emiseLe": "2026-08-29", "montantGnf": 5750000, "approuvee": false, "litige": true, "encaissee": false },
+    { "numero": "FG-2026-0011", "client": "Hôtel Kaloum Palace", "emiseLe": "2026-08-27", "montantGnf": 4300000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0010", "client": "Guinée Distribution SARL", "emiseLe": "2026-08-24", "montantGnf": 3900000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0009", "client": "Mairie de Ratoma", "emiseLe": "2026-08-21", "montantGnf": 3450000, "approuvee": true, "litige": false, "encaissee": false },
+    { "numero": "FG-2026-0008", "client": "Cimenterie de Conakry", "emiseLe": "2026-08-18", "montantGnf": 2800000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0007", "client": "Pharmacie Bhoye", "emiseLe": "2026-08-15", "montantGnf": 2400000, "approuvee": false, "litige": true, "encaissee": false },
+    { "numero": "FG-2026-0006", "client": "Pharmacie Bhoye", "emiseLe": "2026-08-12", "montantGnf": 1950000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0005", "client": "Atelier Diallo Métal", "emiseLe": "2026-08-08", "montantGnf": 1600000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0004", "client": "Boulangerie Sandervalia", "emiseLe": "2026-08-05", "montantGnf": 1250000, "approuvee": false, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0003", "client": "Garage Sylla", "emiseLe": "2026-08-01", "montantGnf": 1100000, "approuvee": true, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0002", "client": "Ets Touré Négoce", "emiseLe": "2026-07-29", "montantGnf": 950000, "approuvee": false, "litige": false, "encaissee": true },
+    { "numero": "FG-2026-0001", "client": "Client au comptoir — 628 44 17 02", "emiseLe": "2026-07-26", "montantGnf": 850000, "approuvee": false, "litige": false, "encaissee": true }
+  ]
+}

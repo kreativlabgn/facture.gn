@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ButtonLink } from "@/components/ui";
+import { ComptesDemo } from "@/components/ComptesDemo";
 import { formatGnf } from "@/lib/format";
 import { COMMISSION_CAP_CENTIMES } from "@/lib/plans";
 
@@ -234,6 +235,12 @@ export default function InscriptionPage() {
           <CarteVoie key={voie.titre} voie={voie} />
         ))}
       </div>
+
+      {/* La vitrine vient APRÈS les quatre portes, jamais avant : un visiteur
+          venu s'inscrire doit trouver son parcours en premier écran. Elle est
+          là pour celui qui hésite encore — et pour l'audit visuel, qui a besoin
+          d'une surface peuplée sans monter une base de données. */}
+      <ComptesDemo />
 
       <p className="text-center text-sm text-navy-600">
         Vous avez déjà un compte ?{" "}

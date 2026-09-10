@@ -27,9 +27,30 @@ export interface InvoiceWindowKpis {
 
 const AWAITING_PAYMENT_STATUSES: readonly string[] = ["issued", "partially_paid"];
 
+// Un document qui ne réclame RIEN n'a pas sa place dans un total en francs.
+//
+//   draft   personne ne l'a reçu — l'organisation n'a encore rien facturé.
+//   voided  la pièce est annulée ; elle reste en base pour l'historique et
+//           pour la chaîne de certification, mais elle ne vaut plus une
+//           créance.
+//
+// La règle existait déjà pour le COMPTE « en attente », et pas pour la SOMME :
+// la même fenêtre excluait donc une facture annulée d'un compteur et
+// l'additionnait dans l'autre. Un carnet de 14 factures à 45 000 000 GNF plus
+// une quinzième annulée affichait 45 850 000 GNF d'encours — un montant que
+// l'organisation ne peut réclamer à personne.
+const CLAIMING_STATUSES_EXCLUDED: readonly string[] = ["draft", "voided"];
+
 export function deriveInvoiceWindowKpis(invoices: readonly InvoiceListItem[]): InvoiceWindowKpis {
-  const totalTtcCentimes = invoices.reduce((sum, invoice) => sum + BigInt(invoice.totalTtc), BigInt(0));
+  const totalTtcCentimes = invoices
+    .filter((invoice) => !CLAIMING_STATUSES_EXCLUDED.includes(invoice.status))
+    .reduce((sum, invoice) => sum + BigInt(invoice.totalTtc), BigInt(0));
+
   return {
+    // La fenêtre reste la fenêtre : elle dit sur combien de factures le calcul
+    // a porté, y compris celles qui n'entrent pas dans le total. La réduire
+    // ferait mentir le libellé « sur les N dernières factures », qui décrit ce
+    // qui a été LU, pas ce qui a été additionné.
     windowSize: invoices.length,
     totalTtcCentimes: totalTtcCentimes.toString(),
     awaitingPaymentCount: invoices.filter((invoice) => AWAITING_PAYMENT_STATUSES.includes(invoice.status)).length,

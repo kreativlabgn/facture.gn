@@ -14,12 +14,14 @@ import {
   MIN_TIER_FOR_ROLE,
   TIER_ORDER,
   avantagesDuPalier,
+  fraisTransaction,
   passerelleePdpAutorisee,
   quotaAtteint,
   quotaMembres,
   quotaSuccursales,
   tierIndex,
   tierLabel,
+  tauxEffectifBps,
   ventilationFrais,
   type Tier,
 } from "./plans";
@@ -328,5 +330,77 @@ describe("utilitaires", () => {
   it("rend un palier inconnu tel quel", () => {
     expect(tierLabel("nouveau_palier")).toBe("nouveau_palier");
     expect(tierLabel("pro")).toBe("Pro");
+  });
+});
+
+// ── Frais de transaction en UNE ligne ───────────────────────────────────────
+//
+// Le guichet n'affiche plus « facture.gn » puis « Djomy » : un seul montant.
+// Ce qui est testé ici, c'est que la fusion ne perd pas un centime et que le
+// taux affiché est DÉRIVÉ de ce montant — pas un chiffre rond écrit en dur.
+describe("fraisTransaction — commission et passerelle fondues, total intact", () => {
+  it("additionne exactement les deux composantes de ventilationFrais", () => {
+    const v = ventilationFrais("100000000", "pro");
+    const f = fraisTransaction("100000000", "pro");
+
+    expect(f.marchandise).toBe(v.marchandise);
+    expect(f.fraisTransaction).toBe((BigInt(v.infrastructure) + BigInt(v.passerelle)).toString());
+    expect(f.totalPayeur).toBe(v.totalPayeur);
+  });
+
+  it("garde l'identité marchandise + frais = total sur tous les paliers", () => {
+    for (const tier of TIER_ORDER) {
+      const f = fraisTransaction("87654321", tier);
+      expect(BigInt(f.totalPayeur)).toBe(BigInt(f.marchandise) + BigInt(f.fraisTransaction));
+    }
+  });
+
+  // La cascade Djomy rend le taux réel LÉGÈREMENT supérieur au barème nominal
+  // (150 + 140 = 290 bps sur Pro) : la passerelle facture sur le montant déjà
+  // majoré. Afficher 2,90 % annoncerait moins que le prélèvement.
+  it("dérive un taux qui tient compte de la cascade, au-dessus du nominal", () => {
+    const f = fraisTransaction("100000000", "pro");
+
+    expect(f.tauxEffectifBps).toBe(292);
+    expect(f.tauxEffectifBps).toBeGreaterThan(totalPayeurBps("pro"));
+    expect(pourcentage(f.tauxEffectifBps)).toBe("2,92 %");
+  });
+
+  // Et l'inverse, là où le plafond joue : le taux DÉCROCHE du barème, en faveur
+  // du commerçant. C'est précisément ce qu'un « 2,5 % » écrit en dur effacerait.
+  it("dérive un taux dégressif dès que le plafond de commission mord", () => {
+    // 50 M GNF : 1,50 % appellerait 750 000, le plafond Pro ramène à 75 000.
+    const f = fraisTransaction("5000000000", "pro");
+
+    expect(f.tauxEffectifBps).toBe(155);
+    expect(f.tauxEffectifBps).toBeLessThan(totalPayeurBps("pro"));
+  });
+
+  it("un montant nul ne produit ni frais ni taux — jamais de division par zéro", () => {
+    const f = fraisTransaction("0", "freemium");
+
+    expect(f.fraisTransaction).toBe("0");
+    expect(f.totalPayeur).toBe("0");
+    expect(f.tauxEffectifBps).toBe(0);
+  });
+});
+
+describe("tauxEffectifBps — le taux se déduit du montant, jamais l'inverse", () => {
+  it("arrondit au point de base le plus proche", () => {
+    // 2,5 % pile.
+    expect(tauxEffectifBps("100000000", "2500000")).toBe(250);
+    // 2,504 9 % → 250 ; 2,505 % → 251 (demi vers le haut).
+    expect(tauxEffectifBps("1000000000", "25049000")).toBe(250);
+    expect(tauxEffectifBps("1000000000", "25050000")).toBe(251);
+  });
+
+  it("rend 0 sur une marchandise nulle ou négative plutôt que de diviser par zéro", () => {
+    expect(tauxEffectifBps("0", "1000")).toBe(0);
+  });
+
+  // Au-delà de Number.MAX_SAFE_INTEGER, un calcul en number perdrait des
+  // unités en silence : la division reste en BigInt de bout en bout.
+  it("reste juste sur des montants au-delà de MAX_SAFE_INTEGER", () => {
+    expect(tauxEffectifBps("100000000000000000000", "2500000000000000000")).toBe(250);
   });
 });

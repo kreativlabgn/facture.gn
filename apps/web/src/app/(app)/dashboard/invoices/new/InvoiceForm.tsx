@@ -3,6 +3,7 @@
 import { useActionState, useMemo, useState } from "react";
 import type { CustomerListItem } from "@/lib/trust-api";
 import { createAndIssueInvoiceAction, type CreateInvoiceActionState } from "./actions";
+import { Button } from "@/components/ui";
 
 interface LineDraft {
   description: string;
@@ -194,15 +195,12 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
           <span className="font-mono">{totalGnf.toLocaleString("fr-FR")} GNF</span>
         </div>
         {state?.error ? <p className="mt-4 text-sm text-red-text">{state.error}</p> : null}
-        <button
-          type="submit"
-          disabled={pending}
-          className="mt-5 w-full rounded-[10px] bg-navy-950 px-6 py-3 font-display text-sm font-semibold text-white transition hover:bg-navy-800 disabled:opacity-45"
-        >
+        <Button type="submit" disabled={pending} size="lg" className="mt-5 w-full">
           {pending ? "Émission..." : "Émettre et certifier"}
-        </button>
+        </Button>
         <p className="mt-3 text-xs leading-relaxed text-navy-600">
-          La facture sera signée (Ed25519) et chaînée au registre de l&apos;organisation.
+          Votre facture sera scellée et rattachée à la suite de vos factures : ni elle ni les
+          précédentes ne pourront être modifiées après coup.
         </p>
       </div>
     </form>

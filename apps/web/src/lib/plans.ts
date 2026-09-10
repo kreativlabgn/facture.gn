@@ -230,6 +230,63 @@ export function ventilationFrais(montantCentimes: string, tier: Tier): Ventilati
   };
 }
 
+// ── Frais de transaction, en UNE ligne ──────────────────────────────────────
+//
+// Deux lignes côte à côte — « facture.gn » puis « Djomy » — exposaient au payeur
+// la répartition interne d'une somme qu'il débourse de toute façon. Le guichet
+// n'en montre plus qu'une.
+//
+// Ce qui n'est PAS fusionné, c'est le calcul : `fraisTransaction` est la somme
+// exacte des deux composantes de ventilationFrais(), cascade et plafond
+// compris, jamais un pourcentage rond appliqué à la marchandise. Un taux écrit
+// en dur — 2,5 %, par exemple — ne correspondrait à AUCUN palier (le barème
+// donne 3,5 / 3,4 / 2,9 / 2,6 / 2,4 %) et rejouerait le bug que cet écran a
+// précisément corrigé : un prix annoncé, un autre prélevé.
+
+export interface FraisUnifies {
+  /** 100 % net pour le marchand — le prix de la marchandise, et rien d'autre. */
+  marchandise: string;
+  /** Commission facture.gn + frais réseau de la passerelle, en un seul montant. */
+  fraisTransaction: string;
+  totalPayeur: string;
+  /** Taux effectif en points de base, DÉRIVÉ des deux montants ci-dessus. */
+  tauxEffectifBps: number;
+}
+
+/** Taux réellement supporté, déduit des montants — et jamais l'inverse.
+ *
+ *  Le plafond de commission rend ce taux dégressif : passé le plafond du
+ *  palier, chaque franc supplémentaire ne porte plus que la passerelle. Un taux
+ *  nominal recopié du barème mentirait exactement là où l'argument commercial
+ *  est le plus fort — sur les grosses factures.
+ *
+ *  Arrondi au point de base le plus proche : `+½ bps` avant la division
+ *  entière, en BigInt de bout en bout. Une marchandise nulle n'a pas de taux —
+ *  on rend 0 plutôt que de diviser par zéro. Aucun littéral `0n` : la cible de
+ *  compilation de `web` est ES2017. */
+export function tauxEffectifBps(marchandiseCentimes: string, fraisCentimes: string): number {
+  const marchandise = BigInt(marchandiseCentimes);
+  if (marchandise <= BigInt(0)) return 0;
+
+  const frais = BigInt(fraisCentimes);
+  const deuxFoisMarchandise = marchandise * BigInt(2);
+  return Number((frais * BPS_DENOMINATEUR * BigInt(2) + marchandise) / deuxFoisMarchandise);
+}
+
+/** Vue fusionnée de ventilationFrais() : deux lignes deviennent une, le total
+ *  reste au centime ce qu'il était. */
+export function fraisTransaction(montantCentimes: string, tier: Tier): FraisUnifies {
+  const v = ventilationFrais(montantCentimes, tier);
+  const frais = (BigInt(v.infrastructure) + BigInt(v.passerelle)).toString();
+
+  return {
+    marchandise: v.marchandise,
+    fraisTransaction: frais,
+    totalPayeur: v.totalPayeur,
+    tauxEffectifBps: tauxEffectifBps(v.marchandise, frais),
+  };
+}
+
 // ── Prédicats de palier consommés par les onglets Paramètres ────────────────
 
 export function passerelleePdpAutorisee(tier: Tier): boolean {
