@@ -49,7 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const moreEntries = visibleMoreEntries(role);
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex min-h-full flex-col bg-white">
       <AppHeader
         tabs={tabs}
         moreEntries={moreEntries}

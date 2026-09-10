@@ -54,8 +54,8 @@ export default async function CabinetSettingsPage() {
       </Card>
 
       <section>
-        <h2 className="mb-1 font-display text-lg font-semibold text-navy-950">Identité</h2>
-        <p className="mb-3 max-w-prose text-sm text-navy-600">
+        <h2 className="mb-1 font-display text-lg font-semibold text-white">Identité</h2>
+        <p className="mb-3 max-w-prose text-sm text-white/75">
           Ces informations ont été saisies à la création du cabinet et ne sont pas modifiables
           depuis cet écran — contactez-nous pour les corriger.
         </p>
@@ -80,11 +80,11 @@ export default async function CabinetSettingsPage() {
       </section>
 
       <section>
-        <h2 className="mb-1 font-display text-lg font-semibold text-navy-950">
+        <h2 className="mb-1 font-display text-lg font-semibold text-white">
           Palier partenaire
         </h2>
-        <p className="mb-3 max-w-prose text-sm text-navy-600">
-          Actuellement : <strong className="text-navy-950">{palierLabel(practice.tier)}</strong>.
+        <p className="mb-3 max-w-prose text-sm text-white/75">
+          Actuellement : <strong className="text-white">{palierLabel(practice.tier)}</strong>.
         </p>
         <Card>
           <div className="p-6">
@@ -94,9 +94,9 @@ export default async function CabinetSettingsPage() {
       </section>
 
       <section>
-        <h2 className="mb-1 font-display text-lg font-semibold text-navy-950">Reversement</h2>
-        <p className="mb-3 max-w-prose text-sm text-navy-600">
-          Actuellement : <strong className="text-navy-950">{modeLabel(modeActuel)}</strong>. C&apos;est
+        <h2 className="mb-1 font-display text-lg font-semibold text-white">Reversement</h2>
+        <p className="mb-3 max-w-prose text-sm text-white/75">
+          Actuellement : <strong className="text-white">{modeLabel(modeActuel)}</strong>. C&apos;est
           la façon dont vos commissions d&apos;apporteur vous parviennent.
         </p>
         <Card>

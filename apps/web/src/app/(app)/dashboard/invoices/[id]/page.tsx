@@ -7,7 +7,7 @@ import { formatDate, formatGnf, uniteDeSaisie } from "@/lib/format";
 import { etapesDuCycle } from "@/lib/invoice-lifecycle";
 import { invoiceEventLabel, type EventTone } from "@/lib/invoice-events";
 import { hasPermission } from "@/lib/permissions";
-import { pourcentage, ventilationFrais, COMMISSION_BPS, FRAIS_PASSERELLE_BPS, type Tier } from "@/lib/plans";
+import { pourcentage, fraisTransaction, type Tier } from "@/lib/plans";
 import { requireSessionToken } from "@/lib/session";
 import {
   getFinancingOptions,
@@ -222,9 +222,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
         </dl>
       </Card>
 
-      {/* ── Ventilation des frais ──────────────────────────────────────── */}
-      {/* « facture.gn + Djomy » en un bloc opaque ne dit ni qui prend quoi, ni
-          combien. Trois montants distincts, en chasse fixe, sous le total.
+      {/* ── Frais de transaction ───────────────────────────────────────── */}
+      {/* Deux montants en chasse fixe sous le total : la marchandise, puis les
+          frais cumulés. Le détail commission / passerelle a été retiré — la
+          répartition est interne et ne change pas ce que règle le client.
 
           Une PROJECTION, et elle le dit : aucune tentative de paiement n'existe
           encore à ce stade, donc rien n'est persisté. Elle disparaît dès que la
@@ -527,11 +528,15 @@ const MARQUEUR: Record<EventTone, string> = {
   alerte: "bg-bad",
 };
 
-// Les trois montants que supporte le payeur, jamais fondus en un seul.
+// Ce que le payeur débourse, en deux montants : la marchandise, puis les frais.
+// Le détail commission facture.gn / passerelle Djomy a été retiré — c'est une
+// répartition interne, elle ne change rien au total et la donner ligne à ligne
+// faisait ressembler un prix à une addition de restaurant.
+//
 // `font-mono` sur toute la colonne : ce sont des sommes à comparer chiffre à
 // chiffre, et la chasse fixe est ce qui aligne les unités.
 function VentilationFrais({ montantCentimes, palier }: { montantCentimes: string; palier: Tier }) {
-  const v = ventilationFrais(montantCentimes, palier);
+  const f = fraisTransaction(montantCentimes, palier);
 
   return (
     <section>
@@ -547,22 +552,18 @@ function VentilationFrais({ montantCentimes, palier }: { montantCentimes: string
           <LigneFrais
             libelle="Montant de la marchandise"
             aide="100 % net pour vous"
-            valeur={v.marchandise}
+            valeur={f.marchandise}
             fort
           />
           <LigneFrais
-            libelle="Frais d'infrastructure facture.gn"
-            aide={`${pourcentage(COMMISSION_BPS[palier] ?? COMMISSION_BPS.freemium)} du montant, plafonnés`}
-            valeur={v.infrastructure}
+            libelle="Frais de transaction"
+            // Le taux est DÉRIVÉ du montant, jamais recopié du barème : passé le
+            // plafond de commission du palier, le taux réel décroche du taux
+            // nominal — et c'est en faveur du commerçant.
+            aide={f.tauxEffectifBps > 0 ? `${pourcentage(f.tauxEffectifBps)} du montant` : undefined}
+            valeur={f.fraisTransaction}
           />
-          <LigneFrais
-            libelle="Frais réseau Djomy"
-            // La cascade, dite plutôt que masquée : la passerelle facture sur le
-            // montant DÉJÀ majoré de notre commission, pas sur la marchandise.
-            aide={`${pourcentage(FRAIS_PASSERELLE_BPS)} du montant majoré de la commission`}
-            valeur={v.passerelle}
-          />
-          <LigneFrais libelle="Total réglé par le client" valeur={v.totalPayeur} fort />
+          <LigneFrais libelle="Total réglé par le client" valeur={f.totalPayeur} fort />
         </dl>
       </Card>
     </section>

@@ -16,11 +16,19 @@ import { Wordmark } from "@/components/Wordmark";
 // toujours — c'est déjà ce qui était en train d'arriver dans l'ancien fichier.
 // Les ancres pointent vers des sections que `page.tsx` doit poser ; une entrée
 // ajoutée ici sans sa section donne un lien mort, silencieusement.
+//
+// QUATRE ESPACES, ET UN SEUL PAR PUBLIC. La page ne s'adresse pas « aux
+// entreprises » : elle s'adresse à un commerçant de Madina, à un expert-
+// comptable, à un DAF public et à un analyste crédit — quatre lecteurs qui ne
+// cherchent pas la même preuve et n'ont pas le même vocabulaire. Chaque espace
+// est ÉTANCHE : ce qui parle à l'un n'est pas répété chez l'autre, sinon la
+// segmentation redevient une page unique découpée en intertitres.
 const NAV = [
   { href: "#pme", label: "PME & marchands" },
   { href: "#cabinets", label: "Cabinets" },
+  { href: "#grands-comptes", label: "Grands comptes" },
   { href: "#developpeurs", label: "Développeurs" },
-  { href: "#verify", label: "Vérification publique" },
+  { href: "#verify", label: "Vérification" },
 ];
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
@@ -33,12 +41,15 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
                 dot Or entre « facture » et « gn » (R-02) — le dot EST la
                 ponctuation, jamais un point littéral ni une autre couleur. */}
             <Wordmark href="/" ariaLabel="facture.gn — Accueil" />
-            <span className="hidden rounded-full bg-navy-50 px-2.5 py-1 font-mono text-[11px] font-bold text-navy-600 sm:inline">
+            {/* La pastille cède la place à la navigation avant elle : à cinq
+                espaces, c'est la barre de nav qui porte l'information utile.
+                Elle revient à `xl`, où les deux tiennent sans se serrer. */}
+            <span className="hidden rounded-full bg-navy-50 px-2.5 py-1 font-mono text-[11px] font-bold text-navy-600 xl:inline">
               LFI 2025
             </span>
           </div>
 
-          <nav aria-label="Sections" className="hidden items-center gap-7 text-sm font-semibold text-navy-600 lg:flex">
+          <nav aria-label="Sections" className="hidden items-center gap-6 text-sm font-semibold text-navy-600 lg:flex">
             {NAV.map((item) => (
               <a key={item.href} href={item.href} className="transition-colors hover:text-navy-950">
                 {item.label}
@@ -78,7 +89,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
               Se connecter
             </Link>
           </nav>
-          <p className="text-sm text-navy-600">République de Guinée</p>
+          <p className="text-sm text-navy-600">Conakry, Guinée</p>
         </div>
       </footer>
     </div>

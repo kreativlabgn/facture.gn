@@ -16,6 +16,16 @@ import { MenuIcon } from "./icons";
 // l'accès est parfaitement légitime. Le fond est le premier signal ; le bloc
 // « Espace actif », en bas de la barre, est le second, et il est permanent.
 //
+// La rupture est TOTALE depuis ce chantier : le fond de page, l'en-tête et le
+// rail plongent ensemble dans le Navy. L'espace marchand est clair, le cabinet
+// est sombre, et il n'y a plus une bande blanche pour brouiller le signal.
+//
+// CE QUE CELA IMPOSE AUX PAGES DE /cabinet : le texte posé DIRECTEMENT sur ce
+// fond s'écrit en clair (`text-white`, `text-white/75`) — un `text-navy-950`
+// hérité de l'espace marchand y devient invisible. Les cartes, elles, restent
+// blanches : c'est le contraste des deux surfaces qui porte la hiérarchie, et
+// le texte navy à l'intérieur d'une carte reste juste.
+//
 // Deux rendus d'une seule navigation :
 //   ≥ md   rail permanent — le seuil est à 768px : au-delà, 256px de barre
 //          laissent encore 512px de contenu, et un cabinet qui saisit des
@@ -55,25 +65,25 @@ export function CabinetShell({
   }, [pathname]);
 
   return (
-    <div className="flex min-h-full bg-navy-50">
-      <aside className="hidden w-64 shrink-0 flex-col bg-navy-950 md:flex">
+    <div className="flex min-h-full bg-navy-950">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-navy-800 bg-navy-950 md:flex">
         <CabinetSidebar practices={practices} active={active} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-navy-100 bg-white">
+        <header className="border-b border-navy-800 bg-navy-950">
           <div className="flex items-center justify-between gap-4 px-4 py-3.5 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
               <span className="md:hidden">
                 <Wordmark href="/cabinet" ariaLabel="facture.gn — Accueil cabinet" />
               </span>
-              <p className="hidden truncate font-display text-lg font-bold text-navy-950 md:block">
+              <p className="hidden truncate font-display text-lg font-bold text-white md:block">
                 {titre}
               </p>
             </div>
             <div className="min-w-0 text-right">
-              <p className="truncate text-sm font-semibold text-navy-950">{active.name}</p>
-              <p className="truncate text-xs text-navy-600">
+              <p className="truncate text-sm font-semibold text-white">{active.name}</p>
+              <p className="truncate text-xs text-white/70">
                 {PRACTICE_TYPE_LABELS[active.type] ?? active.type} · {practiceRoleLabel(active.role)}
               </p>
             </div>

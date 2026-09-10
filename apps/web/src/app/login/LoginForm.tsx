@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { Button, Field, TextInput } from "@/components/ui";
 import { loginAction, type LoginActionState } from "./actions";
@@ -25,9 +26,23 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
         <TextInput id="password" name="password" type="password" autoComplete="current-password" required />
       </Field>
       {state?.error ? (
-        <p role="alert" className="text-sm text-red-text">
-          {state.error}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="alert" className="text-sm text-red-text">
+            {state.error}
+          </p>
+          {/* Le lien n'apparaît QUE sur un échec dû à un identifiant de
+              démonstration. Partout ailleurs, proposer une sortie vers une
+              vitrine détournerait quelqu'un de sa vraie connexion — au moment
+              précis où il a besoin de réessayer, pas de visiter. */}
+          {state.demo ? (
+            <Link
+              href={state.demo.href}
+              className="text-sm font-semibold text-navy-950 underline underline-offset-2"
+            >
+              Ouvrir {state.demo.libelle} — sans compte
+            </Link>
+          ) : null}
+        </div>
       ) : null}
       <Button type="submit" disabled={pending}>
         {pending ? "Connexion..." : "Se connecter"}

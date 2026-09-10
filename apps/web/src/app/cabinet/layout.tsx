@@ -38,8 +38,8 @@ export default async function CabinetLayout({ children }: { children: React.Reac
   // intercepterait une route /cabinet/nouveau et lui servirait ce même écran.
   if (!active) {
     return (
-      <div className="flex min-h-full flex-col bg-navy-50">
-        <header className="border-b border-navy-100 bg-white">
+      <div className="flex min-h-full flex-col bg-navy-950">
+        <header className="border-b border-navy-800 bg-navy-950">
           <div className="mx-auto flex max-w-6xl items-center px-4 py-4 sm:px-6">
             <Wordmark href="/cabinet" ariaLabel="facture.gn — Accueil cabinet" />
           </div>

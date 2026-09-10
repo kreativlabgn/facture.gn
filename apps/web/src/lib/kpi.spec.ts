@@ -48,6 +48,22 @@ describe("kpi — agrégats de fenêtre", () => {
     expect(kpis.windowSize).toBe(6);
   });
 
+  it("laisse les brouillons et les annulées hors du total en francs", () => {
+    // La régression qui a rendu ce test nécessaire : une facture annulée
+    // sortait bien du compteur « en attente », mais restait dans la somme.
+    // L'écran affichait donc un encours que l'organisation ne pouvait
+    // réclamer à personne.
+    const kpis = deriveInvoiceWindowKpis([
+      invoice({ id: "a", status: "issued", totalTtc: "100000" }),
+      invoice({ id: "b", status: "paid", totalTtc: "200000" }),
+      invoice({ id: "c", status: "voided", totalTtc: "85000000" }),
+      invoice({ id: "d", status: "draft", totalTtc: "500000" }),
+    ]);
+    expect(kpis.totalTtcCentimes).toBe("300000");
+    // La fenêtre, elle, compte tout ce qui a été lu.
+    expect(kpis.windowSize).toBe(4);
+  });
+
   it("reste défini sur une fenêtre vide", () => {
     expect(deriveInvoiceWindowKpis([])).toEqual({
       windowSize: 0,

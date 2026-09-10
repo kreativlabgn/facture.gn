@@ -90,12 +90,12 @@ export default async function CabinetHomePage({
           d’accountant_external porte mandate:request (ADR-068/078). Demander
           n'engage rien — c'est l'organisation qui accepte, et qui révoque. */}
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <p className="max-w-prose text-sm text-navy-600">
+        <p className="max-w-prose text-sm text-white/75">
           Votre cabinet en un coup d&apos;œil : les entreprises que vous suivez, ce qu&apos;elles
           ont facturé, et l&apos;équipe qui les accompagne.
         </p>
         {canRequestMandate(practice.role) ? (
-          <ButtonLink href="/cabinet/mandates" variant="accent">
+          <ButtonLink href="/cabinet/mandates" variant="accent" surface="sombre">
             Demander un mandat
           </ButtonLink>
         ) : null}
@@ -217,7 +217,7 @@ function SignalCabinet({
 // (WCAG 1.4.1).
 function Onglets({ actif }: { actif: CabinetTab }) {
   return (
-    <nav aria-label="Sections du cabinet" className="border-b border-navy-100">
+    <nav aria-label="Sections du cabinet" className="border-b border-navy-800">
       <ul className="-mb-px flex gap-1">
         {CABINET_TABS.map((onglet) => {
           const estActif = onglet.cle === actif;
@@ -228,10 +228,10 @@ function Onglets({ actif }: { actif: CabinetTab }) {
                 aria-current={estActif ? "page" : undefined}
                 className={[
                   "inline-flex min-h-[44px] items-center border-b-2 px-4 font-display text-sm font-semibold transition-colors",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-or",
                   estActif
-                    ? "border-navy-950 text-navy-950"
-                    : "border-transparent text-navy-600 hover:text-navy-950",
+                    ? "border-or text-white"
+                    : "border-transparent text-white/65 hover:text-white",
                 ].join(" ")}
               >
                 {onglet.label}
@@ -266,11 +266,11 @@ function Portefeuille({ clients }: { clients: readonly ClientSousMandat[] }) {
   return (
     <section>
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="font-display text-lg font-semibold text-navy-950">Entreprises sous mandat</h2>
+        <h2 className="font-display text-lg font-semibold text-white">Entreprises sous mandat</h2>
         {/* L'encours est un MAJORANT : une facture partiellement réglée y pèse
             pour son montant plein, GET /invoices ne rendant pas la part déjà
             payée. Le dire ici plutôt que de laisser lire un solde exact. */}
-        <p className="text-xs text-navy-600">
+        <p className="text-xs text-white/75">
           L&apos;encours compte les factures partiellement réglées en entier.
         </p>
       </div>
@@ -374,7 +374,7 @@ function Structure({
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h2 className="mb-3 font-display text-lg font-semibold text-navy-950">Fiche du cabinet</h2>
+        <h2 className="mb-3 font-display text-lg font-semibold text-white">Fiche du cabinet</h2>
         <Card>
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-navy-50 px-6 py-5">
             <div className="min-w-0">
@@ -409,10 +409,10 @@ function Structure({
 
       <section>
         <div className="mb-3 flex items-baseline justify-between gap-4">
-          <h2 className="font-display text-lg font-semibold text-navy-950">Collaborateurs</h2>
+          <h2 className="font-display text-lg font-semibold text-white">Collaborateurs</h2>
           <Link
             href="/cabinet/members"
-            className="text-sm font-medium text-navy-950 underline underline-offset-2"
+            className="text-sm font-medium text-white underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-or"
           >
             Gérer
           </Link>
@@ -431,7 +431,7 @@ function Structure({
           )}
         </Card>
         {administre ? (
-          <p className="mt-2 max-w-prose text-xs text-navy-600">
+          <p className="mt-2 max-w-prose text-xs text-white/75">
             Retirer un collaborateur coupe d&apos;un coup ses accès à TOUTES les entreprises sous
             mandat : le mandat est accordé au cabinet, jamais à une personne. Le retrait d&apos;un
             administrateur se fait depuis l&apos;écran Collaborateurs.
@@ -446,8 +446,8 @@ function PartageDHonoraires({ partage }: { partage: PartageHonoraires }) {
   return (
     <section>
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="font-display text-lg font-semibold text-navy-950">Partage d&apos;honoraires</h2>
-        <p className="font-mono text-xs text-navy-600">{partage.periodMonth}</p>
+        <h2 className="font-display text-lg font-semibold text-white">Partage d&apos;honoraires</h2>
+        <p className="font-mono text-xs text-white/75">{partage.periodMonth}</p>
       </div>
 
       {partage.indisponible ? (
