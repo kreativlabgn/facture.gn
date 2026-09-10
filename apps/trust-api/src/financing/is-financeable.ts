@@ -24,33 +24,86 @@
 // par une vraie validation. flagPublicEntity() réinitialise désormais
 // isPublicEntityConfirmed ET validatedByAdministration à chaque repointage —
 // cette 5e condition est ce qui rend cette réinitialisation effective ici.
+
+// Durcissement 2026-09-10 (anti-double-encaissement du Capital Layer) — 6e et
+// 7e conditions. ADR-031 pose que ce composite est unique et que « toute
+// modification est un ADR » : celle-ci en demande un, elle n'est pas une
+// retouche cosmétique. Jusqu'ici le prédicat n'excluait que `voided`, si bien
+// qu'une facture B2G visée par l'administration PUIS réglée par le Trésor
+// restait finançable côté serveur — un partenaire pouvait racheter une créance
+// déjà encaissée. L'écran de la PME la masquait déjà
+// (STATUTS_SANS_ARBITRAGE, apps/web/src/lib/financing.ts), mais un masquage
+// d'interface n'est pas une garde : l'API répondait 200.
+//
+// Le statut est désormais une LISTE EN POSITIF, jamais une liste d'exclusions
+// (même discipline que payment-eligibility.ts côté money-api) : un statut
+// ajouté demain à l'enum InvoiceStatus n'est pas finançable par défaut, il faut
+// l'inscrire ici pour qu'il le devienne.
+//
+// `partially_paid` en est volontairement ABSENT. Le décaissement est tracé à
+// `invoice.totalTtc` (voir l'événement financing_disbursed de
+// chooseFinancing()), c'est-à-dire à la valeur faciale : financer une facture
+// déjà réglée pour moitié rachèterait une deuxième fois la moitié encaissée.
+// L'admettre suppose d'abord de financer `amountDue` et non `totalTtc` — c'est
+// un autre chantier, et un autre ADR.
+export const STATUTS_FINANCABLES = ["issued"] as const;
+
+/** Pourquoi une créance ne peut plus être cédée. `null` = rien ne s'y oppose.
+ *
+ *  Séparé du prédicat parce que le refus doit pouvoir être NOMMÉ : « déjà
+ *  financée » et « déjà encaissée » sont deux situations distinctes pour la PME
+ *  comme pour le partenaire, et un 409 unique les confondait. */
+export type MotifCreanceNonCessible = "deja_encaissee" | "en_litige";
+
+export function motifCreanceNonCessible(invoice: {
+  status: string;
+  disputeStatus: string;
+}): MotifCreanceNonCessible | null {
+  // Une facture réglée n'est plus une créance : il n'y a plus rien à racheter.
+  if (invoice.status === "paid") return "deja_encaissee";
+  // `disputeStatus` est un champ SÉPARÉ de `status`, jamais une valeur de
+  // l'enum : une facture peut être émise ET contestée en même temps. Un
+  // prédicat qui ne regarderait que `status` encaisserait la cession d'une
+  // créance dont le montant est justement en discussion. `resolved` ne bloque
+  // pas — le litige est clos, la créance redevient cessible.
+  if (invoice.disputeStatus === "disputed") return "en_litige";
+  return null;
+}
+
 export function isFinanceable(invoice: {
   validatedByAdministration: boolean;
   financedByPartnerId: string | null;
   status: string;
+  disputeStatus: string;
   publicBuyerAccountVerified: boolean;
   publicEntityConfirmed: boolean;
 }): boolean {
   return (
     invoice.validatedByAdministration &&
     invoice.financedByPartnerId === null &&
-    invoice.status !== "voided" &&
+    (STATUTS_FINANCABLES as readonly string[]).includes(invoice.status) &&
+    motifCreanceNonCessible(invoice) === null &&
     invoice.publicBuyerAccountVerified &&
     invoice.publicEntityConfirmed
   );
 }
 
-// Reproduit les 5 conditions de isFinanceable() sous forme de clause Prisma
+// Reproduit les 7 conditions de isFinanceable() sous forme de clause Prisma
 // `where` — c'est cette clause, pas isFinanceable(), qui protège réellement
 // contre la concurrence au moment du commit (voir chooseFinancing()). Extrait
 // ici (revue dev-domain-model-reviewer, K4/K5) pour que les deux ne puissent
 // plus diverger silencieusement.
+//
+// `status: { in: [...] }` et non `{ not: "voided" }` : c'est ce qui rend la
+// garde hermétique quand un règlement tombe ENTRE la lecture et le commit —
+// l'updateMany ne trouve alors plus aucune ligne et la cession est avortée.
 export function financeableInvoiceWhere(invoiceId: string) {
   return {
     id: invoiceId,
     financedByPartnerId: null,
     validatedByAdministration: true,
-    status: { not: "voided" as const },
+    status: { in: [...STATUTS_FINANCABLES] },
+    disputeStatus: { not: "disputed" as const },
     customer: {
       isPublicEntityConfirmed: true,
       publicBuyerAccount: { verificationStatus: "verified" as const },
