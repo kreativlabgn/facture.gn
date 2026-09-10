@@ -123,6 +123,52 @@ describe("FinancingService.getFinancingOptions (K4, ADR-031/088)", () => {
     expect(result.financeable).toBe(false);
     expect(result.partners).toEqual([]);
   });
+
+  // K5 — une facture déjà cédée n'est plus finançable, donc `partners` est
+  // vide : sans ce champ, l'écran de la PME n'aurait AUCUN moyen de nommer
+  // l'établissement qui a racheté sa créance, et devrait afficher un uuid.
+  it("nomme le cessionnaire d'une facture déjà cédée, alors même qu'elle n'est plus finançable", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({
+        financedByPartnerId: "partner-7",
+        financedByPartner: { id: "partner-7", name: "Ecobank Guinée" },
+      }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1", "org-1");
+
+    expect(result.financeable).toBe(false);
+    expect(result.partners).toEqual([]);
+    expect(result.financedByPartner).toEqual({ id: "partner-7", name: "Ecobank Guinée" });
+  });
+
+  // Le pendant du test précédent : tant qu'aucune cession n'a eu lieu, le champ
+  // vaut null — jamais `undefined`, qui disparaîtrait de la réponse JSON et
+  // ferait lire « champ absent » là où la réponse dit « aucune cession ».
+  it("rend financedByPartner à null quand aucune cession n'a eu lieu", async () => {
+    const prisma = createFakePrisma({ partners: [{ id: "partner-1", name: "UBA", status: "active" }] });
+    const service = new FinancingService(prisma as any);
+
+    const result = await service.getFinancingOptions("inv-1", "org-1");
+
+    expect(result.financedByPartner).toBeNull();
+  });
+
+  // financial_partner.apiKey est le secret d'appel du partenaire. Sans `select`,
+  // findMany rendait la ligne entière dans une réponse HTTP servie à l'owner/
+  // admin de n'importe quelle PME ouvrant l'écran d'arbitrage. L'assertion porte
+  // sur la PROJECTION, pas sur le résultat mocké : c'est la requête qui fuit.
+  it("ne projette jamais apiKey dans l'annuaire des partenaires", async () => {
+    const prisma = createFakePrisma({ partners: [{ id: "partner-1", name: "UBA" }] });
+    const service = new FinancingService(prisma as any);
+
+    await service.getFinancingOptions("inv-1", "org-1");
+
+    const projection = prisma.financialPartner.findMany.mock.calls[0][0].select;
+    expect(projection).toBeDefined();
+    expect(projection.apiKey).toBeUndefined();
+  });
 });
 
 describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
@@ -304,5 +350,54 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
       service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" }, "user-1", "org-1"),
     ).rejects.toThrow(ConflictException);
     expect(prisma.__tx.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  // K5 — DOUBLE CLIC RÉELLEMENT CONCURRENT, et le CODE HTTP qu'il produit.
+  //
+  // Le test au-dessus fige déjà le comportement (la seconde demande échoue),
+  // mais il l'obtient d'un `updateManyCount: 0` posé d'avance : il n'exécute
+  // jamais deux appels en même temps, et n'assure que la CLASSE de l'exception.
+  // Or ce qui est promis au client, c'est un 409 — pas un 500 opaque. Cette
+  // application n'a AUCUN ExceptionFilter (constat repris dans
+  // public-buyer-portal.service.ts) : seule la nature HttpException de
+  // ConflictException garantit le code rendu. Une refonte qui lèverait une
+  // erreur maison non-HttpException passerait le `toThrow(ConflictException)`
+  // d'à côté tout en dégradant la réponse en 500 — d'où l'assertion sur
+  // getStatus() ici, et le lancement simultané des deux demandes.
+  it("sur deux demandes simultanées, une seule aboutit et l'autre rend un 409 explicite (jamais un 500)", async () => {
+    const prisma = createFakePrisma();
+    // La clause `where` de l'updateMany est le SEUL point de sérialisation réel
+    // (voir chooseFinancing) : on la rend stateful pour que la première
+    // revendication gagne et que la seconde trouve count === 0 — exactement ce
+    // que ferait Postgres sur deux transactions concurrentes.
+    let dejaRevendiquee = false;
+    prisma.__tx.invoice.updateMany.mockImplementation(() => {
+      if (dejaRevendiquee) {
+        return Promise.resolve({ count: 0 });
+      }
+      dejaRevendiquee = true;
+      return Promise.resolve({ count: 1 });
+    });
+    const service = new FinancingService(prisma as any);
+    const dto = { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" as const };
+
+    const resultats = await Promise.allSettled([
+      service.chooseFinancing("inv-1", dto, "user-1", "org-1"),
+      service.chooseFinancing("inv-1", dto, "user-1", "org-1"),
+    ]);
+
+    const aboutis = resultats.filter((r) => r.status === "fulfilled");
+    const rejetes = resultats.filter((r) => r.status === "rejected");
+    expect(aboutis).toHaveLength(1);
+    expect(rejetes).toHaveLength(1);
+
+    const erreur = (rejetes[0] as PromiseRejectedResult).reason as ConflictException;
+    expect(erreur).toBeInstanceOf(ConflictException);
+    // LE point de ce test : le code réellement rendu au client.
+    expect(erreur.getStatus()).toBe(409);
+
+    // K5 — une seule cession, donc une seule trace d'audit : jamais deux
+    // financing_disbursed sur la même facture.
+    expect(prisma.__tx.invoiceEvent.create).toHaveBeenCalledTimes(1);
   });
 });

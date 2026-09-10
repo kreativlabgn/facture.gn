@@ -490,6 +490,14 @@ export interface InvoiceFullDetail {
   issuedAt: string | null;
   createdAt: string;
 
+  // K5, ADR-089 — état de cession de la créance. `GET /invoices/:id` renvoie la
+  // ligne Invoice entière (InvoicesService.findOne n'applique aucun `select` de
+  // premier niveau) : ces deux colonnes arrivaient déjà, elles n'étaient
+  // simplement pas déclarées ici. Le NOM du cessionnaire, lui, n'y est pas —
+  // il vient de getFinancingOptions(), seule route qui joint financial_partner.
+  financedByPartnerId: string | null;
+  financedAt: string | null;
+
   customer: { id: string; name: string; phone: string | null; nif: string | null } | null;
   lines: InvoiceLineItem[];
   events: InvoiceEventItem[];
@@ -537,6 +545,62 @@ export async function regeneratePaymentLink(token: string, invoiceId: string): P
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new TrustApiError(body?.message ?? "Régénération du lien impossible", response.status);
+  }
+}
+
+// ── RAILS DE FINANCEMENT B2G — ADR-088/089, K4/K5 ───────────────────────────
+//
+// Les deux routes de `/invoices/:id/financing` portent @Roles("owner","admin").
+// Les appeler depuis un écran non filtré ne serait pas une faille — RolesGuard
+// reste seul juge et rendrait 403 — mais un appel qui ne peut que échouer n'a
+// pas de raison d'être émis : voir hasPermission(role, "invoices:financing").
+
+export interface FinancialPartnerOption {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface FinancingOptions {
+  // Verdict d'is_financeable() (ADR-031 : « règle composite unique, toute
+  // modification est un ADR »). Deux de ses cinq conditions — compte acheteur
+  // public « verified », rattachement client confirmé — ne figurent NULLE PART
+  // dans InvoiceFullDetail : recopier la règle côté web est impossible, et
+  // l'approcher afficherait un rail que trust-api refuserait ensuite.
+  financeable: boolean;
+  partners: FinancialPartnerOption[];
+  // K5 — renseigné dès que la créance est cédée, c'est-à-dire exactement quand
+  // `financeable` retombe à false et que `partners` se vide.
+  financedByPartner: { id: string; name: string } | null;
+}
+
+export type DisbursementMethod = "payment_link_payout" | "bank_transfer";
+
+export async function getFinancingOptions(token: string, invoiceId: string): Promise<FinancingOptions> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/financing/options`, token);
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les rails de financement", response.status);
+  }
+  return response.json();
+}
+
+// K5 — LA CESSION. Le 409 rendu sur une facture déjà cédée n'est pas un aléa
+// réseau : c'est l'invariant anti-double-financement qui s'exprime (updateMany
+// conditionnel, count = 0). Son message est relayé tel quel, comme partout
+// ailleurs dans ce fichier — le reformuler perdrait la seule explication utile.
+export async function chooseFinancing(
+  token: string,
+  invoiceId: string,
+  input: { financialPartnerId: string; disbursementMethod: DisbursementMethod },
+): Promise<void> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/financing`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Financement impossible", response.status);
   }
 }
 
@@ -1138,4 +1202,116 @@ export async function fetchInvoiceVerification(
   }
 
   return response.json();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Portail acheteur public (DAF) — J1/J2, ADR-080/088/089.
+//
+// Ces trois routes sont les SEULES que la console DAF consomme, et elles
+// partagent une propriété qu'aucune autre section de ce fichier n'a : leur
+// autorisation est entièrement inline dans PublicBuyerPortalService, jamais un
+// RolesGuard. Un DAF n'est OrganizationMember d'AUCUNE PME — il agit sur les
+// factures d'organisations tierces. Ne jamais leur ajouter un
+// organizationId : il n'y en a pas un seul, un tableau de bord « encours
+// fournisseurs » agrège par construction plusieurs PME.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Mirroir d'une ligne Invoice rendue par GET /public-buyer/invoices
+// (public-buyer-portal.service.ts:listReceivedInvoices). Volontairement
+// PARTIEL : seuls les champs réellement rendus par le service et affichés par
+// la console sont déclarés. Les montants sont des centimes GNF sérialisés en
+// string (BigInt.prototype.toJSON, trust-api/src/main.ts) — jamais un number.
+//
+// Ce que le service ne renvoie PAS, et qui manque donc à l'écran : le NOM du
+// fournisseur émetteur. `findMany` n'inclut aucune relation `organization`, et
+// le DAF n'a par ailleurs aucune route pour résoudre un organizationId. La
+// console affiche donc la référence marché / bon de commande comme identifiant
+// métier. Combler ce manque = un `include` côté trust-api, hors périmètre ici.
+export interface PublicBuyerInvoice {
+  id: string;
+  number: string | null;
+  certificationId: string | null;
+  status: string;
+  disputeStatus: string;
+  validatedByAdministration: boolean;
+  totalTtc: string;
+  amountDue: string;
+  issuedAt: string | null;
+  cadreFacturation: string;
+  referenceMarche: string | null;
+  numeroBonCommande: string | null;
+  numeroEngagement: string | null;
+  // K5, ADR-089 — la seule présence de ce champ vaut créance déjà cédée. Il est
+  // la source unique du verrou anti-double-nantissement affiché par la console.
+  financedByPartnerId: string | null;
+  financedAt: string | null;
+}
+
+export interface PublicBuyerInvoiceList {
+  invoices: PublicBuyerInvoice[];
+  // Somme des amountDue du périmètre (centimes GNF, string). Le service exclut
+  // déjà draft et voided — ne jamais recalculer ce total côté web à partir de
+  // la page courante, il porte sur l'encours ENTIER, pas sur les 50 lignes.
+  outstandingTotal: string;
+}
+
+export async function listReceivedInvoices(
+  token: string,
+  pagination: { take?: number; skip?: number } = {},
+): Promise<PublicBuyerInvoiceList> {
+  const query = new URLSearchParams();
+  if (pagination.take !== undefined) {
+    query.set("take", String(pagination.take));
+  }
+  if (pagination.skip !== undefined) {
+    query.set("skip", String(pagination.skip));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await authenticatedFetch(`/public-buyer/invoices${suffix}`, token);
+  if (response.status === 403) {
+    // Le service répond 403 quand le compte n'est rattaché à AUCUN compte
+    // acheteur public — cas d'usage normal (un utilisateur PME qui atterrit
+    // sur /daf), jamais une panne. La page le distingue par ce statut.
+    throw new TrustApiError("Aucun accès à un compte acheteur public", response.status);
+  }
+  if (!response.ok) {
+    throw new TrustApiError("Impossible de charger les factures reçues", response.status);
+  }
+  return response.json();
+}
+
+// J1 — vise le service fait / liquidation. Idempotent côté service (un second
+// appel renvoie 200 sans créer un second InvoiceEvent), donc un double clic est
+// sans conséquence ici : le 409 que cette route peut rendre ne concerne que les
+// factures draft ou voided, jamais une course entre deux validations.
+export async function validateLiquidation(token: string, invoiceId: string): Promise<PublicBuyerInvoice> {
+  const response = await authenticatedFetch(
+    `/public-buyer/invoices/${encodeURIComponent(invoiceId)}/validate-liquidation`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    // Message de l'API relayé tel quel : il distingue « pas une facture B2G »,
+    // « compte non vérifié » et « rattachement non confirmé », trois refus que
+    // le DAF doit pouvoir lire. Les reformuler ici les rendrait indistincts.
+    throw new TrustApiError(body?.message ?? "Validation impossible", response.status);
+  }
+  return response.json();
+}
+
+// Security Audit 2026-08-23, finding #13 — confirmation par le compte CIBLÉ du
+// rattachement qu'une PME a posé unilatéralement. Sans elle, la facture reste
+// invisible dans listReceivedInvoices() (isPublicEntityConfirmed: true) : c'est
+// donc un prérequis, pas une option, et la console doit l'exposer.
+export async function confirmCustomerLink(token: string, customerId: string): Promise<void> {
+  const response = await authenticatedFetch(
+    `/public-buyer/customers/${encodeURIComponent(customerId)}/confirm-link`,
+    token,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Confirmation impossible", response.status);
+  }
 }

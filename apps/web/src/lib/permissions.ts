@@ -34,6 +34,7 @@ export type Permission =
   | "invoices:issue"
   | "invoices:void"
   | "invoices:relance"
+  | "invoices:financing"
   | "customers:read"
   | "customers:create"
   | "customers:merge"
@@ -60,6 +61,13 @@ const PERMISSION_ROLES: Record<Permission, readonly OrganizationRole[]> = {
   // /regenerate-payment-link. Deux routes, même trio, même geste métier :
   // relancer un client qui n'a pas payé.
   "invoices:relance": ["owner", "admin", "cashier"],
+  // financing.controller.ts — GET /invoices/:id/financing/options et
+  // POST /invoices/:id/financing, tous deux @Roles("owner","admin"). Aussi
+  // étroit qu'invoices:void, et pour une raison plus lourde : céder une créance
+  // engage un montant réel et ne se défait pas (K5, ADR-089 — la seule présence
+  // de financedByPartnerId bloque définitivement tout second financement).
+  // cashier en est absent alors qu'il peut émettre : encaisser n'est pas céder.
+  "invoices:financing": ["owner", "admin"],
   // customers.controller.ts — GET /customers, GET /customers/:id
   "customers:read": ["owner", "admin", "accountant_internal", "cashier", "field_agent"],
   // customers.controller.ts — POST /customers
