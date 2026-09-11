@@ -31,12 +31,12 @@ describe("DjomyStubProvider", () => {
   });
 
   it("simule un délai configurable, utilisé par les tests du circuit breaker", async () => {
-    const provider = new DjomyStubProvider(30);
+    const provider = new DjomyStubProvider(50);
     const start = Date.now();
 
     await provider.createPaymentLink(request);
 
-    expect(Date.now() - start).toBeGreaterThanOrEqual(30);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(40);
   });
 });
 
