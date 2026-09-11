@@ -31,12 +31,18 @@ export interface InvoiceRenderCustomer {
   nif?: string | null;
 }
 
+/** ADR-108 — TTC_FIRST : parcours marchand (unitPrice TTC). HT_FIRST :
+ *  passerelle PDP / ERP tiers (unitPrice hors taxes). */
+export type SaisieRegimeRendu = "TTC_FIRST" | "HT_FIRST";
+
 export interface InvoiceRenderLine {
   description: string;
   quantity: number;
-  // centimes GNF, prix unitaire TTC (convention TTC-first du repo — les lignes
-  // ne portent pas de ventilation HT, C4).
+  // centimes GNF. TTC ou HT selon saisieRegime ci-dessous — ADR-108. La
+  // convention TTC-first (C4) reste celle du parcours marchand, elle n'est
+  // simplement plus la seule.
   unitPrice: bigint;
+  saisieRegime: SaisieRegimeRendu;
 }
 
 export interface InvoiceRenderInput {
@@ -59,6 +65,26 @@ export interface InvoiceRenderInput {
   // références non-nulles) — le renderer n'inspecte jamais les champs bruts.
   untdidTypeCode: string | null;
   b2gReferences: { label: string; value: string }[];
+}
+
+// Le régime d'un TABLEAU, là où la colonne est portée par la LIGNE.
+//
+// Un en-tête de colonne ne peut annoncer qu'une seule unité : il faut donc
+// trancher pour l'ensemble. En pratique les lignes d'une facture viennent
+// toutes du même canal — un seul service les écrit, en une seule transaction
+// — et le cas mixte n'existe pas. On ne le suppose pas pour autant : s'il
+// survenait (reprise manuelle, migration future), intituler tout le tableau
+// d'après la première ligne mentirait sur les autres. On retombe alors sur des
+// libellés NEUTRES, qui n'affirment rien de faux.
+//
+// Une facture sans ligne suit la convention historique : il n'y a rien à
+// mal intituler, et le récapitulatif doit garder son déroulé habituel.
+function regimeDuTableau(lines: InvoiceRenderLine[]): SaisieRegimeRendu | null {
+  if (lines.length === 0) {
+    return "TTC_FIRST";
+  }
+  const premier = lines[0].saisieRegime;
+  return lines.every((l) => l.saisieRegime === premier) ? premier : null;
 }
 
 function formatDate(date: Date): string {
@@ -89,12 +115,18 @@ function customerBlock(customer: InvoiceRenderCustomer): object {
 }
 
 function linesTable(lines: InvoiceRenderLine[]): object {
+  // ADR-108 — l'unité annoncée suit la provenance des lignes. Une facture
+  // entrée par la passerelle PDP porte des prix unitaires HORS TAXES :
+  // les intituler « P.U. TTC » était le micro-écart visuel à supprimer.
+  const regime = regimeDuTableau(lines);
+  const unite = regime === "HT_FIRST" ? " HT" : regime === "TTC_FIRST" ? " TTC" : "";
+
   const body: object[][] = [
     [
       { text: "Désignation", style: "th" },
       { text: "Qté", style: "th", alignment: "right" },
-      { text: "P.U. TTC", style: "th", alignment: "right" },
-      { text: "Montant TTC", style: "th", alignment: "right" },
+      { text: `P.U.${unite}`, style: "th", alignment: "right" },
+      { text: `Montant${unite}`, style: "th", alignment: "right" },
     ],
   ];
   for (const line of lines) {
@@ -121,26 +153,57 @@ function linesTable(lines: InvoiceRenderLine[]): object {
 }
 
 function summaryTable(input: InvoiceRenderInput): object {
-  const grossTtc = input.lines.reduce((sum, l) => sum + BigInt(l.quantity) * l.unitPrice, 0n);
-  const rows: object[][] = [[{ text: "Sous-total TTC", style: "sumLabel" }, { text: formatGnf(grossTtc), style: "sumValue" }]];
+  // La somme BRUTE des lignes, dans l'unité où elles sont saisies : TTC pour le
+  // parcours marchand, HT pour la passerelle PDP. BigInt(0) en amorce, jamais le
+  // littéral 0n (ADR-108, discipline de compilation du projet).
+  const sommeLignes = input.lines.reduce((sum, l) => sum + BigInt(l.quantity) * l.unitPrice, BigInt(0));
+  const htFirst = regimeDuTableau(input.lines) === "HT_FIRST";
 
-  // discountAmount = brut − net. Le rendu de la ligne exige les DEUX conditions
-  // (discountPct enregistré ET écart de montant positif) : sur des données
-  // cohérentes elles vont toujours ensemble ; le garde > 0n évite d'afficher
-  // "- -X GNF" si les lignes ont été retouchées après coup sans le total.
-  const discountAmount = grossTtc - input.totalTtc;
-  if (input.discountPct > 0 && discountAmount > 0n) {
+  // ADR-108 — DEUX DÉROULÉS, PAS DEUX CALCULS. Tous les montants affichés
+  // sortent des totaux scellés sur la facture ; seul leur ENCHAÎNEMENT change.
+  //
+  // HT_FIRST lit dans le sens du document : sous-total HT, puis la TVA isolée,
+  // puis le total TTC. C'est la formule brute (quantité × P.U. HT), celle que
+  // l'ERP a envoyée et que le lecteur peut refaire de tête, ligne à ligne.
+  //
+  // TTC_FIRST garde l'extraction à rebours historique : le total TTC d'abord,
+  // dont on ventile ensuite le HT et la TVA. Appliquer ce déroulé-là à des
+  // lignes HT afficherait un « Sous-total TTC » qui vaut le HT — précisément
+  // l'écart que l'ADR-108 supprime.
+  const libelleSousTotal = htFirst ? "Sous-total HT" : "Sous-total TTC";
+  const rows: object[][] = [
+    [{ text: libelleSousTotal, style: "sumLabel" }, { text: formatGnf(sommeLignes), style: "sumValue" }],
+  ];
+
+  // discountAmount = brut − net, DANS L'UNITÉ DU RÉGIME : comparer une somme de
+  // lignes HT au total TTC rendrait un écart qui n'est pas une remise. Le rendu
+  // de la ligne exige les DEUX conditions (discountPct enregistré ET écart
+  // positif) : sur des données cohérentes elles vont toujours ensemble ; le
+  // garde > 0 évite d'afficher "- -X GNF" si les lignes ont été retouchées
+  // après coup sans le total. Aucune remise globale n'existe sur le chemin
+  // HT_FIRST (le contrat PDP l'interdit), mais la formule reste juste s'il en
+  // apparaissait une.
+  const netDuRegime = htFirst ? input.totalHt : input.totalTtc;
+  const discountAmount = sommeLignes - netDuRegime;
+  if (input.discountPct > 0 && discountAmount > BigInt(0)) {
     rows.push([
       { text: `Remise (${input.discountPct} %)`, style: "sumLabel" },
       { text: `- ${formatGnf(discountAmount)}`, style: "sumValue" },
     ]);
   }
 
-  rows.push(
-    [{ text: "Total TTC", bold: true, style: "sumLabel" }, { text: formatGnf(input.totalTtc), bold: true, style: "sumValue" }],
-    [{ text: "dont HT", style: "sumLabelSmall" }, { text: formatGnf(input.totalHt), style: "sumValueSmall" }],
-    [{ text: "dont TVA", style: "sumLabelSmall" }, { text: formatGnf(input.totalTva), style: "sumValueSmall" }],
-  );
+  if (htFirst) {
+    rows.push(
+      [{ text: "TVA", style: "sumLabel" }, { text: formatGnf(input.totalTva), style: "sumValue" }],
+      [{ text: "Total TTC", bold: true, style: "sumLabel" }, { text: formatGnf(input.totalTtc), bold: true, style: "sumValue" }],
+    );
+  } else {
+    rows.push(
+      [{ text: "Total TTC", bold: true, style: "sumLabel" }, { text: formatGnf(input.totalTtc), bold: true, style: "sumValue" }],
+      [{ text: "dont HT", style: "sumLabelSmall" }, { text: formatGnf(input.totalHt), style: "sumValueSmall" }],
+      [{ text: "dont TVA", style: "sumLabelSmall" }, { text: formatGnf(input.totalTva), style: "sumValueSmall" }],
+    );
+  }
 
   return {
     margin: [0, 16, 0, 0],
@@ -291,10 +354,10 @@ export function buildReceiptDocDefinition(input: ReceiptRenderInput): object {
   if (payment.amountCollected !== payment.amount) {
     detailRows.push([{ text: "Payé par le client", style: "k" }, { text: formatGnf(payment.amountCollected), style: "v" }]);
   }
-  if (payment.platformFeeAmount > 0n) {
+  if (payment.platformFeeAmount > BigInt(0)) {
     detailRows.push([{ text: "dont commission", style: "k" }, { text: formatGnf(payment.platformFeeAmount), style: "v" }]);
   }
-  if (payment.gatewayFeeAmount > 0n) {
+  if (payment.gatewayFeeAmount > BigInt(0)) {
     detailRows.push([{ text: "dont frais gateway", style: "k" }, { text: formatGnf(payment.gatewayFeeAmount), style: "v" }]);
   }
   if (payment.providerRef) {

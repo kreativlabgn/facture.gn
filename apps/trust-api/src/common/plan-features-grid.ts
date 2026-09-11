@@ -55,6 +55,21 @@ const MIN_TIER_FOR_ROLE: Partial<Record<OrganizationRole, CommercialTier>> = {
 
 export const ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER: CommercialTier = "pro";
 
+// ADR-107 — passerelle PDP (API publique ouverte aux ERP tiers). Palier
+// minimal : enterprise, ce qui n'ouvre l'accès qu'à enterprise et custom, les
+// deux derniers de TIER_ORDER.
+//
+// Exprimé comme un SEUIL et non comme une liste ["enterprise", "custom"] : une
+// liste devrait être retrouvée et complétée à chaque palier ajouté au-dessus
+// (starter_plus a déjà montré que la grille bouge, ADR-106), et l'oublier ferait
+// silencieusement perdre l'accès à un client qui vient de monter en gamme. Le
+// seuil, lui, reste juste par construction.
+//
+// Accès DISTINCT du rôle developer_api (pro, ci-dessus) : ce dernier permet à un
+// membre de fabriquer une clé pour ses propres scripts ; celui-ci autorise un
+// éditeur externe à déposer des documents fiscaux au nom de la PME.
+export const PDP_GATEWAY_MIN_TIER: CommercialTier = "enterprise";
+
 function tierIndex(tier: CommercialTier): number {
   return TIER_ORDER.indexOf(tier);
 }
@@ -77,4 +92,8 @@ export function maxMembersForTier(tier: CommercialTier): number | null {
 
 export function isAdvancedCustomerManagementAllowed(tier: CommercialTier): boolean {
   return tierIndex(tier) >= tierIndex(ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER);
+}
+
+export function isPdpGatewayAllowed(tier: CommercialTier): boolean {
+  return tierIndex(tier) >= tierIndex(PDP_GATEWAY_MIN_TIER);
 }

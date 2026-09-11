@@ -38,8 +38,8 @@ describe("renderToBuffer", () => {
       status: "issued",
       discountPct: 5,
       lines: [
-        { description: "Sac de riz 25kg", quantity: 3, unitPrice: 350_000_00n },
-        { description: "Bidon d'huile 5L", quantity: 2, unitPrice: 75_000_00n },
+        { description: "Sac de riz 25kg", quantity: 3, unitPrice: 350_000_00n, saisieRegime: "TTC_FIRST" as const },
+        { description: "Bidon d'huile 5L", quantity: 2, unitPrice: 75_000_00n, saisieRegime: "TTC_FIRST" as const },
       ],
       totalHt: 1_016_949_15n,
       totalTva: 183_050_85n,

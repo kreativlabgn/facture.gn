@@ -43,6 +43,7 @@ import { MerkleAnchorModule } from "./certification/merkle-anchor/merkle-anchor.
 import { DataRightsModule } from "./data-rights/data-rights.module";
 import { BankReconciliationModule } from "./bank-reconciliation/bank-reconciliation.module";
 import { PendingMemberInvitesModule } from "./pending-member-invites/pending-member-invites.module";
+import { PdpModule } from "./pdp/pdp.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -106,6 +107,12 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     // Lot rapprochement bancaire (ADR-052) — import de relevé, suggestion de
     // correspondance facture, confirmation manuelle (chemin C3 réutilisé).
     BankReconciliationModule,
+    // ADR-107 — passerelle PDP : point d'entrée public des ERP tiers (Odoo,
+    // OwoDesk). Placé en DERNIER, après EtaxModule dont il prolonge le circuit :
+    // aucune dépendance de module explicite (PRISMA_CLIENT, PASSWORD_SERVICE et
+    // la connexion Redis viennent tous de modules @Global), l'ordre n'est donc
+    // qu'une convention de lecture.
+    PdpModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même

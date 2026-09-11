@@ -185,6 +185,26 @@ enum InvoiceCadre {
 // agent_terrain : aligné sur RegistrationSource.agent_terrain / User.isCommercialAgent
 // (ADR-107). api : modélisé pour le futur (auth par clé API, F15) — aucun code
 // ne le pose encore, même précédent que payment_link/bank_transfer avant câblage.
+// ADR-108 — régime de saisie d'une ligne de facture. Décrit COMMENT le prix
+// unitaire a été capturé, jamais ce qu'il vaut : les totaux de la facture sont
+// scellés par la certification et ne dépendent pas de cette colonne.
+//
+// TTC_FIRST : convention historique du parcours marchand (PWA, USSD, agent
+// terrain, récurrent). unit_price est TTC, et InvoicesService.createDraft()
+// dérive HT/TVA du total par computeTaxBreakdown().
+// HT_FIRST : standard international des ERP tiers, entré par la passerelle PDP
+// (ADR-107). unit_price est HORS TAXES et la TVA est déclarée globalement par
+// le connecteur ; PdpConsolidationService écrit les totaux DÉCLARÉS sans
+// repasser par le normalisateur TTC — sans quoi le TTC certifié vaudrait le HT.
+//
+// VALEURS EN MAJUSCULES, seul enum du schéma dans ce cas : elles sont fixées
+// telles quelles par l'ADR-108 et lues par le rendu PDF comme par le front.
+// Les aligner en snake_case aurait divergé du texte approuvé.
+enum SaisieRegime {
+  TTC_FIRST
+  HT_FIRST
+}
+
 enum EmissionChannel {
   pwa
   ussd
@@ -452,6 +472,13 @@ model ApiKey {
   organization  Organization @relation(fields: [organizationId], references: [id])
   createdByUser User         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id])
   revokedByUser User?        @relation("ApiKeyRevoker", fields: [revokedByUserId], references: [id])
+  // ADR-107 — les dépôts PDP faits AVEC cette clé. Même intention que
+  // createdByUserId juste au-dessus : sur une organisation branchée à plusieurs
+  // connecteurs (ERP comptable + caisse), savoir LEQUEL a déposé quoi est la
+  // première question du support. onDelete: Restrict côté PdpRawTransaction —
+  // une clé révoquée reste en base, la trace de ce qu'elle a déposé ne doit
+  // jamais pouvoir disparaître avec elle.
+  pdpRawTransactions PdpRawTransaction[]
 
   @@map("api_key")
 }
@@ -662,6 +689,7 @@ model Organization {
   referralsMade         Referral[]                 @relation("ReferralReferrer")
   referralReceived      Referral?                  @relation("ReferralReferred")
   devices               Device[]
+  pdpRawTransactions    PdpRawTransaction[]
 
   @@map("organization")
 }
@@ -1292,6 +1320,7 @@ model Invoice {
   refunds       Refund[]
   bankTransactionsMatched BankTransaction[]
   creditTransactions      CreditTransaction[]
+  pdpRawTransaction       PdpRawTransaction?
 
   @@unique([organizationId, number])
   // E1 — reconstruction de la preuve d'inclusion (feuilles d'une tranche).
@@ -1470,6 +1499,18 @@ model InvoiceLine {
   quantity    Int
   unitPrice   BigInt @map("unit_price")
   taxRateBps  Int    @default(0) @map("tax_rate_bps")
+
+  // ADR-108 — dit si unitPrice ci-dessus est TTC (parcours marchand) ou HT
+  // (passerelle PDP). SANS EFFET SUR LES MONTANTS : c'est un indicateur de
+  // PROVENANCE, lu par le rendu PDF et le front pour intituler correctement les
+  // colonnes et sommer les lignes dans la bonne unité. Les totaux généraux
+  // (totalHt/totalTva/totalTtc) restent ceux scellés sur la facture.
+  //
+  // Défaut TTC_FIRST : toutes les lignes antérieures à l'ADR-108 viennent du
+  // parcours marchand, la valeur est donc exacte pour l'historique — jamais un
+  // simple remplissage. Non-nullable pour cette raison : une ligne dont on
+  // ignorerait le régime serait inaffichable sans deviner.
+  saisieRegime SaisieRegime @default(TTC_FIRST) @map("saisie_regime")
 
   costPriceAtTime BigInt? @map("cost_price_at_time")
 
@@ -2006,4 +2047,102 @@ enum BankTransactionState {
   unmatched
   matched
   ignored
+}
+
+// ADR-107 — Passerelle PDP (Plateforme de Dématérialisation Partenaire) : point
+// d'entrée des ERP tiers (Odoo, OwoDesk) qui délèguent à facture.gn la
+// certification et la transmission fiscale de leurs documents.
+//
+// TABLE TAMPON *ET* REGISTRE D'IDEMPOTENCE. Les deux rôles tiennent dans la même
+// table à dessein, et c'est le point à comprendre avant de la lire :
+//
+//   • tampon — le flux e-reporting (B2C, caisses) n'a pas vocation à produire une
+//     facture unitaire. Ses lignes attendent ici qu'un cron les compile en Z de
+//     caisse global pour la DGI. C'est ce cas d'usage qui a fait naître la table.
+//   • registre — @@unique([organizationId, clientUniqueId]) est la SEULE barrière
+//     qui empêche un connecteur ERP de faire certifier deux fois la même facture
+//     après un simple timeout réseau. Elle doit donc couvrir AUSSI le flux
+//     e-invoicing (B2B/B2G), qui, lui, part en file BullMQ. Un e-invoicing qui ne
+//     s'inscrirait pas ici n'aurait aucune idempotence durable : la déduplication
+//     BullMQ par jobId ne vit que dans Redis, disparaît au nettoyage des jobs
+//     terminés (removeOnComplete) et ne survit pas à un flush.
+//
+// Autrement dit : TOUT document entrant s'inscrit ici, et `flow` décide seulement
+// de ce qui se passe ensuite.
+//
+// `payload` (Json) conserve le corps ERP tel que reçu, jamais retouché. C'est la
+// pièce à produire quand un client conteste ce que son ERP a réellement envoyé —
+// les colonnes typées n'en sont qu'une projection.
+model PdpRawTransaction {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Identifiant de la facture DANS l'ERP tiers (ex. « INV/2026/00042 » côté Odoo).
+  // Opaque : recopié tel quel, jamais interprété, jamais supposé unique hors de
+  // l'organisation qui l'émet — deux PME peuvent parfaitement envoyer « FA-001 ».
+  clientUniqueId String @map("client_unique_id")
+
+  flow   PdpFlow
+  status PdpTransactionStatus @default(pending)
+
+  // Montants en centimes GNF (ADR-014), convertis depuis les chaînes numériques
+  // du payload — jamais par un flottant intermédiaire (voir pdp-amounts.ts).
+  totalHtCentimes  BigInt @map("total_ht_centimes")
+  totalVatCentimes BigInt @map("total_vat_centimes")
+  totalTtcCentimes BigInt @map("total_ttc_centimes")
+
+  payload Json
+
+  apiKeyId String @map("api_key_id")
+
+  // invoiceId est posé par le worker e-invoicing DÈS LA CRÉATION DU BROUILLON,
+  // dans la même transaction — pas à la certification. C'est l'ancre
+  // d'idempotence du worker : un crash entre la création et l'émission laisserait
+  // sinon un brouillon orphelin invisible, et le rejeu du job émettrait DEUX
+  // factures certifiées pour un seul document ERP. Au rejeu, le lien déjà présent
+  // fait reprendre la facture existante (PdpConsolidationService.emettre).
+  // certificationId, lui, n'arrive qu'à l'émission réussie.
+  // @unique sur invoiceId : une facture ne répond QUE d'un document ERP — la base
+  // refuse qu'un second dépôt s'accroche à la même.
+  invoiceId       String? @unique @map("invoice_id")
+  certificationId String? @map("certification_id")
+
+  // En clair, quand status = failed. Null partout ailleurs.
+  failureReason String? @map("failure_reason")
+
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  apiKey       ApiKey       @relation(fields: [apiKeyId], references: [id], onDelete: Restrict)
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  // L'index d'idempotence. Composite avec organizationId, jamais un @unique seul
+  // sur clientUniqueId : ce dernier interdirait à deux PME d'utiliser la même
+  // numérotation ERP, ce qui est le cas NORMAL (même précédent qu'Invoice.number,
+  // @@unique([organizationId, number])).
+  @@unique([organizationId, clientUniqueId])
+  // Le cron de compilation du Z de caisse : « les lignes e-reporting encore
+  // pending de cette organisation ». Composite dans cet ordre — RLS filtre
+  // d'abord sur organization_id.
+  @@index([organizationId, flow, status])
+  @@map("pdp_raw_transaction")
+}
+
+// b2b / b2g → une facture unitaire, certifiée puis transmise à la DGI.
+// b2c → une micro-vente, agrégée en Z de caisse. Le mot « flux » du cahier des
+// charges recouvre les deux : c'est cette colonne qui les sépare.
+enum PdpFlow {
+  e_invoicing
+  e_reporting
+}
+
+// pending = déposé, pas encore traité — état de TOUTE ligne à l'insertion, quel
+// que soit le flux. certified = facture émise et certifiée (e-invoicing) ou ligne
+// intégrée à un Z de caisse (e-reporting). failed = abandon définitif,
+// failureReason renseignée.
+enum PdpTransactionStatus {
+  pending
+  certified
+  failed
 }

@@ -84,6 +84,10 @@ export class RenderingService {
         description: line.description,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
+        // ADR-108 — sans lui, le renderer ne peut pas savoir si ce prix unitaire
+        // est TTC (parcours marchand) ou HT (passerelle PDP), et retomberait sur
+        // l'intitulé historique pour les deux.
+        saisieRegime: line.saisieRegime,
       })),
       totalHt: invoice.totalHt,
       totalTva: invoice.totalTva,

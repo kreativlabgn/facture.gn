@@ -66,7 +66,40 @@ export function makePracticeScopedOperation(
   return makeScopedOperation(baseClient, RLS_PRACTICE_SETTING, practiceId);
 }
 
-export function organizationScopedClient(client: PrismaClient, organizationId: string) {
+// ── POURQUOI UN TYPE DE RETOUR ANNOTÉ, ET PAS L'INFÉRENCE DE $extends ───────
+//
+// Le type que `$extends` infère porte les paramètres génériques de l'extension
+// (`InternalArgs<...>`) au lieu de `DefaultArgs`. Les délégués de modèles y sont
+// STRUCTURELLEMENT identiques — une extension `query` intercepte l'exécution,
+// elle ne change ni les arguments acceptés ni les valeurs rendues, contrairement
+// à une extension `result` ou `model` — mais NOMINALEMENT différents. Chaque
+// appel devait donc réconcilier deux arbres de types complets.
+//
+// Ça tenait, de justesse. Le modèle PdpRawTransaction (ADR-107, 29e table du
+// registre RLS) a fait franchir à TypeScript sa limite d'instanciation : les
+// quatre endroits qui manipulent une UNION `PrismaClient | client scopé` —
+// `tx ?? organizationScopedClient(...)` dans OrganizationSigningKeyService,
+// `organizationId ? ... : this.prisma` dans DataRightsService — se sont mis à
+// échouer d'un coup (TS2321 « Excessive stack depth », puis TS2349 « none of
+// those signatures are compatible »), dans des fichiers que la story ne touchait
+// pas. Le seuil est atteint par le NOMBRE DE MODÈLES, pas par ce que ce
+// modèle-ci contient : n'importe quelle table ajoutée ensuite l'aurait déclenché,
+// et le prochain qui l'aurait vu n'aurait eu aucun moyen de relier la panne à sa
+// cause.
+//
+// Annoter le retour coupe la racine du problème : l'union devient
+// `PrismaClient | PrismaClient`, TypeScript n'a plus rien à réconcilier, et les
+// 107 usages directs continuent de se vérifier exactement comme avant. Le cast
+// est le prix à payer — `$extends` retire `$use`/`$on` de sa signature, si bien
+// que son résultat n'est pas assignable à PrismaClient sans lui, alors même que
+// tout ce qu'on utilise (les délégués de modèles, `$transaction`, `$executeRaw`)
+// y est présent et compatible.
+//
+// Ce que l'annotation NE dit pas : qu'un client scopé s'utilise comme un client
+// normal. La mise en garde ci-dessous vaut plus que jamais — `$transaction` est
+// désormais visible sur le type rendu, et l'appeler ouvrirait une transaction
+// imbriquée dans celle que chaque opération scopée ouvre déjà.
+export function organizationScopedClient(client: PrismaClient, organizationId: string): PrismaClient {
   assertScopeId(organizationId, "organizationId");
   return client.$extends({
     query: {
@@ -74,13 +107,17 @@ export function organizationScopedClient(client: PrismaClient, organizationId: s
         $allOperations: makeOrgScopedOperation(client, organizationId),
       },
     },
-  });
+  }) as unknown as PrismaClient;
 }
 
 // Vue transversale d'un cabinet/CGA : voit les données de TOUTES ses organisations
 // à mandat `active` non expiré (DAT §7.2). L'accès concret ligne à ligne est
 // tranché par la politique `org_isolation` via `rls_practice_sees_org()`.
-export function practiceScopedClient(client: PrismaClient, practiceId: string) {
+// Même annotation, même raison qu'organizationScopedClient ci-dessus — et pas
+// seulement par symétrie : MandatesService prend en paramètre
+// `OrganizationScopedClient | PracticeScopedClient`, l'union exacte que ce
+// changement collapse.
+export function practiceScopedClient(client: PrismaClient, practiceId: string): PrismaClient {
   assertScopeId(practiceId, "practiceId");
   return client.$extends({
     query: {
@@ -88,7 +125,7 @@ export function practiceScopedClient(client: PrismaClient, practiceId: string) {
         $allOperations: makePracticeScopedOperation(client, practiceId),
       },
     },
-  });
+  }) as unknown as PrismaClient;
 }
 
 export type OrganizationScopedClient = ReturnType<typeof organizationScopedClient>;
