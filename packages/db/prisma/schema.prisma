@@ -690,6 +690,7 @@ model Organization {
   referralReceived      Referral?                  @relation("ReferralReferred")
   devices               Device[]
   pdpRawTransactions    PdpRawTransaction[]
+  pdpReportingSequences PdpReportingSequence[]
 
   @@map("organization")
 }
@@ -1214,6 +1215,26 @@ model Invoice {
   // jamais à la création du brouillon — sinon un brouillon abandonné créerait un trou.
   number String?
 
+  // ZR-YYYY-NNNNNN — ADR-107, série SÉQUENTIELLE DÉDIÉE au e-Reporting B2C, posée
+  // sur les seules factures de synthèse de caisse (Z de caisse) produites par
+  // PdpConsolidationService.consolidatePeriodicReporting(). NULL partout ailleurs,
+  // c'est-à-dire sur l'immense majorité des lignes.
+  //
+  // NE REMPLACE PAS `number` CI-DESSUS, ET NE PEUT PAS LE REMPLACER. Un Z de caisse
+  // est une facture certifiée comme une autre : elle consomme un numéro de la
+  // séquence légale Article 23 (invoice_sequence, « sans trou », par organisation
+  // et année), et forker cette séquence pour en sortir un flux entier serait une
+  // décision juridique, jamais un choix d'implémentation. Les deux numéros
+  // coexistent donc, et disent deux choses différentes : `number` est l'identité
+  // fiscale du document, `reportingSeriesNumber` son rang dans la suite des Z de
+  // caisse de l'organisation — celui que le contrôleur DGI rapproche des tickets.
+  //
+  // Compteur séparé : pdp_reporting_sequence, même upsert atomique
+  // ON CONFLICT DO UPDATE qu'invoice_sequence. Jamais dans CertifiablePayload —
+  // la certification ne scelle que invoiceId/organizationNif/number/totalTtc/
+  // issuedAt/previousHash.
+  reportingSeriesNumber String? @map("reporting_series_number")
+
   // GN-{NIF8}-{YYYY}-{HASH6} — vérification publique, non-séquentiel.
   // Nullable tant que la facture n'est pas issued (pas de draft certifié).
   certificationId String? @unique @map("certification_id")
@@ -1320,9 +1341,27 @@ model Invoice {
   refunds       Refund[]
   bankTransactionsMatched BankTransaction[]
   creditTransactions      CreditTransaction[]
-  pdpRawTransaction       PdpRawTransaction?
+  // Le document ERP UNIQUE dont cette facture répond (flux e-invoicing B2B/B2G).
+  // Relation nommée depuis ADR-107 tranche 3 : PdpRawTransaction pointe désormais
+  // DEUX fois vers Invoice (ce lien-ci, et le rattachement au Z de caisse
+  // ci-dessous), Prisma exige donc de les distinguer explicitement. Le nom ne
+  // change AUCUN nom de contrainte SQL — la FK reste
+  // pdp_raw_transaction_invoice_id_fkey.
+  pdpRawTransaction       PdpRawTransaction?  @relation("PdpDocumentInvoice")
+  // Les micro-ventes de caisse (flux e-reporting B2C) que CETTE facture de
+  // synthèse consolide. N→1, jamais 1→1 : un Z de caisse compile par construction
+  // des dizaines à des milliers de tickets. C'est la piste d'audit DESCENDANTE —
+  // d'un Z certifié vers les tickets bruts qui le composent.
+  pdpConsolidatedTransactions PdpRawTransaction[] @relation("PdpConsolidatedInvoice")
 
   @@unique([organizationId, number])
+  // Même forme que @@unique([organizationId, number]) juste au-dessus, et pour la
+  // même raison : la série ZR repart à 1 chez chaque organisation. Un @unique seul
+  // sur la colonne interdirait à deux PME d'avoir toutes deux un ZR-2026-000001.
+  // Postgres autorise autant de NULL qu'on veut sous un index unique — les
+  // factures ordinaires, qui ne portent pas de numéro de série, ne se gênent donc
+  // jamais entre elles.
+  @@unique([organizationId, reportingSeriesNumber])
   // E1 — reconstruction de la preuve d'inclusion (feuilles d'une tranche).
   @@index([anchorBatchId])
   @@map("invoice")
@@ -2105,6 +2144,26 @@ model PdpRawTransaction {
   // @unique sur invoiceId : une facture ne répond QUE d'un document ERP — la base
   // refuse qu'un second dépôt s'accroche à la même.
   invoiceId       String? @unique @map("invoice_id")
+
+  // ADR-107, tranche 3 — le Z de caisse qui a AGRÉGÉ cette micro-vente (flux
+  // e-reporting B2C). Colonne DISTINCTE d'invoiceId juste au-dessus, et cette
+  // séparation est le cœur du dispositif, pas une commodité :
+  //
+  //   • invoiceId est @unique — une facture unitaire ne répond QUE d'un document
+  //     ERP. C'est l'invariant qui empêche deux dépôts Odoo de s'accrocher à la
+  //     même facture certifiée. Y brancher les 50 tickets d'un Z violerait la
+  //     contrainte dès le deuxième, et lever ce @unique pour y arriver rendrait
+  //     le flux unitaire vulnérable à exactement ce qu'il interdit aujourd'hui.
+  //   • celle-ci est donc NON unique et indexée : N tickets → 1 Z.
+  //
+  // POSÉE SUR LE BROUILLON, dans la transaction qui le crée — jamais à la
+  // certification. Même ancre d'idempotence qu'invoiceId côté unitaire, et pour la
+  // même raison : la sélection du lot suivant exclut les lignes déjà rattachées
+  // (consolidated_invoice_id IS NULL), donc une interruption entre la création du
+  // Z et sa certification fait REPRENDRE ce Z au run suivant au lieu d'en émettre
+  // un second sur les mêmes tickets.
+  consolidatedInvoiceId String? @map("consolidated_invoice_id")
+
   certificationId String? @map("certification_id")
 
   // En clair, quand status = failed. Null partout ailleurs.
@@ -2115,7 +2174,11 @@ model PdpRawTransaction {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   apiKey       ApiKey       @relation(fields: [apiKeyId], references: [id], onDelete: Restrict)
-  invoice      Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  invoice      Invoice?     @relation("PdpDocumentInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
+  // onDelete: Restrict comme les trois autres — un Z de caisse certifié ne se
+  // supprime pas, et s'il le pouvait il n'emporterait jamais la trace des tickets
+  // qui le composent.
+  consolidatedInvoice Invoice? @relation("PdpConsolidatedInvoice", fields: [consolidatedInvoiceId], references: [id], onDelete: Restrict)
 
   // L'index d'idempotence. Composite avec organizationId, jamais un @unique seul
   // sur clientUniqueId : ce dernier interdirait à deux PME d'utiliser la même
@@ -2126,7 +2189,32 @@ model PdpRawTransaction {
   // pending de cette organisation ». Composite dans cet ordre — RLS filtre
   // d'abord sur organization_id.
   @@index([organizationId, flow, status])
+  // La piste d'audit DESCENDANTE : « quels tickets composent ce Z ? ». Question
+  // posée à chaque contrôle DGI et à chaque contestation client — sans index, elle
+  // se paie un scan complet de la table tampon, qui est la plus volumineuse du
+  // schéma par construction (une ligne par ticket de caisse).
+  @@index([consolidatedInvoiceId])
   @@map("pdp_raw_transaction")
+}
+
+// ADR-107, tranche 3 — compteur de la série e-Reporting (ZR-YYYY-NNNNNN), posé sur
+// Invoice.reportingSeriesNumber. Jumeau exact d'InvoiceSequence, et délibérément
+// SÉPARÉ d'elle : invoice_sequence porte la séquence légale Article 23 « sans
+// trou » de TOUTES les factures de l'organisation. Y faire passer une seconde
+// suite mêlerait deux numérotations dont l'une est opposable en contrôle fiscal.
+//
+// Même clé [organizationId, year] : la série repart à 1 chaque année, comme la
+// numérotation légale, et chaque organisation a la sienne.
+model PdpReportingSequence {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+  year           Int
+  lastNumber     Int    @default(0) @map("last_number")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, year])
+  @@map("pdp_reporting_sequence")
 }
 
 // b2b / b2g → une facture unitaire, certifiée puis transmise à la DGI.

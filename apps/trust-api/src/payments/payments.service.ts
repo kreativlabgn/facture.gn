@@ -467,16 +467,34 @@ export class PaymentsService {
   ): Promise<number | null> {
     // `invoice: { organizationId }` conservé : payment est sous RLS par
     // indirection, cette jointure EST la garde explicite tant que le GUC dort.
+    //
+    // ── ADR-119 — les apurements de Z de caisse sont HORS RATIO ──────────────
+    //
+    // Un Z de caisse (ADR-107) s'apure tout seul à l'émission, par un règlement
+    // `cash` que personne n'a choisi : il constate des micro-ventes déjà
+    // encaissées, espèces ET Mobile Money confondus. Le laisser entrer dans ce
+    // calcul fausserait le signal DANS LE SENS QUI ACCUSE : le cron de
+    // regroupement tourne toutes les heures, soit ~24 règlements `cash`
+    // supplémentaires par jour et par marchand à caisse, tous au dénominateur.
+    // Le ratio non-cash s'effondrerait mécaniquement — et la « chute du ratio
+    // non-cash » est précisément le motif d'ouverture d'un CommissionBypassCase
+    // (G3, ADR-091). Un marchand parfaitement honnête, dont le seul tort est
+    // d'avoir branché sa caisse, se retrouverait en revue Squad Money.
+    //
+    // L'exclusion porte sur les DEUX comptages, pas seulement le dénominateur :
+    // ces règlements sont `cash` aujourd'hui, mais un filtre posé d'un seul côté
+    // deviendrait faux le jour où le connecteur transmettrait un mode par ticket.
+    const horsSyntheseDeCaisse = { organizationId, reportingSeriesNumber: null };
     const scoped = organizationScopedClient(this.prisma, organizationId);
     const total = await scoped.payment.count({
-      where: { invoice: { organizationId }, collectedAt: { gte: windowStart, lt: windowEnd } },
+      where: { invoice: horsSyntheseDeCaisse, collectedAt: { gte: windowStart, lt: windowEnd } },
     });
     if (total === 0) {
       return null;
     }
     const nonCash = await scoped.payment.count({
       where: {
-        invoice: { organizationId },
+        invoice: horsSyntheseDeCaisse,
         collectedAt: { gte: windowStart, lt: windowEnd },
         method: { not: "cash" },
       },

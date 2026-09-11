@@ -40,3 +40,29 @@ export const PDP_CONSOLIDATED_METRIC = "trust_api_pdp_consolidated_total";
  *  une ligne tampon passée en `failed`, c'est-à-dire à un document fiscal d'un
  *  client tiers qui ne sera JAMAIS certifié sans intervention. */
 export const PDP_CONSOLIDATION_FAILURES_METRIC = "trust_api_pdp_consolidation_failed_total";
+
+/** Z de caisse (factures de synthèse e-Reporting) certifiés et remis au circuit
+ *  e-TVA.
+ *
+ *  Se lit AVEC le compteur de tickets ci-dessous, jamais seul : leur rapport est
+ *  le nombre moyen de tickets par Z, et c'est lui qui dit si l'agrégation fait son
+ *  travail. Un rapport qui s'effondre vers 1 signifie qu'on émet une facture
+ *  certifiée — donc qu'on consomme un numéro Article 23 — par vente de caisse,
+ *  c'est-à-dire exactement l'inondation du guichet DGI que ce cron existe pour
+ *  éviter. */
+export const PDP_REPORTING_BATCHES_METRIC = "trust_api_pdp_reporting_batches_total";
+
+/** Micro-ventes de caisse effectivement basculées en `certified` et rattachées à
+ *  un Z. Le pendant en SORTIE de PDP_DOCUMENTS_INGESTED_METRIC{flow="e_reporting"} :
+ *  l'écart entre les deux est le nombre de tickets encore en attente de
+ *  compilation — cron désarmé, worker arrêté, ou lot bloqué. */
+export const PDP_REPORTING_TICKETS_METRIC = "trust_api_pdp_reporting_tickets_total";
+
+/** 1 si le cron de regroupement est armé dans Redis, 0 sinon.
+ *
+ *  Une jauge et non un compteur, parce que la question est un ÉTAT, pas un
+ *  cumul : « les Z de caisse sont-ils compilés en ce moment ? ». À 0, les tickets
+ *  s'accumulent en silence dans la table tampon — aucune erreur nulle part, et le
+ *  manquement déclaratif ne se découvre qu'au contrôle. Même patron que
+ *  MERKLE_SCHEDULERS_ARMED_METRIC (E1). */
+export const PDP_REPORTING_SCHEDULER_ARMED_METRIC = "trust_api_pdp_reporting_scheduler_armed";

@@ -76,6 +76,12 @@ function createFakePrisma(overrides: { invoice?: any; organization?: any; fiscal
     fiscalPeriodClosing: {
       findUnique: vi.fn().mockResolvedValue(overrides.fiscalPeriodClosing ?? null),
     },
+    // ADR-119 — le règlement d'apurement d'un Z de caisse. Écrit UNIQUEMENT
+    // quand la facture porte un reportingSeriesNumber : les tests d'émission
+    // ordinaire vérifient précisément qu'on n'y touche jamais.
+    payment: {
+      create: vi.fn().mockResolvedValue({ id: "pay-1" }),
+    },
     organization: {
       // commercialTier: freemium par défaut (grille commission, ADR-074) — reflète
       // Organization.commercialTier @default(freemium) du schema.
@@ -2843,5 +2849,195 @@ describe("InvoicesService.issue — garde d'exercice clos (Lot B, ADR-110)", () 
 
     const result = await service.issue("inv-1", "org-1");
     expect(result.status).toBe("issued");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADR-119 — apurement automatique des factures de synthèse e-Reporting B2C
+// ══════════════════════════════════════════════════════════════════════════════
+
+const SERIE_Z = "ZR-2026-000004";
+
+/** Une facture prête à être émise. `reportingSeriesNumber` décide de tout : sa
+ *  présence fait un Z de caisse, son absence une facture ordinaire. */
+function prismaPourEmission(reportingSeriesNumber: string | null) {
+  return createFakePrisma({
+    invoice: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "inv-1",
+        status: "draft",
+        documentType: "invoice",
+        organizationId: "org-1",
+        totalTtc: 1_180_000n,
+        amountPaid: 0n,
+        reportingSeriesNumber,
+      }),
+    },
+  });
+}
+
+function serviceDEmission(prisma: any, paymentLink: any = createFakePaymentLinkClient()) {
+  return new InvoicesService(
+    prisma as any,
+    createFakeNumbering() as any,
+    createFakeSigningKeyService() as any,
+    paymentLink as any,
+  );
+}
+
+describe("InvoicesService — apurement d'un Z de caisse (ADR-119)", () => {
+  it("solde le Z dès l'émission au lieu de le porter en créance", async () => {
+    const prisma = prismaPourEmission(SERIE_Z);
+
+    await serviceDEmission(prisma).issue("inv-1", "org-1");
+
+    const { data } = prisma.invoice.update.mock.calls[0][0];
+    expect(data.status).toBe("paid");
+    expect(data.amountDue).toBe(0n);
+    expect(data.amountPaid).toBe(1_180_000n);
+  });
+
+  // Le règlement et la certification commitent ENSEMBLE : un Z certifié sans son
+  // règlement serait une créance fantôme, un règlement sans son Z un
+  // encaissement orphelin.
+  it("écrit le règlement d'apurement dans la transaction de certification", async () => {
+    const prisma = prismaPourEmission(SERIE_Z);
+
+    await serviceDEmission(prisma).issue("inv-1", "org-1");
+
+    expect(prisma.payment.create).toHaveBeenCalledTimes(1);
+    const { data } = prisma.payment.create.mock.calls[0][0];
+    expect(data).toMatchObject({
+      invoiceId: "inv-1",
+      amount: 1_180_000n,
+      amountCollected: 1_180_000n,
+      // Journal de caisse à l'export FEC, comme le ferait un Z papier.
+      method: "cash",
+      // Les deux conditions d'isSettledPayment (fec-generation.ts) : sans elles
+      // l'apurement serait invisible de l'export comptable légal.
+      status: "completed",
+      depositType: null,
+      // Aucune commission : facture.gn n'a servi d'intermédiaire à aucune de ces
+      // ventes, encaissées au comptoir avant que le document n'existe.
+      platformFeeAmount: 0n,
+      gatewayFeeAmount: 0n,
+    });
+    // Clé déterministe — c'est elle qui empêche de créditer le Z deux fois.
+    expect(data.idempotencyKey).toBe("zr-apurement-inv-1");
+  });
+
+  // Point 3 de l'ADR. Un lien provoquerait un DOUBLE encaissement chez un client
+  // final qui a déjà payé au comptoir et ne reconnaîtrait ni le montant global
+  // ni le document.
+  it("n'émet aucun lien de paiement pour un Z, même si l'organisation les envoie d'office", async () => {
+    const prisma = prismaPourEmission(SERIE_Z);
+    prisma.organization.findUniqueOrThrow = vi.fn().mockResolvedValue({
+      id: "org-1",
+      nif: "GN12345678",
+      commercialTier: "freemium",
+      // Le drapeau du marchand est à true : c'est le DOCUMENT qui court-circuite.
+      paymentLinkAutoSend: true,
+    });
+    const paymentLink = createFakePaymentLinkClient({
+      paymentLinkUrl: "https://pay.example/z",
+      providerRef: "pl-1",
+      expiresAt: new Date(),
+    });
+
+    await serviceDEmission(prisma, paymentLink).issue("inv-1", "org-1");
+
+    expect(paymentLink.tryGenerate).not.toHaveBeenCalled();
+  });
+
+  // La colonne payment_link_auto_send appartient à Organization, pas à Invoice.
+  // L'écrire couperait les liens de TOUTES les factures du marchand, y compris
+  // ses ventes B2B à recouvrer — une régression de recouvrement silencieuse.
+  it("ne touche JAMAIS au drapeau de l'organisation pour y parvenir", async () => {
+    const prisma = prismaPourEmission(SERIE_Z);
+    prisma.organization.update = vi.fn();
+    prisma.organization.updateMany = vi.fn();
+
+    await serviceDEmission(prisma).issue("inv-1", "org-1");
+
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+    expect(prisma.organization.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Le déclaratif n'est pas concerné : transmettre le Z à la DGI est sa raison
+  // d'être (e-Reporting B2C, LFI 2025). L'apurement ne touche qu'au recouvrement.
+  it("transmet quand même le Z au guichet e-TVA", async () => {
+    const prisma = prismaPourEmission(SERIE_Z);
+    const etax = { enqueueForInvoice: vi.fn().mockResolvedValue(undefined) };
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+      undefined,
+      undefined,
+      undefined,
+      etax as any,
+    );
+
+    await service.issue("inv-1", "org-1");
+
+    expect(etax.enqueueForInvoice).toHaveBeenCalledWith("inv-1", "org-1");
+  });
+});
+
+describe("InvoicesService — ce que l'apurement ADR-119 ne doit JAMAIS toucher", () => {
+  // LE test qui protège le chiffre d'affaires. L'ADR énonce la condition comme
+  // « saisieRegime = HT_FIRST ET rattaché à un lot e-Reporting ». La première
+  // clause prise SEULE serait catastrophique : le worker PDP unitaire pose
+  // HT_FIRST sur TOUTE facture B2B/B2G venue d'un ERP tiers
+  // (PdpConsolidationService.creerBrouillonLie), et ce sont de vraies créances
+  // impayées. Les apurer d'office effacerait des dizaines de millions de GNF de
+  // dû réel, sans le moindre signal.
+  it("laisse une facture B2B de connecteur ERP en créance, malgré son régime HT_FIRST", async () => {
+    // Aucun numéro de série : ce document n'appartient à aucun lot de caisse,
+    // quel que soit le régime de saisie de ses lignes.
+    const prisma = prismaPourEmission(null);
+
+    await serviceDEmission(prisma).issue("inv-1", "org-1");
+
+    const { data } = prisma.invoice.update.mock.calls[0][0];
+    expect(data.status).toBe("issued");
+    expect(data.amountDue).toBe(1_180_000n);
+    expect(data.amountPaid).toBeUndefined();
+    expect(prisma.payment.create).not.toHaveBeenCalled();
+  });
+
+  // Le défaut tombe du côté « ce n'est pas un Z ». `undefined !== null` vaut
+  // true : un prédicat écrit en `!== null` aurait reconnu comme Z de caisse
+  // toute facture lue par un `select` n'incluant pas la colonne — apurée
+  // d'office, créditée d'un règlement fantôme. Une créance effacée ne se
+  // rattrape pas.
+  it("traite une facture sans la colonne de série comme une facture ordinaire", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          status: "draft",
+          documentType: "invoice",
+          organizationId: "org-1",
+          totalTtc: 1_180_000n,
+          // reportingSeriesNumber absent, comme sous un select partiel.
+        }),
+      },
+    });
+
+    await serviceDEmission(prisma).issue("inv-1", "org-1");
+
+    expect(prisma.invoice.update.mock.calls[0][0].data.status).toBe("issued");
+    expect(prisma.payment.create).not.toHaveBeenCalled();
+  });
+
+  it("traite une série vide comme une absence de série", async () => {
+    const prisma = prismaPourEmission("");
+
+    await serviceDEmission(prisma).issue("inv-1", "org-1");
+
+    expect(prisma.invoice.update.mock.calls[0][0].data.status).toBe("issued");
+    expect(prisma.payment.create).not.toHaveBeenCalled();
   });
 });

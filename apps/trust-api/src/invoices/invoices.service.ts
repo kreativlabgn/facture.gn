@@ -30,6 +30,29 @@ import { canauxFactures, type CanalFacturable } from "../credits/credits.constan
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
 
+/**
+ * ADR-119 — ce document est-il une facture de synthèse de caisse (Z de caisse,
+ * ADR-107) ?
+ *
+ * Un seul porteur : `reportingSeriesNumber`, écrit exclusivement par
+ * PdpConsolidationService.ouvrirOuReprendreLot(), dans la transaction même qui
+ * crée le brouillon Z. Aucun autre chemin d'écriture n'y touche.
+ *
+ * ── POURQUOI PAS `!== null`, QUI SERAIT LE RÉFLEXE ──────────────────────────
+ * Parce que `undefined !== null` vaut `true`. Un appelant qui aurait lu la
+ * facture par un `select` n'incluant pas la colonne verrait donc TOUTES ses
+ * factures reconnues comme des Z de caisse — apurées d'office, créditées d'un
+ * règlement fantôme, et privées de lien de paiement. Une créance réelle effacée
+ * ne se rattrape pas : le défaut doit tomber du côté « ce n'est pas un Z ».
+ *
+ * Le test porte donc sur la PRÉSENCE d'une chaîne non vide, jamais sur
+ * l'absence de null. Une colonne manquante, nulle ou vide veut dire la même
+ * chose ici : facture ordinaire, à recouvrer normalement.
+ */
+export function estSyntheseDeCaisse(invoice: { reportingSeriesNumber?: string | null }): boolean {
+  return typeof invoice.reportingSeriesNumber === "string" && invoice.reportingSeriesNumber !== "";
+}
+
 // Quality Audit 2026-08-23, finding #9 — sous-ensemble explicite des champs
 // qu'un brouillon peut légitimement recevoir en correction. Exclut
 // délibérément tout ce qui appartient au chemin de certification (status,
@@ -426,6 +449,27 @@ export class InvoicesService {
         tx,
       );
 
+      // ── ADR-119 — apurement automatique d'une facture de synthèse de caisse ──
+      //
+      // Un Z de caisse (ADR-107) consolide des micro-ventes DÉJÀ réglées au
+      // comptoir, en espèces ou en Mobile Money. Émis comme une facture
+      // ordinaire, il porterait amountDue = totalTtc : le poste clients du
+      // tableau de bord gonflerait d'un montant que personne ne doit, et
+      // l'organisation recevrait un lien de paiement fantôme pour des ventes
+      // encaissées la veille.
+      //
+      // LE DISCRIMINANT EST reportingSeriesNumber, JAMAIS saisieRegime. L'ADR
+      // énonce la condition comme « saisieRegime = HT_FIRST ET rattaché à un lot
+      // e-Reporting » ; dans ce schéma les deux clauses désignent le même
+      // ensemble, mais la première prise SEULE serait catastrophique — le worker
+      // PDP unitaire pose HT_FIRST sur TOUTE facture B2B/B2G venue d'un ERP
+      // tiers (PdpConsolidationService.creerBrouillonLie), et ce sont de vraies
+      // créances impayées. Les apurer d'office effacerait des dizaines de
+      // millions de GNF de dû réel. La seconde clause est donc la seule encodée,
+      // et reportingSeriesNumber en est le porteur : il n'est écrit que par
+      // ouvrirOuReprendreLot(), dans la transaction même qui crée le brouillon Z.
+      const apurementAutomatique = estSyntheseDeCaisse(invoice);
+
       let issuedInvoice;
       try {
         issuedInvoice = await tx.invoice.update({
@@ -437,9 +481,16 @@ export class InvoicesService {
             previousHash: certification.previousHash,
             signature: Buffer.from(certification.signature, "hex"),
             signingKeyId: certification.signingKeyId,
-            status: "issued",
             issuedAt,
-            amountDue: invoice.totalTtc,
+            // `paid` d'emblée, sans transiter par `issued` : le règlement est
+            // antérieur à l'émission, pas postérieur. Le statut ferme aussi la
+            // porte à un second encaissement — PAYABLE_STATUSES (PaymentsService)
+            // n'admet que `issued` et `partially_paid`, donc tout appel ultérieur
+            // à recordCashPayment/recordProviderPayment sur ce Z est refusé en
+            // 409 par le chemin normal, sans garde supplémentaire à maintenir.
+            ...(apurementAutomatique
+              ? { status: "paid" as const, amountPaid: invoice.totalTtc, amountDue: BigInt(0) }
+              : { status: "issued" as const, amountDue: invoice.totalTtc }),
           },
         });
       } catch (error) {
@@ -462,6 +513,50 @@ export class InvoicesService {
           );
         }
         throw error;
+      }
+
+      // Le règlement d'apurement, DANS LA MÊME TRANSACTION que la certification.
+      // Un Z certifié sans son règlement serait une créance fantôme au bilan ; un
+      // règlement sans son Z serait un encaissement orphelin. Les deux n'ont de
+      // sens qu'ensemble, donc ils commitent ensemble.
+      //
+      // idempotencyKey DÉTERMINISTE : c'est la colonne @unique qui porte
+      // l'idempotence des paiements (ADR-016), et la dériver de l'invoiceId la
+      // rend gratuite ici — une réémission qui rejouerait ce chemin heurterait la
+      // contrainte au lieu de créditer le Z deux fois.
+      //
+      // method: "cash" — un Z de caisse se solde au journal de caisse, comme le
+      // ferait son équivalent papier (l'export FEC lit cette colonne : compte
+      // 5310 / journal « CA »). La part réellement encaissée en Mobile Money y va
+      // donc aussi : le connecteur ERP ne transmet aucun mode de règlement par
+      // ticket, et inventer une ventilation serait pire que l'assumer. En
+      // contrepartie, ces règlements sont EXCLUS du ratio non-cash du détecteur
+      // de contournement de commission (PaymentsService, G3/ADR-091) — sans quoi
+      // un Z par heure ferait chuter le ratio de tout marchand à caisse et
+      // ouvrirait des dossiers contre des honnêtes gens.
+      //
+      // status "completed" et depositType null : les deux conditions
+      // d'isSettledPayment (fec-generation.ts). Un apurement qui ne les
+      // remplirait pas serait invisible de l'export comptable légal.
+      if (apurementAutomatique) {
+        await tx.payment.create({
+          data: {
+            invoiceId,
+            amount: invoice.totalTtc,
+            amountCollected: invoice.totalTtc,
+            // Aucune commission, aucun frais de passerelle : facture.gn n'a servi
+            // d'intermédiaire à aucune de ces ventes — elles ont été encaissées au
+            // comptoir avant même que le document n'existe. Y poser un
+            // computePlatformFee() facturerait un service jamais rendu.
+            platformFeeAmount: BigInt(0),
+            gatewayFeeAmount: BigInt(0),
+            method: "cash",
+            status: "completed",
+            depositType: null,
+            idempotencyKey: `zr-apurement-${invoiceId}`,
+            collectedAt: issuedAt,
+          },
+        });
       }
 
       return { issuedInvoice, organization };
@@ -488,7 +583,29 @@ export class InvoicesService {
     // enqueueForInvoice() NE LÈVE JAMAIS : la facture est certifiée et
     // committée, le commerçant a son document. Redis éteint doit laisser une
     // trace à rattraper, pas casser une émission déjà acquise.
+    // La transmission DGI, ELLE, a lieu pour un Z de caisse comme pour toute
+    // autre facture certifiée : c'est même sa raison d'être (e-Reporting B2C,
+    // LFI 2025). L'apurement ADR-119 ne touche qu'au recouvrement, jamais au
+    // déclaratif.
     await this.etaxInvoice?.enqueueForInvoice(issuedInvoice.id, organizationId);
+
+    // ── ADR-119, point 3 — aucun lien de paiement sur un Z de caisse ─────────
+    //
+    // Le solde est nul et les ventes sont encaissées : un lien ne pourrait que
+    // provoquer un DOUBLE encaissement, chez un client final qui a déjà payé au
+    // comptoir et ne reconnaîtrait ni le montant global ni le document.
+    //
+    // SUPPRESSION PAR DOCUMENT, jamais par organisation. L'ADR parle de « forcer
+    // paymentLinkAutoSend à false » : ce drapeau est une colonne d'Organization,
+    // pas de facture (schema.prisma, `payment_link_auto_send`). L'écrire
+    // couperait les liens de paiement de TOUTES les factures du marchand, y
+    // compris ses ventes B2B à recouvrer — une régression de recouvrement
+    // silencieuse, déclenchée par le premier Z venu et jamais rétablie. Le
+    // court-circuit vit donc ici, sur le document, et la colonne du marchand
+    // reste ce qu'il en a décidé.
+    if (estSyntheseDeCaisse(issuedInvoice)) {
+      return issuedInvoice;
+    }
 
     // Meilleur effort, jamais couplé à la certification (déjà committée ci-dessus) :
     // DAT §12 fixe deux SLA distinctes ("Émission facture < 2s" / "Génération lien
