@@ -371,6 +371,7 @@ model User {
   devicesRevoked                Device[]                   @relation("DeviceRevoker")
   creditTransactions            CreditTransaction[]
   pendingMemberInvitesSent      PendingMemberInvite[]      @relation("PendingMemberInviteInviter")
+  ocrDocumentsUploaded          OcrDocument[]              @relation("OcrDocumentUploader")
   pendingMemberInvitesResolved  PendingMemberInvite[]      @relation("PendingMemberInviteResolvedUser")
   fiscalPeriodClosingsMade      FiscalPeriodClosing[]
   bankTransactionsImported      BankTransaction[]          @relation("BankTransactionImporter")
@@ -691,6 +692,7 @@ model Organization {
   devices               Device[]
   pdpRawTransactions    PdpRawTransaction[]
   pdpReportingSequences PdpReportingSequence[]
+  ocrDocuments          OcrDocument[]
 
   @@map("organization")
 }
@@ -1353,6 +1355,9 @@ model Invoice {
   // des dizaines à des milliers de tickets. C'est la piste d'audit DESCENDANTE —
   // d'un Z certifié vers les tickets bruts qui le composent.
   pdpConsolidatedTransactions PdpRawTransaction[] @relation("PdpConsolidatedInvoice")
+  // ADR-122 — le document papier scanné dont CE brouillon est issu. 1→1 comme
+  // pdpRawTransaction : une facture ne répond que d'un seul scan.
+  ocrDocument OcrDocument? @relation("OcrDocumentInvoice")
 
   @@unique([organizationId, number])
   // Même forme que @@unique([organizationId, number]) juste au-dessus, et pour la
@@ -2233,4 +2238,104 @@ enum PdpTransactionStatus {
   pending
   certified
   failed
+}
+
+// ADR-122 — Hub de Vision Souveraine : extraction automatique des factures
+// PAPIER (carnets à souche du marché de Madina) photographiées depuis la PWA.
+//
+// UN SCAN N'EST JAMAIS UNE FACTURE. Cette table est le REGISTRE de ce que le
+// modèle a lu et de ce que le serveur en a décidé — jamais la facture elle-même.
+// Trois raisons de la tenir à part d'Invoice :
+//
+//   • la sortie du modèle est un ORACLE FAILLIBLE. Elle est archivée telle
+//     quelle dans `extraction` (Json), comme pdp_raw_transaction.payload archive
+//     le corps ERP : c'est la pièce à produire quand un commerçant conteste
+//     « ce que la machine a lu ». Les colonnes typées n'en sont qu'une
+//     projection.
+//   • le statut DRAFT_PENDING_MANUAL_REVIEW n'a de sens que POUR LE SCAN. Il ne
+//     doit pas contaminer InvoiceStatus (7 valeurs, protégées par le cycle de
+//     vie Article 23 et les contraintes CHECK) : une facture est un brouillon
+//     ou ne l'est pas ; c'est le document scanné qui attend une relecture.
+//   • @@unique([organizationId, imageSha256]) est l'idempotence du scan : le
+//     même cliché renvoyé après un timeout 3G ne crée ni deux registres ni deux
+//     brouillons. Composite avec l'organisation, jamais un @unique seul : deux
+//     PME peuvent photographier le même modèle de carnet vierge.
+model OcrDocument {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Qui a pris la photo. onDelete: Restrict — la trace d'un scan qui a produit
+  // (ou failli produire) une facture ne disparaît pas avec le compte.
+  uploadedByUserId String @map("uploaded_by_user_id")
+
+  // Empreinte SHA-256 (hex minuscule) des octets de l'image. Clé d'idempotence.
+  imageSha256 String @map("image_sha256")
+  // Clé de l'objet dans le stockage (jamais les octets en base).
+  storageKey String @map("storage_key")
+
+  status OcrDocumentStatus @default(RECEIVED)
+
+  // Identifiant du modèle qui a produit `extraction` — traçabilité de
+  // souveraineté : quel poids, quelle version, a lu ce document.
+  modelId String? @map("model_id")
+
+  // Sortie STRUCTURÉE du modèle, telle que reçue et validée par le schéma
+  // Zod (ocr-extraction.schema.ts). Null tant que le modèle n'a pas répondu, ou
+  // s'il a rendu un JSON hors contrat (status = REJECTED, rejectionReason posée).
+  extraction Json?
+
+  // Projection des totaux LUS par le modèle, en centimes GNF (ADR-014). Nulls
+  // tant qu'aucune extraction n'existe. Ce sont les montants CONSTATÉS sur le
+  // papier — pas ceux d'une facture certifiée, qui n'existe pas encore.
+  totalHtCentimes  BigInt? @map("total_ht_centimes")
+  totalVatCentimes BigInt? @map("total_vat_centimes")
+  totalTtcCentimes BigInt? @map("total_ttc_centimes")
+  // ADR-108 — le régime que le modèle a reconnu sur le document (prix unitaires
+  // HT ou TTC). Nullable : inconnu avant extraction.
+  saisieRegime SaisieRegime? @map("saisie_regime")
+
+  // Les écarts relevés par OcrValidationService quand status =
+  // DRAFT_PENDING_MANUAL_REVIEW : liste [{ code, chemin, attendu, constate }]
+  // rendue telle quelle au front (OcrReviewAlert). Null partout ailleurs.
+  reviewFindings Json? @map("review_findings")
+
+  // En clair, quand status = REJECTED (sortie du modèle hors contrat).
+  rejectionReason String? @map("rejection_reason")
+
+  // Le brouillon d'Invoice créé quand la double-garde a validé le document,
+  // posé DANS LA MÊME TRANSACTION que le passage à AUTO_INSERTED — même ancre
+  // d'idempotence que pdp_raw_transaction.invoice_id. @unique : une facture ne
+  // répond que d'un scan.
+  invoiceId String? @unique @map("invoice_id")
+
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  uploadedBy   User         @relation("OcrDocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  invoice      Invoice?     @relation("OcrDocumentInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, imageSha256])
+  // La bannette de relecture : « les scans de cette organisation qui attendent
+  // une main humaine ». Composite dans cet ordre — RLS filtre d'abord sur
+  // organization_id.
+  @@index([organizationId, status])
+  @@map("ocr_document")
+}
+
+// RECEIVED = image reçue, le modèle n'a pas encore rendu (ou a rendu et la
+// validation est en cours — état transitoire jamais persisté seul en pratique).
+// AUTO_INSERTED = double-garde passée au centime près, brouillon créé et lié.
+// DRAFT_PENDING_MANUAL_REVIEW = au moins un écart d'UN centime entre ce que le
+// modèle a lu et ce qui se recalcule : AUCUN brouillon n'est créé, le commerçant
+// relit (ADR-122 §2). REJECTED = le modèle a rendu un JSON hors contrat ; rien
+// n'a pu être lu, le document est à rescanner.
+//
+// Majuscules comme SaisieRegime : valeurs fixées telles quelles par l'ADR-122
+// (DRAFT_PENDING_MANUAL_REVIEW y est nommé) et lues par le front.
+enum OcrDocumentStatus {
+  RECEIVED
+  AUTO_INSERTED
+  DRAFT_PENDING_MANUAL_REVIEW
+  REJECTED
 }
