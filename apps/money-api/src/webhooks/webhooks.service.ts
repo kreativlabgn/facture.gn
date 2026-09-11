@@ -23,6 +23,9 @@ export class WebhooksService {
     if (!normalized.signatureValid) {
       throw new UnauthorizedException("Signature webhook invalide");
     }
+    if (!normalized.providerRef) {
+      throw new BadRequestException("Le payload webhook ne contient pas de providerRef");
+    }
 
     const alreadyProcessed = await this.prisma.paymentWebhook.findUnique({
       where: { provider_providerRef: { provider: providerName, providerRef: normalized.providerRef } },
@@ -41,17 +44,46 @@ export class WebhooksService {
     }
 
     if (normalized.status === "paid") {
-      // Jamais catché ici — un échec doit remonter jusqu'au contrôleur pour qu'il
-      // réponde en erreur au fournisseur (redélivraison attendue), pas être avalé.
-      // L'insertion de PaymentWebhook n'a lieu qu'APRÈS ce succès (voir plus bas) :
-      // jamais un état à moitié traité.
-      await this.confirmationClient.confirm({
-        invoiceId: attempt.invoiceId,
-        amountGnf: attempt.amountGnf,
-        provider: providerName,
-        providerRef: normalized.providerRef,
-        feeGatewayGnf: attempt.feeGateway,
-      });
+      // La ligne de dédoublonnage est posée AVANT la confirmation : si celle-ci
+      // échoue (trust-api hors ligne), la ligne est retirée et le fournisseur
+      // redélivresse le webhook, qui repassera par le même chemin. Si la
+      // confirmation réussit et que le processus crash avant la mise à jour,
+      // la redélivraison trouve la ligne et saute : le paiement est déjà enregistré
+      // côté trust-api, et la confirmation est idempote (ADR-076).
+      try {
+        await this.prisma.paymentWebhook.create({
+          data: {
+            provider: providerName,
+            providerRef: normalized.providerRef,
+            payload: rawPayload as Prisma.InputJsonValue,
+            normalizedStatus: normalized.status,
+            signatureValid: normalized.signatureValid,
+          },
+        });
+      } catch (error) {
+        // Course concurrente : une autre livraison a inséré la ligne en même
+        // temps. Le paiement est déjà traité (ou en cours) — on ne repasse pas
+        // par confirm(), jamais un double paiement.
+        if (!isUniqueConstraintViolation(error, "provider_ref")) {
+          throw error;
+        }
+        return;
+      }
+      try {
+        await this.confirmationClient.confirm({
+          invoiceId: attempt.invoiceId,
+          amountGnf: attempt.amountGnf,
+          provider: providerName,
+          providerRef: normalized.providerRef,
+          feeGatewayGnf: attempt.feeGateway,
+        });
+      } catch (error) {
+        await this.prisma.paymentWebhook.delete({
+          where: { provider_providerRef: { provider: providerName, providerRef: normalized.providerRef } },
+        });
+        throw error;
+      }
+      return;
     }
 
     try {
@@ -65,10 +97,6 @@ export class WebhooksService {
         },
       });
     } catch (error) {
-      // Course concurrente : deux livraisons quasi simultanées du même webhook
-      // passent toutes deux le lookup de dédoublonnage avant que l'une des deux ne
-      // committe — la contrainte unique DB tranche, on ignore silencieusement
-      // (l'autre a déjà tout traité), jamais un 500 brut.
       if (!isUniqueConstraintViolation(error, "provider_ref")) {
         throw error;
       }

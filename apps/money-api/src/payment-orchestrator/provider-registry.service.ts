@@ -70,18 +70,30 @@ export class PaymentProviderRegistryService {
     status: "success" | "failed" | "timeout",
     result?: CreatePaymentLinkResult,
   ): Promise<void> {
-    await this.prisma.paymentProviderAttempt.create({
-      data: {
-        invoiceId: request.invoiceId,
-        provider,
-        status,
-        providerRef: result?.providerRef,
-        amountGnf: request.amountGnf,
-        feeGateway: result?.feeGatewayGnf ?? 0n,
-        paymentLinkUrl: result?.paymentLinkUrl,
-        expiresAt: result?.expiresAt,
-        settledAt: status === "success" ? new Date() : null,
-      },
-    });
+    const idempotencyKey = `${request.invoiceId}:${provider}`;
+    try {
+      await this.prisma.paymentProviderAttempt.create({
+        data: {
+          invoiceId: request.invoiceId,
+          provider,
+          status,
+          idempotencyKey,
+          providerRef: result?.providerRef,
+          amountGnf: request.amountGnf,
+          feeGateway: result?.feeGatewayGnf ?? 0n,
+          paymentLinkUrl: result?.paymentLinkUrl,
+          expiresAt: result?.expiresAt,
+          settledAt: status === "success" ? new Date() : null,
+        },
+      });
+    } catch (error) {
+      // Un échec d'insertion ne doit pas masquer l'état du provider : le
+      // registre a déjà tenté, l'attempt est tracé par le webhook ou la
+      // réconciliation si elle survive. On logue et on laisse le statut
+      // réel du provider guider le chemin (success → résultat, sinon null).
+      console.error(
+        `Impossible d'enregistrer l'attempt ${provider} pour ${request.invoiceId} (idempotencyKey=${idempotencyKey}) : ${(error as Error).message}`,
+      );
+    }
   }
 }

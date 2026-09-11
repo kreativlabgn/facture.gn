@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, StreamableFile, UsePipes } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
@@ -35,6 +36,7 @@ export class InvoicesController {
   // @CurrentUser(), qui échouerait alors le même schéma de validation (piège déjà
   // documenté dans organizations.controller.ts).
   @Post("assisted")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   createAssisted(
     @Body(new ZodValidationPipe(createInvoiceSchema)) dto: CreateInvoiceDto,
     @CurrentUser() user: CurrentUserPayload,
@@ -93,12 +95,14 @@ export class InvoicesController {
   }
 
   @Post(":id/issue")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Roles("owner", "admin", "cashier")
   issue(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
     return this.invoicesService.issue(id, organizationId);
   }
 
   @Post(":id/void")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Roles("owner", "admin")
   void(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
     return this.invoicesService.void(id, organizationId);
@@ -107,6 +111,7 @@ export class InvoicesController {
   // Même trio que /issue (owner/admin/cashier) — portée similaire, transforme un
   // document en facture réellement facturable (C15).
   @Post(":id/convert-to-invoice")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Roles("owner", "admin", "cashier")
   convertToInvoice(@Param("id") id: string, @CurrentOrganizationId() organizationId: string) {
     return this.invoicesService.convertToInvoice(id, organizationId);
@@ -115,6 +120,7 @@ export class InvoicesController {
   // Même trio que /issue et /convert-to-invoice — action conséquente déclenchée par
   // le staff (C5, ADR-034).
   @Post(":id/forfeit-deposit")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Roles("owner", "admin", "cashier")
   forfeitDeposit(
     @Param("id") id: string,
@@ -128,6 +134,7 @@ export class InvoicesController {
   // Même trio que /issue et /convert-to-invoice — régénération à la demande
   // (C18, ADR-066).
   @Post(":id/regenerate-payment-link")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Roles("owner", "admin", "cashier")
   regeneratePaymentLink(
     @Param("id") id: string,
@@ -139,6 +146,7 @@ export class InvoicesController {
 
   // Même trio que /regenerate-payment-link — action de relance à la demande (I2).
   @Post(":id/send-reminder")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Roles("owner", "admin", "cashier")
   sendReminder(
     @Param("id") id: string,

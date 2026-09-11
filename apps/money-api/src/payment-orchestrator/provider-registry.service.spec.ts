@@ -37,6 +37,11 @@ function createFakePrisma() {
     paymentProviderAttempt: {
       create: vi.fn().mockResolvedValue({}),
     },
+    paymentWebhook: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
+    },
   };
 }
 
