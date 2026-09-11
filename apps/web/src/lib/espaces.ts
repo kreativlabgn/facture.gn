@@ -59,7 +59,7 @@ export const ESPACES: readonly Espace[] = [
   },
   {
     id: "cabinet",
-    eyebrow: "Pour les professionnels du chiffre",
+    eyebrow: "Pour les cabinets et les CGA",
     titre: "Espace cabinet",
     texte: "Suivez les mandats, les portefeuilles et les écritures de vos entreprises clientes dans un environnement séparé.",
     accent: false,
