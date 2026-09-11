@@ -1,4 +1,4 @@
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, PreconditionFailedException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { FinancingService } from "./financing.service";
 
@@ -29,6 +29,7 @@ function baseInvoice(overrides: Record<string, any> = {}) {
     validatedByAdministration: true,
     financedByPartnerId: null,
     status: "issued",
+    disputeStatus: "none",
     // Security Audit 2026-08-23, finding #1 — PublicBuyerAccount vérifié par
     // défaut dans ces fixtures ; voir le test dédié plus bas pour le cas non-vérifié.
     // Security Audit 2026-08-23, revue post-fix #1 — isPublicEntityConfirmed:true
@@ -45,11 +46,18 @@ function createFakePrisma(
     partners?: any[];
     partner?: any;
     updateManyCount?: number;
+    invoiceApresCoup?: any;
   } = {},
 ) {
   const tx = {
     invoice: {
       updateMany: vi.fn().mockResolvedValue({ count: overrides.updateManyCount ?? 1 }),
+      // Relecture du motif quand la revendication ne trouve aucune ligne.
+      // Par défaut la facture est toujours cessible : l'échec est alors un
+      // doublon de financement, et le service rend un 409 comme avant.
+      findFirst: vi.fn().mockResolvedValue(
+        overrides.invoiceApresCoup ?? { status: "issued", disputeStatus: "none" },
+      ),
     },
     invoiceEvent: {
       create: vi.fn().mockResolvedValue({ id: "event-1" }),
@@ -284,7 +292,7 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     ).rejects.toThrow(ConflictException);
   });
 
-  it("la clause where transactionnelle revérifie status et validatedByAdministration, pas seulement financedByPartnerId (protège contre un void() concurrent)", async () => {
+  it("la clause where transactionnelle revérifie statut, litige et validatedByAdministration, pas seulement financedByPartnerId (protège contre un void() ou un règlement concurrent)", async () => {
     const prisma = createFakePrisma();
     const service = new FinancingService(prisma as any);
 
@@ -299,7 +307,8 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
         organizationId: "org-1",
         financedByPartnerId: null,
         validatedByAdministration: true,
-        status: { not: "voided" },
+        status: { in: ["issued"] },
+        disputeStatus: { not: "disputed" },
         customer: {
           isPublicEntityConfirmed: true,
           publicBuyerAccount: { verificationStatus: "verified" },
@@ -399,5 +408,98 @@ describe("FinancingService.chooseFinancing (K4/K5, ADR-088/089)", () => {
     // K5 — une seule cession, donc une seule trace d'audit : jamais deux
     // financing_disbursed sur la même facture.
     expect(prisma.__tx.invoiceEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Durcissement 2026-09-10 — anti-double-encaissement du Capital Layer ──
+
+  it("rejette (412) le rachat d'une facture déjà encaissée, et ne consulte même pas l'annuaire des partenaires", async () => {
+    const prisma = createFakePrisma({ invoice: baseInvoice({ status: "paid" }) });
+    const service = new FinancingService(prisma as any);
+
+    await expect(service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" } as any, "user-1", "org-1")).rejects.toBeInstanceOf(
+      PreconditionFailedException,
+    );
+    // Rien n'a été engagé : ni partenaire retenu, ni transaction ouverte.
+    expect(prisma.financialPartner.findUnique).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("porte un code métier stable, distinct du message, sur une facture encaissée", async () => {
+    const prisma = createFakePrisma({ invoice: baseInvoice({ status: "paid" }) });
+    const service = new FinancingService(prisma as any);
+
+    const erreur = await service
+      .chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" } as any, "user-1", "org-1")
+      .catch((e: any) => e);
+    expect(erreur.getStatus()).toBe(412);
+    expect(erreur.getResponse().code).toBe("FINANCING_INVOICE_ALREADY_SETTLED");
+  });
+
+  it("rejette (412) le rachat d'une facture sous litige actif, bien qu'elle soit émise et visée", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({ status: "issued", disputeStatus: "disputed" }),
+    });
+    const service = new FinancingService(prisma as any);
+
+    const erreur = await service
+      .chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" } as any, "user-1", "org-1")
+      .catch((e: any) => e);
+    expect(erreur).toBeInstanceOf(PreconditionFailedException);
+    expect(erreur.getResponse().code).toBe("FINANCING_INVOICE_DISPUTED");
+  });
+
+  it("avorte la cession quand le règlement tombe ENTRE la lecture et le commit (garde transactionnelle)", async () => {
+    // La facture est finançable à la lecture — c'est tout l'intérêt du cas :
+    // la première garde la laisse passer, seule la clause where l'arrête.
+    const prisma = createFakePrisma({
+      invoice: baseInvoice(),
+      updateManyCount: 0,
+      invoiceApresCoup: { status: "paid", disputeStatus: "none" },
+    });
+    const service = new FinancingService(prisma as any);
+
+    const erreur = await service
+      .chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" } as any, "user-1", "org-1")
+      .catch((e: any) => e);
+    expect(erreur).toBeInstanceOf(PreconditionFailedException);
+    expect(erreur.getResponse().code).toBe("FINANCING_INVOICE_ALREADY_SETTLED");
+    // Aucune trace de décaissement pour une cession qui n'a pas eu lieu.
+    expect(prisma.__tx.invoiceEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("garde le 409 quand la revendication échoue sans que la créance soit éteinte (doublon de financement)", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice(),
+      updateManyCount: 0,
+      invoiceApresCoup: { status: "issued", disputeStatus: "none" },
+    });
+    const service = new FinancingService(prisma as any);
+
+    await expect(service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" } as any, "user-1", "org-1")).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it("la clause where transactionnelle porte le statut en liste positive et exclut le litige", async () => {
+    const prisma = createFakePrisma();
+    const service = new FinancingService(prisma as any);
+
+    await service.chooseFinancing("inv-1", { financialPartnerId: "partner-1", disbursementMethod: "bank_transfer" } as any, "user-1", "org-1");
+
+    const where = prisma.__tx.invoice.updateMany.mock.calls[0][0].where;
+    expect(where.status).toEqual({ in: ["issued"] });
+    expect(where.disputeStatus).toEqual({ not: "disputed" });
+  });
+
+  it("ne propose aucun partenaire sur une facture encaissée (getFinancingOptions)", async () => {
+    const prisma = createFakePrisma({
+      invoice: baseInvoice({ status: "paid" }),
+      partners: [{ id: "partner-1", name: "Akiba Finance", type: "bank" }],
+    });
+    const service = new FinancingService(prisma as any);
+
+    const options = await service.getFinancingOptions("inv-1", "org-1");
+    expect(options.financeable).toBe(false);
+    expect(options.partners).toEqual([]);
   });
 });

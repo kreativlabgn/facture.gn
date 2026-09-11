@@ -1,8 +1,8 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, PreconditionFailedException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
-import { financeableInvoiceWhere, isFinanceable } from "./is-financeable";
+import { financeableInvoiceWhere, isFinanceable, motifCreanceNonCessible } from "./is-financeable";
 import type { ChooseFinancingDto } from "./dto/choose-financing.dto";
 
 // RLS (ADR-111 étape 1) — CARTE DU MODULE. `invoice` porte organization_id en
@@ -16,6 +16,22 @@ import type { ChooseFinancingDto } from "./dto/choose-financing.dto";
 // `organizationId` vient du RolesGuard : les routes sont sous /invoices/:id sans
 // @OrganizationIdSource, donc la résolution "invoice" par défaut s'applique — le
 // guard a déjà résolu l'organisation émettrice et vérifié l'appartenance.
+// Codes d'erreur métier du rail de financement. Stables et distincts du
+// message : un partenaire qui automatise ses reprises doit pouvoir brancher
+// dessus sans lire du français, et distinguer « réessaie plus tard » d'un refus
+// que rien ne rattrapera.
+const MOTIF_HTTP_CODE = {
+  deja_encaissee: "FINANCING_INVOICE_ALREADY_SETTLED",
+  en_litige: "FINANCING_INVOICE_DISPUTED",
+} as const;
+
+const MOTIF_MESSAGE = {
+  deja_encaissee: (id: string) =>
+    `Facture ${id} déjà encaissée : la créance est éteinte, elle ne peut plus être cédée`,
+  en_litige: (id: string) =>
+    `Facture ${id} sous litige actif : la créance ne peut pas être cédée tant que le montant est contesté`,
+} as const;
+
 @Injectable()
 export class FinancingService {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -89,6 +105,18 @@ export class FinancingService {
       publicEntityConfirmed: invoice.customer?.isPublicEntityConfirmed === true,
     });
     if (!financeable) {
+      // Le refus est NOMMÉ quand la créance elle-même n'est plus cessible.
+      // « Déjà encaissée » et « en litige » ne sont pas des conflits de
+      // concurrence : ce sont des préconditions métier que rien ne rattrapera
+      // en réessayant, d'où un 412 et non un 409. Les autres refus (pas encore
+      // visée, déjà financée, compte acheteur non vérifié) restent des 409.
+      const motif = motifCreanceNonCessible(invoice);
+      if (motif) {
+        throw new PreconditionFailedException({
+          code: MOTIF_HTTP_CODE[motif],
+          message: MOTIF_MESSAGE[motif](invoiceId),
+        });
+      }
       throw new ConflictException(`Facture ${invoiceId} non finançable`);
     }
 
@@ -110,6 +138,25 @@ export class FinancingService {
         data: { financedByPartnerId: dto.financialPartnerId, financedAt },
       });
       if (claimed.count === 0) {
+        // La clause `where` dit QUE la revendication a échoué, jamais POURQUOI.
+        // On relit dans la MÊME transaction — donc sous le même instantané que
+        // la revendication, et sous le même GUC — pour distinguer le règlement
+        // ou le litige survenu entre la lecture et le commit du cas ordinaire
+        // « quelqu'un a financé avant nous ». Sans cette relecture, un
+        // encaissement concurrent se présentait à la PME comme un doublon de
+        // financement, et le partenaire n'avait aucun moyen de savoir que la
+        // créance venait de s'éteindre.
+        const apresCoup = await tx.invoice.findFirst({
+          where: { id: invoiceId, organizationId },
+          select: { status: true, disputeStatus: true },
+        });
+        const motif = apresCoup ? motifCreanceNonCessible(apresCoup) : null;
+        if (motif) {
+          throw new PreconditionFailedException({
+            code: MOTIF_HTTP_CODE[motif],
+            message: MOTIF_MESSAGE[motif](invoiceId),
+          });
+        }
         throw new ConflictException(`Facture ${invoiceId} déjà financée`);
       }
 

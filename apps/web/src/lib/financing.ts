@@ -23,19 +23,32 @@ import type { DisbursementMethod, InvoiceFullDetail } from "@/lib/trust-api";
 
 export { netVerseALaPme } from "@/lib/daf";
 
-type EtatFacture = Pick<InvoiceFullDetail, "status" | "financedByPartnerId">;
+type EtatFacture = Pick<InvoiceFullDetail, "status" | "disputeStatus" | "financedByPartnerId">;
 
 // Une créance PAYÉE n'a plus rien à financer (le Trésor a réglé), une créance
 // ANNULÉE n'existe plus. Ces deux statuts ferment l'arbitrage à l'écran.
 //
-// ⚠ Ce n'est PAS ce que fait trust-api : is_financeable() n'exclut que
-// `voided`, jamais `paid` — une facture visée puis réglée reste techniquement
-// finançable côté serveur. L'écart est délibéré et documenté ici plutôt que
-// comblé en silence : ADR-031 pose qu'is_financeable() est la règle composite
-// unique et que « toute modification est un ADR ». Refermer ce trou est un
-// travail de backend sous ADR, pas un masquage d'UI — celui-ci ne fait que ne
-// pas PROPOSER un geste qui n'a pas de sens.
+// L'écart avec trust-api est REFERMÉ depuis l'ADR-121 (2026-09-10) : le serveur
+// refuse désormais lui-même `paid`, `partially_paid` et le litige actif, et ne
+// laisse passer que `issued`. Cet écran ne masque donc plus un geste que le
+// serveur aurait accepté — il ne propose plus un geste que le serveur refuse.
+// La distinction reste entière pour autant : un bouton masqué n'a jamais été un
+// contrôle d'accès, c'est `is_financeable()` qui décide.
 const STATUTS_SANS_ARBITRAGE = new Set(["paid", "voided"]);
+
+// LE LITIGE N'EST PAS UN STATUT, et c'est pour ça qu'il lui faut sa propre
+// garde. `disputeStatus` est un champ SÉPARÉ de `status` : une facture peut
+// être `issued` ET `disputed` en même temps. L'ajouter au Set ci-dessus aurait
+// produit une entrée qu'aucune comparaison n'atteint jamais — un correctif qui
+// se lit bien et ne ferme rien.
+//
+// `resolved` ne bloque pas : le litige est clos, la créance redevient cessible.
+// Côté serveur, c'est la même règle (motifCreanceNonCessible, ADR-121), et le
+// refus y répond 412 — proposer ici un bouton qui mène à un 412 serait envoyer
+// le commerçant contre un mur.
+function enLitigeActif(invoice: EtatFacture): boolean {
+  return invoice.disputeStatus === "disputed";
+}
 
 // Faut-il appeler `GET /invoices/:id/financing/options` en rendant cette page ?
 // La question n'est pas cosmétique : la route est @Roles("owner","admin"), donc
@@ -50,7 +63,10 @@ export function doitInterrogerLesRails(role: string, invoice: EtatFacture): bool
   if (!hasPermission(role, "invoices:financing")) {
     return false;
   }
-  return isSecondaryFinancingLocked(invoice) || !STATUTS_SANS_ARBITRAGE.has(invoice.status);
+  return (
+    isSecondaryFinancingLocked(invoice) ||
+    (!STATUTS_SANS_ARBITRAGE.has(invoice.status) && !enLitigeActif(invoice))
+  );
 }
 
 // Les trois états possibles de la section, et rien entre les deux :
@@ -85,7 +101,7 @@ export function etatArbitrage(input: {
     return "cedee";
   }
 
-  if (STATUTS_SANS_ARBITRAGE.has(input.invoice.status)) {
+  if (STATUTS_SANS_ARBITRAGE.has(input.invoice.status) || enLitigeActif(input.invoice)) {
     return "masque";
   }
 

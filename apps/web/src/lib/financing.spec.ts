@@ -11,9 +11,16 @@ import {
 // l'autorisation et de l'éligibilité, et c'est justement ce que ces cas
 // figent — l'écran ne recopie ni l'une ni l'autre, il les CONSOMME.
 
-function facture(overrides: { status?: string; financedByPartnerId?: string | null } = {}) {
+function facture(
+  overrides: {
+    status?: string;
+    disputeStatus?: string;
+    financedByPartnerId?: string | null;
+  } = {},
+) {
   return {
     status: overrides.status ?? "issued",
+    disputeStatus: overrides.disputeStatus ?? "none",
     financedByPartnerId: overrides.financedByPartnerId ?? null,
   };
 }
@@ -139,5 +146,57 @@ describe("Modes de versement — miroir du DTO de trust-api", () => {
       expect(methode.label.length).toBeGreaterThan(0);
       expect(methode.aide.length).toBeGreaterThan(0);
     }
+  });
+
+  // ── ADR-121 — le litige ferme l'arbitrage à l'écran ──────────────────────
+
+  it("masque l'arbitrage sur une facture contestée, bien qu'elle soit émise et déclarée finançable", () => {
+    // Le cas qui rendait le correctif nécessaire : `status` vaut "issued", donc
+    // le Set des statuts morts ne l'attrape pas. Seul `disputeStatus` le dit.
+    expect(
+      etatArbitrage({
+        role: "owner",
+        invoice: facture({ status: "issued", disputeStatus: "disputed" }),
+        financeable: true,
+      }),
+    ).toBe("masque");
+  });
+
+  it("rouvre l'arbitrage une fois le litige résolu", () => {
+    expect(
+      etatArbitrage({
+        role: "owner",
+        invoice: facture({ disputeStatus: "resolved" }),
+        financeable: true,
+      }),
+    ).toBe("ouvert");
+  });
+
+  it("continue de nommer le cessionnaire d'une créance cédée PUIS contestée (K5 prime)", () => {
+    // La cession prime les états morts, litige compris : effacer cette ligne le
+    // jour où le client conteste retirerait au commerçant, au pire moment, la
+    // seule information qui dit à qui va l'argent.
+    expect(
+      etatArbitrage({
+        role: "owner",
+        invoice: facture({ disputeStatus: "disputed", financedByPartnerId: "partner-1" }),
+        financeable: false,
+      }),
+    ).toBe("cedee");
+  });
+
+  it("n'interroge pas les rails pour une facture contestée jamais cédée", () => {
+    expect(
+      doitInterrogerLesRails("owner", facture({ disputeStatus: "disputed" })),
+    ).toBe(false);
+  });
+
+  it("interroge encore les rails d'une facture contestée DÉJÀ cédée — le nom du cessionnaire n'a pas d'autre source", () => {
+    expect(
+      doitInterrogerLesRails(
+        "owner",
+        facture({ disputeStatus: "disputed", financedByPartnerId: "partner-1" }),
+      ),
+    ).toBe(true);
   });
 });

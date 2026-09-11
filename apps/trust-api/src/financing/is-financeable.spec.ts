@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { financeableInvoiceWhere, isFinanceable } from "./is-financeable";
+import { STATUTS_FINANCABLES, financeableInvoiceWhere, isFinanceable } from "./is-financeable";
 
 function baseInvoice(
   overrides: Partial<{
     validatedByAdministration: boolean;
     financedByPartnerId: string | null;
     status: string;
+    disputeStatus: string;
     publicBuyerAccountVerified: boolean;
     publicEntityConfirmed: boolean;
   }> = {},
@@ -14,6 +15,7 @@ function baseInvoice(
     validatedByAdministration: true,
     financedByPartnerId: null,
     status: "issued",
+    disputeStatus: "none",
     publicBuyerAccountVerified: true,
     publicEntityConfirmed: true,
     ...overrides,
@@ -45,6 +47,35 @@ describe("isFinanceable (K4, ADR-031/080/088)", () => {
     expect(isFinanceable(baseInvoice({ publicEntityConfirmed: false }))).toBe(false);
   });
 
+  // ── Durcissement 2026-09-10 — anti-double-encaissement du Capital Layer ──
+
+  it("non finançable : facture déjà encaissée (paid) — une créance réglée ne se rachète pas", () => {
+    expect(isFinanceable(baseInvoice({ status: "paid" }))).toBe(false);
+  });
+
+  it("non finançable : facture sous litige actif, même émise et visée par l'administration", () => {
+    // disputeStatus est ORTHOGONAL à status : la facture est bien `issued`, et
+    // un prédicat qui ne regarderait que `status` la financerait.
+    expect(isFinanceable(baseInvoice({ status: "issued", disputeStatus: "disputed" }))).toBe(false);
+  });
+
+  it("finançable de nouveau une fois le litige résolu (resolved ne bloque pas)", () => {
+    expect(isFinanceable(baseInvoice({ disputeStatus: "resolved" }))).toBe(true);
+  });
+
+  it("non finançable : partiellement réglée — le décaissement est tracé à la valeur faciale", () => {
+    expect(isFinanceable(baseInvoice({ status: "partially_paid" }))).toBe(false);
+  });
+
+  it("non finançable : tout statut hors de la liste en positif (brouillon, convertie, expirée)", () => {
+    // Liste en POSITIF : un statut ajouté demain à l'enum n'est pas finançable
+    // par défaut. C'est la propriété que ce test verrouille, pas la liste des
+    // trois valeurs citées.
+    for (const status of ["draft", "converted", "expired"]) {
+      expect(isFinanceable(baseInvoice({ status }))).toBe(false);
+    }
+  });
+
   it("non finançable : compte cible vérifié mais CE lien précis n'a jamais été confirmé — repointage post-validation vers un autre compte déjà verified (Security Audit 2026-08-23, revue post-fix #1, scénario d'attaque complet)", () => {
     // Un compte pending auto-créé a produit la validation (validatedByAdministration
     // resterait true si flagPublicEntity() ne le réinitialisait pas), puis le
@@ -59,16 +90,27 @@ describe("isFinanceable (K4, ADR-031/080/088)", () => {
 });
 
 describe("financeableInvoiceWhere (K4/K5) — reproduit isFinanceable() en clause Prisma", () => {
-  it("reproduit les 5 conditions de isFinanceable()", () => {
+  it("reproduit les 7 conditions de isFinanceable()", () => {
     expect(financeableInvoiceWhere("inv-1")).toEqual({
       id: "inv-1",
       financedByPartnerId: null,
       validatedByAdministration: true,
-      status: { not: "voided" },
+      status: { in: ["issued"] },
+      disputeStatus: { not: "disputed" },
       customer: {
         isPublicEntityConfirmed: true,
         publicBuyerAccount: { verificationStatus: "verified" },
       },
     });
+  });
+
+  it("refuse par la clause `where` exactement ce que le prédicat refuse (paid, disputed)", () => {
+    // Les deux formes vivent côte à côte pour une raison : le prédicat sert
+    // l'affichage, la clause sert le commit. Ce test relit la seconde à travers
+    // la première — si l'une gagne une condition que l'autre n'a pas, il tombe.
+    const where = financeableInvoiceWhere("inv-1");
+    expect(where.status.in).not.toContain("paid");
+    expect(where.status.in).toEqual([...STATUTS_FINANCABLES]);
+    expect(where.disputeStatus).toEqual({ not: "disputed" });
   });
 });
