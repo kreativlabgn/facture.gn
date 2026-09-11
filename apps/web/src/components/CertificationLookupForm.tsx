@@ -43,7 +43,7 @@ export function CertificationLookupForm() {
           />
         </Field>
       </div>
-      <Button type="submit">Vérifier</Button>
+      <Button type="submit" disabled={!value.trim()}>Vérifier</Button>
     </form>
   );
 }

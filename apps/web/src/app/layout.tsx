@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Poppins } from "next/font/google";
 import "./globals.css";
 import { OfflineBanner } from "@/components/OfflineBanner";
 
-// Système typographique de la maquette consolidée (ADR-102/103, polices
-// embarquées Space Grotesk / Inter / JetBrains Mono) : Space Grotesk (marque,
+// Système typographique de la charte facture.gn : Poppins (marque, titres,
 // titres, boutons — jamais en dessous de 12px, sinon Inter prend le relais),
 // Inter (texte courant), JetBrains Mono (identifiants vérifiables DÉJÀ
 // certifiés — certification ID, montants, hash, timestamps ; jamais la saisie
@@ -19,10 +18,10 @@ const inter = Inter({
   display: "swap",
 });
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const poppins = Poppins({
+  variable: "--font-poppins",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["600", "700", "800"],
   display: "swap",
 });
 
@@ -47,7 +46,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="fr"
-      className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${poppins.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-grey text-navy-950">
         <OfflineBanner />

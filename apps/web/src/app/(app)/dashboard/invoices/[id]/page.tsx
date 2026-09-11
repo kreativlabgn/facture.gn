@@ -135,6 +135,22 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
         </div>
       ) : null}
 
+      {!invoice.disputeStatus || invoice.disputeStatus !== "disputed" ? (
+        <ProchaineAction
+          titre={brouillon ? "Facture prête à être certifiée" : peutRelancer ? "Règlement à suivre" : soldee ? "Facture clôturée" : "Facture émise"}
+          description={
+            brouillon
+              ? "Vérifiez les lignes puis émettez la facture pour sceller son numéro et sa preuve."
+              : peutRelancer
+                ? "Le client n'a pas encore réglé la totalité. Vous pouvez relancer ou régénérer le lien de paiement."
+                : soldee
+                  ? "Aucune action urgente n'est requise sur cette facture."
+                  : "La facture est émise. Consultez son lien de paiement et son journal pour suivre la suite."
+          }
+          ton={brouillon || peutRelancer ? "attention" : "neutre"}
+        />
+      ) : null}
+
       {/* ── Montants ───────────────────────────────────────────────────── */}
       <Card>
         <div className="grid grid-cols-1 divide-y divide-navy-50 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -401,6 +417,26 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
         </Card>
       </section>
     </div>
+  );
+}
+
+function ProchaineAction({
+  titre,
+  description,
+  ton,
+}: {
+  titre: string;
+  description: string;
+  ton: "attention" | "neutre";
+}) {
+  return (
+    <section
+      aria-label="Prochaine action"
+      className={ton === "attention" ? "rounded-2xl border border-amber-text/40 bg-amber-bg p-5" : "rounded-2xl border border-navy-100 bg-navy-50 p-5"}
+    >
+      <p className="font-display text-sm font-bold text-navy-950">{titre}</p>
+      <p className="mt-1 max-w-3xl text-sm leading-relaxed text-navy-700">{description}</p>
+    </section>
   );
 }
 

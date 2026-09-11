@@ -17,7 +17,7 @@ export function AuthCard({
   children: ReactNode;
 }) {
   return (
-    <Card>
+    <Card className="w-full max-w-md mx-auto">
       <CardBody className="p-6 sm:p-7">
         <h1 className="font-display text-xl font-bold text-navy-950">{title}</h1>
         {description ? <p className="mt-2 text-sm leading-relaxed text-navy-600">{description}</p> : null}

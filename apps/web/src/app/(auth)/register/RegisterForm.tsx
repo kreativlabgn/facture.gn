@@ -5,12 +5,13 @@ import { Button, Field, TextInput } from "@/components/ui";
 import { PASSWORD_MIN_LENGTH } from "@/lib/registration";
 import { registerAction, type RegisterActionState } from "./actions";
 
-export function RegisterForm() {
+export function RegisterForm({ returnTo }: { returnTo?: string }) {
   const [state, formAction, pending] = useActionState<RegisterActionState, FormData>(registerAction, null);
   const fieldErrors = state?.fieldErrors ?? {};
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {returnTo ? <input type="hidden" name="returnTo" value={returnTo} /> : null}
       <Field label="Votre nom" htmlFor="register-name">
         <TextInput
           id="register-name"

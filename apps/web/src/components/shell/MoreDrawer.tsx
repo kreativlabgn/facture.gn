@@ -46,7 +46,7 @@ export function MoreDrawer({
       <dialog
         ref={dialogRef}
         aria-label="Plus d'options"
-        className="fixed inset-x-0 top-auto bottom-0 m-0 w-full max-w-none rounded-t-2xl bg-white p-0 text-navy-950 backdrop:bg-navy-950/40"
+        className="fixed inset-x-0 top-auto bottom-0 m-0 max-h-[min(85vh,40rem)] w-full max-w-none overflow-y-auto rounded-t-2xl bg-white p-0 text-navy-950 backdrop:bg-navy-950/40"
         // Clic sur le fond : la cible de l'événement n'est le <dialog>
         // lui-même que hors de son contenu — c'est la façon standard de
         // distinguer le backdrop sans lui poser d'élément dédié.

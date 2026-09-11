@@ -14,7 +14,7 @@ export function TrustExplainer() {
       </p>
       <p className="mt-2">
         Vérification cryptographique indépendante — facture.gn ne délivre aucune validation
-        officielle et n&apos;agit pas comme registre d&apos;État.
+        administrative et n&apos;agit pas comme registre d&apos;État.
       </p>
     </div>
   );

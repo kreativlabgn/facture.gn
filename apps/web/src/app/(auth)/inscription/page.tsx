@@ -25,82 +25,53 @@ export const metadata: Metadata = { title: "Créer un compte — facture.gn" };
 // et apps/web n'a aucune plomberie i18n. Un sélecteur ne ferait donc rien du
 // tout : il faut d'abord que le backend et la traduction existent.
 
-interface Voie {
-  href: string;
-  titre: string;
-  description: string;
-  cta: string;
-}
-
-// Le marchand d'abord : c'est la voie de l'écrasante majorité des visiteurs.
-const PRINCIPALE: Voie = {
-  href: "/register",
-  titre: "Je vends — commerce, entreprise ou association",
-  description:
-    "Boutique de quartier, SARL, SA ou association : le même parcours pour toutes. Vous choisirez votre forme légale et votre régime fiscal à l'étape suivante, et vous pourrez facturer sans NIF ni numéro eTax.",
-  cta: "Créer mon compte",
-};
-
-const AUTRES: Voie[] = [
-  {
-    href: "/nouveau-cabinet",
-    titre: "Je suis cabinet comptable, gestionnaire, fiduciaire ou CGA",
-    description:
-      "Créez votre structure, invitez vos collaborateurs, et demandez des mandats à vos clients pour suivre leur facturation depuis un seul écran.",
-    cta: "Créer mon cabinet",
-  },
-  {
-    href: "/portail/auth",
-    titre: "J'ai reçu une facture",
-    description:
-      "Consultez et réglez les factures qui vous ont été adressées. Pas de compte à créer : un code par SMS sur le numéro auquel la facture est adressée suffit.",
-    cta: "Accéder à mes factures",
-  },
-];
-
 export default function InscriptionPage() {
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-navy-950">Bienvenue sur facture.gn</h1>
-        <p className="mt-2 text-sm leading-relaxed text-navy-600">
-          Dites-nous qui vous êtes — chaque profil a son espace.
+    <div className="w-full max-w-4xl">
+      <div className="flex flex-col gap-8">
+      <div className="max-w-xl">
+        <p className="font-mono text-xs font-bold tracking-[0.14em] text-navy-600 uppercase">Le début de votre parcours</p>
+        <h1 className="mt-3 font-display text-3xl leading-tight font-bold text-navy-950 sm:text-4xl">
+          Choisissez l’espace qui vous ressemble.
+        </h1>
+        <p className="mt-3 text-base leading-relaxed text-navy-600">
+          Chaque métier a son rythme, ses responsabilités et son écran. Nous vous orientons d’abord, puis nous vous accompagnons pas à pas.
         </p>
       </div>
 
-      {/* Voie principale, mise en avant : l'accent Or, une seule fois. */}
-      <Card>
-        <div className="flex flex-col gap-4 p-6">
-          <div>
-            <h2 className="font-display text-base font-semibold text-navy-950">{PRINCIPALE.titre}</h2>
-            <p className="mt-1 text-sm leading-relaxed text-navy-600">{PRINCIPALE.description}</p>
-          </div>
-          <ButtonLink href={PRINCIPALE.href} variant="accent" size="lg">
-            {PRINCIPALE.cta}
-          </ButtonLink>
-        </div>
-      </Card>
-
-      <div className="flex items-center gap-3" aria-hidden="true">
-        <span className="h-px flex-1 bg-navy-100" />
-        <span className="text-xs text-navy-600">ou</span>
-        <span className="h-px flex-1 bg-navy-100" />
-      </div>
-
-      <div className="flex flex-col gap-4">
-        {AUTRES.map((voie) => (
-          <Card key={voie.href}>
-            <div className="flex flex-col gap-3 p-6">
-              <div>
-                <h2 className="font-display text-base font-semibold text-navy-950">{voie.titre}</h2>
-                <p className="mt-1 text-sm leading-relaxed text-navy-600">{voie.description}</p>
-              </div>
-              <ButtonLink href={voie.href} variant="secondary">
-                {voie.cta}
-              </ButtonLink>
+      <div className="grid gap-4">
+        <Card className="overflow-hidden border-or">
+          <div className="grid gap-5 p-6 sm:grid-cols-[1fr_auto] sm:items-end sm:p-7">
+            <div>
+              <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-navy-600 uppercase">Pour vendre et encaisser</p>
+              <h2 className="mt-2 font-display text-xl font-bold text-navy-950">Espace marchand</h2>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-navy-600">Émettez vos factures, partagez-les à vos clients et suivez vos règlements, même quand votre journée ne se passe pas derrière un bureau.</p>
             </div>
-          </Card>
-        ))}
+            <ButtonLink href="/espace-marchand" variant="accent">Découvrir l’espace marchand</ButtonLink>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="grid gap-5 p-6 sm:grid-cols-[1fr_auto] sm:items-end sm:p-7">
+            <div>
+              <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-navy-600 uppercase">Pour accompagner plusieurs entreprises</p>
+              <h2 className="mt-2 font-display text-xl font-bold text-navy-950">Espace cabinet</h2>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-navy-600">Organisez vos mandats, vos collaborateurs et votre portefeuille client depuis un espace pensé pour les professionnels du chiffre.</p>
+            </div>
+            <ButtonLink href="/espace-cabinet" variant="secondary">Découvrir l’espace cabinet</ButtonLink>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="grid gap-5 p-6 sm:grid-cols-[1fr_auto] sm:items-end sm:p-7">
+            <div>
+              <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-navy-600 uppercase">Pour régler une facture reçue</p>
+              <h2 className="mt-2 font-display text-xl font-bold text-navy-950">Portail client</h2>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-navy-600">Ouvrez la facture qui vous a été adressée, vérifiez-la et réglez-la avec un code reçu par SMS.</p>
+            </div>
+            <ButtonLink href="/portail/auth" variant="secondary">Accéder à mes factures</ButtonLink>
+          </div>
+        </Card>
       </div>
 
       {/* L'agent terrain n'a PAS de voie d'inscription, et c'est voulu :
@@ -133,6 +104,7 @@ export default function InscriptionPage() {
           Se connecter
         </Link>
       </p>
+      </div>
     </div>
   );
 }

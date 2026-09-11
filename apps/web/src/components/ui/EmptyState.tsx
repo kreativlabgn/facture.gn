@@ -10,14 +10,18 @@ export function EmptyState({
   title,
   description,
   action,
+  heading = "h2",
 }: {
   title: string;
   description: string;
   action?: ReactNode;
+  heading?: "h1" | "h2";
 }) {
+  const Heading = heading;
+
   return (
     <div className="rounded-2xl border border-navy-100 bg-white p-8 text-center">
-      <p className="font-display text-lg font-bold text-navy-950">{title}</p>
+      <Heading className="font-display text-lg font-bold text-navy-950">{title}</Heading>
       <p className="mx-auto mt-3 max-w-sm text-sm text-navy-600">{description}</p>
       {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
     </div>

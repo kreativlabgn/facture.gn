@@ -55,3 +55,27 @@ describe("proxy — le matcher couvre tous les préfixes protégés", () => {
     expect(matcher).toContain(`"${prefix}/:path*"`);
   });
 });
+
+describe("destinationInterne", () => {
+  it("conserve un chemin local et sa query string", async () => {
+    const { destinationInterne } = await import("./route-protection");
+    expect(destinationInterne("/cabinet?tab=structure")).toBe("/cabinet?tab=structure");
+  });
+
+  it("rejette les URLs absolues et protocol-relative", async () => {
+    const { destinationInterne } = await import("./route-protection");
+    expect(destinationInterne("https://example.com")).toBe("/dashboard");
+    expect(destinationInterne("//example.com")).toBe("/dashboard");
+  });
+
+  it("rejette la contre-oblique que les navigateurs normalisent en protocol-relative", async () => {
+    const { destinationInterne } = await import("./route-protection");
+    expect(destinationInterne("/\\example.com")).toBe("/dashboard");
+    expect(destinationInterne("/\\/example.com")).toBe("/dashboard");
+  });
+
+  it("utilise le repli fourni pour une valeur vide", async () => {
+    const { destinationInterne } = await import("./route-protection");
+    expect(destinationInterne("", "/onboarding")).toBe("/onboarding");
+  });
+});

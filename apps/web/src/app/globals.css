@@ -24,7 +24,7 @@
 :root {
   /* Marque — ADR-103 (valeurs mesurées sur la maquette) */
   --navy-atlantique: #0b1d3a; /* texte, structure — ~60 % de la palette */
-  --or-guinee: #fbb500; /* accent marque, CTA, focus — ~30 % */
+   --or-guinee: #f2b705; /* accent marque, CTA, focus — ~30 % */
   --grey: #f5f7f9; /* fond application */
   --surface: #ffffff; /* cartes, panneaux, lignes de table */
 
@@ -104,12 +104,12 @@
   --color-red-text: var(--color-red-text);
   --color-red-bg: var(--color-red-bg);
 
-  /* Charte §Typographie + maquette consolidée : Space Grotesk (display,
-     titres, boutons — jamais < 12px, sinon Inter), Inter (courant),
+  /* Charte §Typographie : Poppins (display, titres, boutons — jamais < 12px,
+     sinon Inter), Inter (courant),
      JetBrains Mono (données DÉJÀ certifiées : #FG, hash, montants, timestamps
      — jamais la saisie utilisateur). */
   --font-sans: var(--font-inter);
-  --font-display: var(--font-space-grotesk);
+   --font-display: var(--font-poppins);
   --font-mono: var(--font-jetbrains-mono);
 }
 

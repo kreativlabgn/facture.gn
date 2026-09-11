@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from "@/lib/session";
 import { normalizeMsisdn, validateRegistration, type RegistrationField } from "@/lib/registration";
 import { TrustApiError, login, register } from "@/lib/trust-api";
+import { destinationInterne } from "@/lib/route-protection";
 
 export type RegisterActionState = {
   error: string;
@@ -14,6 +15,7 @@ export type RegisterActionState = {
   // transiter une seconde fois et apparaître dans le HTML de la réponse.
   values?: { name: string; msisdn: string };
 } | null;
+
 
 // Deux appels enchaînés, pas un seul : POST /auth/register ne renvoie que
 // { userId }, donc c'est POST /auth/login qui fournit le JWT posé en cookie.
@@ -26,6 +28,7 @@ export async function registerAction(
   const name = String(formData.get("name") ?? "").trim();
   const msisdn = normalizeMsisdn(String(formData.get("msisdn") ?? ""));
   const password = String(formData.get("password") ?? "");
+  const returnTo = destinationInterne(String(formData.get("returnTo") ?? ""), "/onboarding");
   const values = { name, msisdn };
 
   const violations = validateRegistration({ name, msisdn, password });
@@ -70,5 +73,5 @@ export async function registerAction(
 
   // Hors du try/catch, comme loginAction : redirect() lève une erreur interne
   // Next.js qui serait sinon confondue avec un échec.
-  redirect("/onboarding");
+  redirect(returnTo);
 }

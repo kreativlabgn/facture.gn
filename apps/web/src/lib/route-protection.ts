@@ -5,10 +5,17 @@
 // /daf — console de l'acheteur public. Route de premier niveau au même titre
 // que /cabinet : son occupant n'est membre d'aucune organisation PME, ni
 // /dashboard ni /cabinet ne le concerne.
-export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/daf"];
+export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/nouveau-cabinet", "/daf", "/espace-marchand", "/espace-cabinet"];
+
+// Un seul « / » initial, suivi ni de « / » ni de « \ » : les navigateurs
+// normalisent « /\evil.com » en « //evil.com » (protocol-relative), donc les
+// deux motifs sont des redirections ouvertes.
+export function destinationInterne(value: string, fallback = "/dashboard"): string {
+  return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : fallback;
+}
 
 // Logique pure isolée du glue Next.js (middleware.ts) pour rester testable sans
-// mocker next/server — le runtime edge de middleware.ts, lui, n'est pas testé
+// mocker next/server — le runtime edge du proxy Next.js, lui, n'est pas testé
 // unitairement (trop couplé, voir plan).
 export function resolveProtectedRouteRedirect(pathname: string, hasSession: boolean): string | null {
   const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

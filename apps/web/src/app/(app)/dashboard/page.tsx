@@ -8,7 +8,7 @@ import { requireSessionToken } from "@/lib/session";
 import { TrustApiError, getTrustScore, listInvoices } from "@/lib/trust-api";
 import { InvoiceList } from "@/components/data/InvoiceList";
 import { KpiRow, type Kpi } from "@/components/data/KpiRow";
-import { ButtonLink } from "@/components/ui";
+import { ButtonLink, Card } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Accueil — facture.gn" };
 
@@ -29,6 +29,10 @@ export default async function DashboardHomePage() {
 
   const invoices = await listInvoices(token, organization.id, { take: HOME_INVOICE_WINDOW });
   const windowKpis = deriveInvoiceWindowKpis(invoices);
+  const brouillons = invoices.filter((invoice) => invoice.status === "draft").length;
+  const aEncaisser = invoices.filter(
+    (invoice) => invoice.status === "issued" || invoice.status === "partially_paid",
+  ).length;
 
   const kpis: Kpi[] = [
     {
@@ -78,6 +82,36 @@ export default async function DashboardHomePage() {
         ) : null}
       </div>
 
+      <section aria-labelledby="actions-prioritaires" className="mb-6">
+        <div className="mb-3 flex items-baseline justify-between gap-4">
+          <h2 id="actions-prioritaires" className="font-display text-base font-semibold text-navy-950">
+            À traiter maintenant
+          </h2>
+          <span className="text-xs text-navy-600">Sur les {windowKpis.windowSize} dernières factures</span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ActionPrioritaire
+            titre="Créer une facture"
+            description={
+              brouillons > 0
+                ? `${brouillons} brouillon${brouillons > 1 ? "s" : ""} à finaliser`
+                : "Partagez une nouvelle facture certifiée"
+            }
+            href={brouillons > 0 ? "/dashboard/invoices" : "/dashboard/invoices/new"}
+            accent={brouillons > 0}
+          />
+          <ActionPrioritaire
+            titre="Suivre les encaissements"
+            description={
+              aEncaisser > 0
+                ? `${aEncaisser} facture${aEncaisser > 1 ? "s" : ""} en attente de règlement`
+                : "Aucun règlement en attente dans cette fenêtre"
+            }
+            href="/dashboard/invoices"
+          />
+        </div>
+      </section>
+
       <KpiRow items={kpis} />
 
       <div className="mb-3 flex items-center justify-between">
@@ -95,5 +129,31 @@ export default async function DashboardHomePage() {
         href={(invoice) => `/dashboard/invoices/${invoice.id}`}
       />
     </div>
+  );
+}
+
+function ActionPrioritaire({
+  titre,
+  description,
+  href,
+  accent = false,
+}: {
+  titre: string;
+  description: string;
+  href: string;
+  accent?: boolean;
+}) {
+  return (
+    <Card className={accent ? "border-or" : undefined}>
+      <div className="flex items-center justify-between gap-4 p-5">
+        <div className="min-w-0">
+          <h3 className="font-display text-sm font-semibold text-navy-950">{titre}</h3>
+          <p className="mt-1 text-xs leading-relaxed text-navy-600">{description}</p>
+        </div>
+        <ButtonLink href={href} variant={accent ? "accent" : "secondary"} className="shrink-0">
+          Ouvrir
+        </ButtonLink>
+      </div>
+    </Card>
   );
 }

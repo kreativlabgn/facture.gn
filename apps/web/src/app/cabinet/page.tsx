@@ -117,6 +117,8 @@ export default async function CabinetHomePage({
         <Chiffre libelle="Collaborateurs" valeur={String(equipe.length)} />
       </div>
 
+      <SurveillanceCabinet clients={clients} equipe={equipe} />
+
       <Onglets actif={onglet} />
 
       {onglet === "portefeuille" ? (
@@ -130,6 +132,81 @@ export default async function CabinetHomePage({
         />
       )}
     </div>
+  );
+}
+
+function SurveillanceCabinet({
+  clients,
+  equipe,
+}: {
+  clients: readonly ClientSousMandat[];
+  equipe: readonly PracticeMemberItem[];
+}) {
+  const sansActivite = clients.filter((client) => !client.indisponible && client.facturesEmises === 0);
+  const indisponibles = clients.filter((client) => client.indisponible);
+  const equipeVide = equipe.length === 0;
+
+  return (
+    <section aria-labelledby="surveillance-cabinet">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+        <h2 id="surveillance-cabinet" className="font-display text-base font-semibold text-navy-950">
+          À surveiller
+        </h2>
+        <span className="text-xs text-navy-600">Signaux issus de vos données disponibles</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <SignalCabinet
+          titre="Entreprises sans activité"
+          description={
+            sansActivite.length > 0
+              ? `${sansActivite.length} entreprise${sansActivite.length > 1 ? "s" : ""} sans facture émise`
+              : "Toutes les entreprises ont une activité"
+          }
+          href="/cabinet"
+          alerte={sansActivite.length > 0}
+        />
+        <SignalCabinet
+          titre="Données à vérifier"
+          description={
+            indisponibles.length > 0
+              ? `${indisponibles.length} entreprise${indisponibles.length > 1 ? "s" : ""} non chargée${indisponibles.length > 1 ? "s" : ""}`
+              : "Toutes les données sont disponibles"
+          }
+          href="/cabinet"
+          alerte={indisponibles.length > 0}
+        />
+        <SignalCabinet
+          titre="Équipe du cabinet"
+          description={equipeVide ? "Vous êtes seul pour le moment" : `${equipe.length} collaborateur${equipe.length > 1 ? "s" : ""}`}
+          href="/cabinet/members"
+          alerte={equipeVide}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SignalCabinet({
+  titre,
+  description,
+  href,
+  alerte,
+}: {
+  titre: string;
+  description: string;
+  href: string;
+  alerte: boolean;
+}) {
+  return (
+    <Card className={alerte ? "border-amber-text/40" : undefined}>
+      <Link
+        href={href}
+        className="block p-5 transition-colors hover:bg-navy-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-navy-950"
+      >
+        <h3 className="font-display text-sm font-semibold text-navy-950">{titre}</h3>
+        <p className={alerte ? "mt-1 text-xs text-amber-text" : "mt-1 text-xs text-navy-600"}>{description}</p>
+      </Link>
+    </Card>
   );
 }
 

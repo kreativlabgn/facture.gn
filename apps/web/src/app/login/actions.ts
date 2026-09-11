@@ -4,8 +4,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { login, TrustApiError } from "@/lib/trust-api";
 import { SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from "@/lib/session";
+import { destinationInterne } from "@/lib/route-protection";
 
 export type LoginActionState = { error: string } | null;
+
 
 // Server Action plutôt qu'un Route Handler consommé par fetch côté client —
 // cohérent avec le choix déjà pris pour les mutations (jamais de secret ni de
@@ -14,6 +16,7 @@ export type LoginActionState = { error: string } | null;
 export async function loginAction(_prevState: LoginActionState, formData: FormData): Promise<LoginActionState> {
   const msisdn = String(formData.get("msisdn") ?? "");
   const password = String(formData.get("password") ?? "");
+  const returnTo = destinationInterne(String(formData.get("returnTo") ?? ""));
 
   let accessToken: string;
   try {
@@ -37,5 +40,5 @@ export async function loginAction(_prevState: LoginActionState, formData: FormDa
 
   // Hors du try/catch : redirect() lève une erreur interne Next.js dédiée,
   // qui serait sinon interceptée par le catch ci-dessus comme un échec de login.
-  redirect("/dashboard");
+  redirect(returnTo);
 }
