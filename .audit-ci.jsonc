@@ -36,8 +36,11 @@
     // jamais d'URL contrôlée par un tiers, aucune requête réseau dérivée.
     "GHSA-jqff-g426-hqxp",
     "GHSA-f65p-4m7j-42xc",
+    // @nestjs/cli > glob — devDependency, le CLI glob n'est jamais invoqué en prod.
     "GHSA-fph4-wmhf-6fwf",
+    // @nestjs/cli > inquirer > external-editor — devDependency, prompt CLI.
     "GHSA-5jgf-p345-68v8",
+    // vitest UI arbitrary file read — le mode UI n'est jamais lancé.
     // browserslist crash/prototype-write + OOM (publiés 01/09/2026) — chaîne
     // apps/web > @serwist/next > browserslist. `browserslist` tourne au BUILD
     // (résolution des cibles pour le bundle SW), jamais sous `next start`. Les
