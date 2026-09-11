@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ESPACES, ESPACE_PAR_DEFAUT, LIBELLE_MENU } from "./espaces";
@@ -15,12 +15,28 @@ import { PROTECTED_PREFIXES, destinationInterne } from "./route-protection";
 const APP = path.resolve(__dirname, "..", "app");
 
 // Un chemin d'URL → le page.tsx qui le sert, en traversant les groupes de
-// routes « (auth) » (qui ne changent pas l'URL). Suffisant pour des chemins
-// statiques ; aucune porte publique n'a de segment dynamique.
+// routes « (auth) », « (entree) », « (coquille) »… qui ne changent pas l'URL,
+// à n'importe quel niveau. Suffisant pour des chemins statiques ; aucune porte
+// publique n'a de segment dynamique.
 function pageExiste(pathname: string): boolean {
   const segments = pathname.split("/").filter(Boolean);
-  const candidats = [path.join(APP, ...segments, "page.tsx"), path.join(APP, "(auth)", ...segments, "page.tsx")];
-  return candidats.some((f) => existsSync(f));
+
+  function chercher(dossier: string, reste: string[]): boolean {
+    if (reste.length === 0) {
+      return existsSync(path.join(dossier, "page.tsx"));
+    }
+    if (!existsSync(dossier)) {
+      return false;
+    }
+    const [segment, ...suite] = reste;
+    const groupes = readdirSync(dossier).filter((d) => d.startsWith("(") && d.endsWith(")"));
+    return (
+      chercher(path.join(dossier, segment), suite) ||
+      groupes.some((groupe) => chercher(path.join(dossier, groupe), reste))
+    );
+  }
+
+  return chercher(APP, segments);
 }
 
 function estProtegee(pathname: string): boolean {
