@@ -10,7 +10,7 @@ import { NavGate } from "@/components/shell/NavGate";
 // Coquille de l'espace connecté (ADR-095). Groupe de routes `(app)` : les
 // parenthèses ne changent aucune URL — /dashboard reste /dashboard — elles
 // donnent seulement un layout commun à tout ce que la coquille habille. Les
-// liens existants, le middleware et les Server Actions ne bougent pas.
+// liens existants, le proxy et les Server Actions ne bougent pas.
 //
 // /cabinet reste hors du groupe : c'est une autre persona (PracticeMember,
 // concept d'appartenance séparé d'OrganizationMember) avec sa propre

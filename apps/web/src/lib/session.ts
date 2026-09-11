@@ -15,7 +15,7 @@ export async function getSessionToken(): Promise<string | null> {
 }
 
 // Lève plutôt que de retourner null — appelé uniquement depuis des pages sous
-// /dashboard, déjà protégées par middleware.ts (un appel ici sans cookie est
+// /dashboard, déjà protégées par le proxy (un appel ici sans cookie est
 // un bug de câblage, pas un cas utilisateur normal à gérer silencieusement.
 export async function requireSessionToken(): Promise<string> {
   const token = await getSessionToken();

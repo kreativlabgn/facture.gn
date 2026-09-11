@@ -46,9 +46,16 @@ export default async function CabinetClientOrganizationPage({ params }: { params
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold text-navy-950">Organisation cliente</h1>
-        <div className="flex items-center gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold tracking-wide text-navy-600 uppercase">Entreprise sous mandat</p>
+          <h1 className="mt-1 font-display text-2xl font-bold text-navy-950">Portefeuille client</h1>
+          <p className="mt-1 text-sm text-navy-600">
+            {invoices.length} facture{invoices.length > 1 ? "s" : ""} · {customers.length} client
+            {customers.length > 1 ? "s" : ""}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
           <Link
             href={`/cabinet/organizations/${organizationId}/fec`}
             className="rounded-[10px] bg-navy-950 px-5 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800"
@@ -70,13 +77,13 @@ export default async function CabinetClientOrganizationPage({ params }: { params
             invoices.map((invoice, index) => (
               <div
                 key={invoice.id}
-                className={`flex items-center justify-between gap-4 px-5 py-4 ${index === invoices.length - 1 ? "" : "border-b border-navy-50"}`}
+                className={`flex flex-wrap items-center justify-between gap-3 px-5 py-4 ${index === invoices.length - 1 ? "" : "border-b border-navy-50"}`}
               >
                 <div className="flex flex-col gap-0.5">
                   <span className="font-mono text-xs text-navy-600">{invoice.number ?? "Brouillon"}</span>
                   <span className="text-xs text-navy-600">{formatDate(invoice.createdAt)}</span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <span className="font-mono text-sm font-bold text-navy-950">{formatGnf(invoice.totalTtc)}</span>
                   <StatusPill status={invoice.status} />
                 </div>
@@ -95,10 +102,10 @@ export default async function CabinetClientOrganizationPage({ params }: { params
             customers.map((customer, index) => (
               <div
                 key={customer.id}
-                className={`flex items-center justify-between gap-4 px-5 py-4 ${index === customers.length - 1 ? "" : "border-b border-navy-50"}`}
+                className={`flex flex-wrap items-center justify-between gap-3 px-5 py-4 ${index === customers.length - 1 ? "" : "border-b border-navy-50"}`}
               >
                 <span className="font-semibold text-navy-950">{customer.name}</span>
-                <div className="flex gap-4 text-xs text-navy-600">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-navy-600">
                   {customer.phone ? <span className="font-mono">{customer.phone}</span> : null}
                   {customer.nif ? <span className="font-mono">NIF {customer.nif}</span> : null}
                 </div>

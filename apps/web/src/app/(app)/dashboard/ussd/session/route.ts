@@ -15,7 +15,7 @@ import { requireSessionToken } from "@/lib/session";
 //   2. Chaque appel crée une ligne ussd_session, sans authentification ni
 //      limite de débit (aucun @Throttle sur UssdController).
 //
-// Ce fichier vit donc sous /dashboard, derrière middleware.ts : simuler exige
+// Ce fichier vit donc sous /dashboard, derrière le proxy : simuler exige
 // d'être connecté. La session USSD simulée, elle, reste bien anonyme du point
 // de vue de trust-api — c'est tout l'intérêt du simulateur.
 const TRUST_API_URL = process.env.TRUST_API_URL ?? "http://localhost:3000";
