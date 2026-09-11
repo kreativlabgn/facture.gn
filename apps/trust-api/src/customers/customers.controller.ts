@@ -11,6 +11,10 @@ import {
   type OrganizationScopedListQueryDto,
 } from "../common/dto/organization-scoped-list-query.dto";
 import { createCustomerSchema, type CreateCustomerDto } from "./dto/create-customer.dto";
+import {
+  resolveCustomerByPhoneSchema,
+  type ResolveCustomerByPhoneDto,
+} from "./dto/resolve-customer-by-phone.dto";
 import { importCustomersSchema, type ImportCustomersDto } from "./dto/import-customers.dto";
 import { mergeCustomerSchema, type MergeCustomerDto } from "./dto/merge-customer.dto";
 import { flagPublicEntitySchema, type FlagPublicEntityDto } from "./dto/flag-public-entity.dto";
@@ -33,6 +37,26 @@ export class CustomersController {
   @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
   create(@Body(new ZodValidationPipe(createCustomerSchema)) dto: CreateCustomerDto) {
     return this.customersService.create(dto);
+  }
+
+  // ADR-106 — vente au comptoir sur un simple numéro. Même trio que create() :
+  // c'est le MÊME geste métier (préparer une vente), avec une saisie réduite au
+  // téléphone. Ouvrir cette route plus largement donnerait par la bande un droit
+  // de création de client à des rôles qui ne l'ont pas.
+  //
+  // Pas de @OrganizationIdSource : organizationId est porté par le corps et
+  // résolu par RolesGuard, comme create()/importCustomers() — aucune ressource
+  // pré-existante n'est désignée par un :id qu'on pourrait usurper.
+  // `organizationId` est relu depuis @CurrentOrganizationId (la valeur
+  // AUTORISÉE) et non depuis le DTO : les deux coïncident ici, mais c'est celle
+  // que le garde a validée qui écrit.
+  @Post("resolve-by-phone")
+  @Roles("owner", "admin", "accountant_internal", "cashier", "field_agent")
+  resolveByPhone(
+    @Body(new ZodValidationPipe(resolveCustomerByPhoneSchema)) dto: ResolveCustomerByPhoneDto,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.customersService.resolveByPhone(organizationId, dto.phone);
   }
 
   // E9, ADR-100 — "seul gap réel" signalé par l'ADR : import en masse, un seul

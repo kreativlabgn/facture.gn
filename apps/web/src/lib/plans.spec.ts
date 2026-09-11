@@ -5,6 +5,7 @@ import {
   ADVANCED_CUSTOMER_MANAGEMENT_MIN_TIER,
   COMMISSION_BPS,
   COMMISSION_CAP_CENTIMES,
+  FRAIS_PASSERELLE_BPS,
   PRIX_MENSUEL_CENTIMES,
   pourcentage,
   totalPayeurBps,
@@ -13,8 +14,16 @@ import {
   MIN_TIER_FOR_ROLE,
   TIER_ORDER,
   avantagesDuPalier,
+  fraisTransaction,
+  passerelleePdpAutorisee,
+  quotaAtteint,
+  quotaMembres,
+  quotaSuccursales,
   tierIndex,
   tierLabel,
+  tauxEffectifBps,
+  ventilationFrais,
+  type Tier,
 } from "./plans";
 
 // La grille backend est la seule autorité : elle est APPLIQUÉE (branches.service,
@@ -203,6 +212,115 @@ describe("affichage des taux", () => {
   });
 });
 
+// ── Ventilation des frais de transaction ────────────────────────────────────
+//
+// L'écran de paiement affichait « Montant de la facture » + « Frais de
+// paiement ». Le premier libellé était FAUX : InvoicesService.issue() transmet
+// `totalTtc + platformFee` à money-api, donc la commission facture.gn était
+// fondue dans le montant présenté comme celui de la marchandise.
+describe("ventilationFrais — les trois montants que supporte le payeur", () => {
+  it("sépare marchandise, infrastructure facture.gn et passerelle Djomy", () => {
+    // 1 000 000 GNF = 100 000 000 centimes, palier Pro (1,50 %).
+    const v = ventilationFrais("100000000", "pro");
+
+    expect(v.marchandise).toBe("100000000");
+    expect(v.infrastructure).toBe("1500000");
+    // 1,4 % de 101 500 000 — voir la cascade ci-dessous.
+    expect(v.passerelle).toBe("1421000");
+    expect(v.totalPayeur).toBe("102921000");
+  });
+
+  // LA subtilité du barème, documentée dans commission-grid.ts et sciemment
+  // acceptée : Djomy facture 1,4 % du montant DÉJÀ majoré de notre commission
+  // (`amountGnf` transmis à money-api = montant + platformFee), jamais du
+  // montant brut. Calculer la passerelle sur la marchandise sous-estimerait ce
+  // que le payeur règle réellement.
+  it("calcule la passerelle sur le montant DÉJÀ majoré de la commission (effet de cascade)", () => {
+    const v = ventilationFrais("100000000", "pro");
+    const base = BigInt(v.marchandise) + BigInt(v.infrastructure);
+
+    expect(BigInt(v.passerelle)).toBe((base * BigInt(FRAIS_PASSERELLE_BPS)) / BigInt(10000));
+    // La naïveté qu'on refuse : 1,4 % de la seule marchandise.
+    expect(v.passerelle).not.toBe("1400000");
+  });
+
+  it("les trois lignes s'additionnent exactement au total — jamais un arrondi qui traîne", () => {
+    for (const tier of TIER_ORDER) {
+      const v = ventilationFrais("87654321", tier);
+      expect(BigInt(v.totalPayeur)).toBe(
+        BigInt(v.marchandise) + BigInt(v.infrastructure) + BigInt(v.passerelle),
+      );
+    }
+  });
+
+  // Le plafond est un argument commercial fort : à 1,50 %, une facture de
+  // 50 M GNF appellerait 750 000 de commission ; le plafond la ramène à 75 000.
+  it("applique le plafond de commission du palier", () => {
+    // 50 M GNF = 5 000 000 000 centimes ; 1,50 % = 75 000 000, au-dessus du
+    // plafond Pro (7 500 000).
+    const v = ventilationFrais("5000000000", "pro");
+
+    expect(v.infrastructure).toBe(COMMISSION_CAP_CENTIMES.pro);
+  });
+
+  it("un montant nul ne produit aucun frais", () => {
+    const v = ventilationFrais("0", "freemium");
+
+    expect(v).toEqual({
+      marchandise: "0",
+      infrastructure: "0",
+      passerelle: "0",
+      totalPayeur: "0",
+    });
+  });
+
+  // Un palier inconnu (ajouté côté serveur avant d'être recopié ici) ne doit
+  // pas faire planter un écran de paiement : il retombe sur le barème le plus
+  // DÉFAVORABLE au commerçant, jamais sur le plus favorable — mieux vaut
+  // annoncer un peu trop que promettre un tarif qu'on ne pratique pas.
+  it("retombe sur le barème Freemium pour un palier inconnu", () => {
+    expect(ventilationFrais("100000000", "palier_inconnu" as Tier)).toEqual(
+      ventilationFrais("100000000", "freemium"),
+    );
+  });
+});
+
+describe("prédicats de palier consommés par les onglets Paramètres", () => {
+  // Miroir de PDP_GATEWAY_MIN_TIER (plan-features-grid.ts) : un SEUIL, jamais
+  // une liste — un palier ajouté au-dessus d'enterprise hériterait sinon
+  // silencieusement d'un refus.
+  it("les clés API PDP s'ouvrent à partir d'Enterprise", () => {
+    expect(passerelleePdpAutorisee("freemium")).toBe(false);
+    expect(passerelleePdpAutorisee("pro")).toBe(false);
+    expect(passerelleePdpAutorisee("enterprise")).toBe(true);
+    expect(passerelleePdpAutorisee("custom")).toBe(true);
+  });
+
+  it("le seuil PDP du miroir est bien celui du backend", () => {
+    const bloc = GRID.match(/PDP_GATEWAY_MIN_TIER[^=]*=\s*"(\w+)"/);
+    expect(bloc, "PDP_GATEWAY_MIN_TIER introuvable").toBeTruthy();
+    expect(passerelleePdpAutorisee(bloc![1] as Tier)).toBe(true);
+    const index = tierIndex(bloc![1]);
+    expect(passerelleePdpAutorisee(TIER_ORDER[index - 1])).toBe(false);
+  });
+
+  it("les quotas rendus aux onglets sont ceux de la grille", () => {
+    expect(quotaSuccursales("freemium")).toBe(1);
+    expect(quotaMembres("freemium")).toBe(1);
+    expect(quotaSuccursales("enterprise")).toBeNull();
+    expect(quotaMembres("enterprise")).toBeNull();
+  });
+
+  // Un quota atteint doit bloquer, un quota illimité ne doit jamais bloquer —
+  // et `null` est précisément le piège d'une comparaison naïve (0 >= null).
+  it("quotaAtteint : jamais atteint quand la limite est illimitée", () => {
+    expect(quotaAtteint(0, 1)).toBe(false);
+    expect(quotaAtteint(1, 1)).toBe(true);
+    expect(quotaAtteint(4, 1)).toBe(true);
+    expect(quotaAtteint(9999, null)).toBe(false);
+  });
+});
+
 describe("utilitaires", () => {
   it("ordonne les paliers", () => {
     expect(tierIndex("freemium")).toBeLessThan(tierIndex("pro"));
@@ -212,5 +330,77 @@ describe("utilitaires", () => {
   it("rend un palier inconnu tel quel", () => {
     expect(tierLabel("nouveau_palier")).toBe("nouveau_palier");
     expect(tierLabel("pro")).toBe("Pro");
+  });
+});
+
+// ── Frais de transaction en UNE ligne ───────────────────────────────────────
+//
+// Le guichet n'affiche plus « facture.gn » puis « Djomy » : un seul montant.
+// Ce qui est testé ici, c'est que la fusion ne perd pas un centime et que le
+// taux affiché est DÉRIVÉ de ce montant — pas un chiffre rond écrit en dur.
+describe("fraisTransaction — commission et passerelle fondues, total intact", () => {
+  it("additionne exactement les deux composantes de ventilationFrais", () => {
+    const v = ventilationFrais("100000000", "pro");
+    const f = fraisTransaction("100000000", "pro");
+
+    expect(f.marchandise).toBe(v.marchandise);
+    expect(f.fraisTransaction).toBe((BigInt(v.infrastructure) + BigInt(v.passerelle)).toString());
+    expect(f.totalPayeur).toBe(v.totalPayeur);
+  });
+
+  it("garde l'identité marchandise + frais = total sur tous les paliers", () => {
+    for (const tier of TIER_ORDER) {
+      const f = fraisTransaction("87654321", tier);
+      expect(BigInt(f.totalPayeur)).toBe(BigInt(f.marchandise) + BigInt(f.fraisTransaction));
+    }
+  });
+
+  // La cascade Djomy rend le taux réel LÉGÈREMENT supérieur au barème nominal
+  // (150 + 140 = 290 bps sur Pro) : la passerelle facture sur le montant déjà
+  // majoré. Afficher 2,90 % annoncerait moins que le prélèvement.
+  it("dérive un taux qui tient compte de la cascade, au-dessus du nominal", () => {
+    const f = fraisTransaction("100000000", "pro");
+
+    expect(f.tauxEffectifBps).toBe(292);
+    expect(f.tauxEffectifBps).toBeGreaterThan(totalPayeurBps("pro"));
+    expect(pourcentage(f.tauxEffectifBps)).toBe("2,92 %");
+  });
+
+  // Et l'inverse, là où le plafond joue : le taux DÉCROCHE du barème, en faveur
+  // du commerçant. C'est précisément ce qu'un « 2,5 % » écrit en dur effacerait.
+  it("dérive un taux dégressif dès que le plafond de commission mord", () => {
+    // 50 M GNF : 1,50 % appellerait 750 000, le plafond Pro ramène à 75 000.
+    const f = fraisTransaction("5000000000", "pro");
+
+    expect(f.tauxEffectifBps).toBe(155);
+    expect(f.tauxEffectifBps).toBeLessThan(totalPayeurBps("pro"));
+  });
+
+  it("un montant nul ne produit ni frais ni taux — jamais de division par zéro", () => {
+    const f = fraisTransaction("0", "freemium");
+
+    expect(f.fraisTransaction).toBe("0");
+    expect(f.totalPayeur).toBe("0");
+    expect(f.tauxEffectifBps).toBe(0);
+  });
+});
+
+describe("tauxEffectifBps — le taux se déduit du montant, jamais l'inverse", () => {
+  it("arrondit au point de base le plus proche", () => {
+    // 2,5 % pile.
+    expect(tauxEffectifBps("100000000", "2500000")).toBe(250);
+    // 2,504 9 % → 250 ; 2,505 % → 251 (demi vers le haut).
+    expect(tauxEffectifBps("1000000000", "25049000")).toBe(250);
+    expect(tauxEffectifBps("1000000000", "25050000")).toBe(251);
+  });
+
+  it("rend 0 sur une marchandise nulle ou négative plutôt que de diviser par zéro", () => {
+    expect(tauxEffectifBps("0", "1000")).toBe(0);
+  });
+
+  // Au-delà de Number.MAX_SAFE_INTEGER, un calcul en number perdrait des
+  // unités en silence : la division reste en BigInt de bout en bout.
+  it("reste juste sur des montants au-delà de MAX_SAFE_INTEGER", () => {
+    expect(tauxEffectifBps("100000000000000000000", "2500000000000000000")).toBe(250);
   });
 });

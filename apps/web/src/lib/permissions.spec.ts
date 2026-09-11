@@ -15,12 +15,16 @@ describe("permissions — miroir des @Roles() de trust-api", () => {
         "invoices:void",
         "invoices:relance",
         "invoices:financing",
+        "invoices:credit_note",
         "customers:read",
         "customers:create",
         "customers:merge",
         "products:read",
         "organization:read",
         "organization:trust_score",
+        "organization:branches",
+        "organization:members",
+        "organization:api_keys",
         "payments:record",
       ]);
     }
@@ -65,6 +69,43 @@ describe("permissions — miroir des @Roles() de trust-api", () => {
     for (const role of ["viewer", "tax_controller_readonly"]) {
       expect(permissionsFor(role)).toEqual(["invoices:read"]);
     }
+  });
+
+  // credit-notes.controller.ts — @Roles("owner","admin","cashier") : "portée
+  // monétaire similaire, action du staff au comptoir". Le trio d'issue(), pas
+  // celui, plus étroit, de void() : un avoir ne casse pas la séquence légale,
+  // il la prolonge par un second document.
+  it("l'avoir rectificatif suit le trio de l'émission, jamais celui de l'annulation", () => {
+    expect(hasPermission("cashier", "invoices:credit_note")).toBe(true);
+    expect(hasPermission("cashier", "invoices:void")).toBe(false);
+    expect(hasPermission("accountant_internal", "invoices:credit_note")).toBe(false);
+    expect(hasPermission("field_agent", "invoices:credit_note")).toBe(false);
+  });
+
+  // branches.controller.ts — trio ÉLARGI, comme POST /invoices : voir et créer
+  // une succursale est une action de structuration, pas un acte financier.
+  it("les succursales suivent le trio élargi des factures", () => {
+    for (const role of ["accountant_internal", "cashier", "field_agent"]) {
+      expect(hasPermission(role, "organization:branches")).toBe(true);
+    }
+    expect(hasPermission("viewer", "organization:branches")).toBe(false);
+  });
+
+  // organizations.controller.ts — GET/POST :id/members et .../revoke sont tous
+  // @Roles("owner","admin") : donner ou retirer un accès est une élévation de
+  // privilège. La garde owner-only sur les rôles admin/approver/owner est
+  // appliquée EN PLUS côté service, invisible d'ici.
+  it("la gestion d'équipe reste fermée au-delà d'owner/admin", () => {
+    expect(hasPermission("cashier", "organization:members")).toBe(false);
+    expect(hasPermission("accountant_internal", "organization:members")).toBe(false);
+  });
+
+  // api-keys.controller.ts — @Roles("owner","admin","developer_api"). C'est la
+  // SEULE permission de developer_api dans toute la coquille : sans elle, ce
+  // rôle n'a aucun écran, alors que le palier Pro le débloque explicitement.
+  it("les clés API sont la seule surface de developer_api", () => {
+    expect(permissionsFor("developer_api")).toEqual(["organization:api_keys"]);
+    expect(hasPermission("cashier", "organization:api_keys")).toBe(false);
   });
 
   // Un rôle ajouté côté trust-api mais pas encore connu ici doit se comporter

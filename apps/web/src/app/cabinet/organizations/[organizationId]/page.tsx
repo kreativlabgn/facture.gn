@@ -48,9 +48,9 @@ export default async function CabinetClientOrganizationPage({ params }: { params
     <div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold tracking-wide text-navy-600 uppercase">Entreprise sous mandat</p>
-          <h1 className="mt-1 font-display text-2xl font-bold text-navy-950">Portefeuille client</h1>
-          <p className="mt-1 text-sm text-navy-600">
+          <p className="text-xs font-semibold tracking-wide text-white/75 uppercase">Entreprise sous mandat</p>
+          <h1 className="mt-1 font-display text-2xl font-bold text-white">Portefeuille client</h1>
+          <p className="mt-1 text-sm text-white/75">
             {invoices.length} facture{invoices.length > 1 ? "s" : ""} · {customers.length} client
             {customers.length > 1 ? "s" : ""}
           </p>
@@ -58,18 +58,18 @@ export default async function CabinetClientOrganizationPage({ params }: { params
         <div className="flex flex-wrap items-center gap-3">
           <Link
             href={`/cabinet/organizations/${organizationId}/fec`}
-            className="rounded-[10px] bg-navy-950 px-5 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800"
+            className="rounded-[10px] bg-or px-5 py-2.5 font-display text-sm font-semibold text-navy-950 transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-or"
           >
             Télécharger le FEC
           </Link>
-          <Link href="/cabinet" className="text-sm font-medium text-navy-600 hover:text-navy-950">
+          <Link href="/cabinet" className="text-sm font-medium text-white/75 hover:text-white">
             ← Retour
           </Link>
         </div>
       </div>
 
       <section className="mb-8">
-        <h2 className="mb-3 font-display text-sm font-semibold text-navy-950">Factures</h2>
+        <h2 className="mb-3 font-display text-sm font-semibold text-white">Factures</h2>
         <div className="rounded-2xl border border-navy-100 bg-white">
           {invoices.length === 0 ? (
             <p className="p-8 text-center text-sm text-navy-600">Aucune facture pour le moment.</p>
@@ -94,7 +94,7 @@ export default async function CabinetClientOrganizationPage({ params }: { params
       </section>
 
       <section>
-        <h2 className="mb-3 font-display text-sm font-semibold text-navy-950">Clients</h2>
+        <h2 className="mb-3 font-display text-sm font-semibold text-white">Clients</h2>
         <div className="rounded-2xl border border-navy-100 bg-white">
           {customers.length === 0 ? (
             <p className="p-8 text-center text-sm text-navy-600">Aucun client pour le moment.</p>

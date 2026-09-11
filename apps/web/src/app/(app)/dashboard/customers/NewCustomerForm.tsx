@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { createCustomerAction, type CreateCustomerActionState } from "./actions";
+import { Button } from "@/components/ui";
 
 export function NewCustomerForm() {
   const [state, formAction, pending] = useActionState<CreateCustomerActionState, FormData>(
@@ -44,13 +45,9 @@ export function NewCustomerForm() {
         </select>
       </div>
       {state?.error ? <p className="mt-3 text-sm text-red-text">{state.error}</p> : null}
-      <button
-        type="submit"
-        disabled={pending}
-        className="mt-4 rounded-[10px] bg-navy-950 px-6 py-2.5 font-display text-sm font-semibold text-white transition hover:bg-navy-800 disabled:opacity-45"
-      >
+      <Button type="submit" disabled={pending} className="mt-4">
         {pending ? "Ajout..." : "Ajouter"}
-      </button>
+      </Button>
     </form>
   );
 }

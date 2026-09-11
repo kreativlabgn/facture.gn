@@ -24,7 +24,7 @@ export default async function CabinetMandatesPage() {
 
   return (
     <div>
-      <h1 className="mb-6 font-display text-2xl font-bold text-navy-950">Mandats</h1>
+      <h1 className="mb-6 font-display text-2xl font-bold text-white">Mandats</h1>
 
       <div className="mb-6 rounded-2xl border border-navy-100 bg-white">
         {mandates.length === 0 ? (

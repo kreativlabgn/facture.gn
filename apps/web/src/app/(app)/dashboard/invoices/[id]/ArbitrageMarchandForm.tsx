@@ -324,14 +324,14 @@ function RailAFormulaire({
           (`payout_fee_djomy_bps`, ADR-089) n'existe nulle part dans ce dépôt.
           On dit QUI paie, jamais COMBIEN — inventer un chiffre sur un écran
           comptable serait pire que de ne rien afficher. */}
-      <div className="rounded-xl bg-navy-950 p-4">
-        <p className="text-xs font-semibold tracking-wide text-or uppercase">
+      <div className="rounded-xl border border-navy-100 bg-white p-4">
+        <p className="text-xs font-semibold tracking-wide text-navy-600 uppercase">
           Net versé à votre entreprise
         </p>
-        <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-white">
+        <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-navy-950">
           {formatGnf(netVerseALaPme({ totalTtc }))}
         </p>
-        <p className="mt-2 text-xs text-white">
+        <p className="mt-2 text-xs text-navy-600">
           100 % du total certifié de la facture. Les frais de décaissement sont à la charge de
           l&apos;établissement financier — jamais déduits de ce que vous percevez.
         </p>
@@ -414,7 +414,7 @@ function RailAFormulaire({
 // que la base ne porte pas.
 function RailBExplication() {
   return (
-    <div className="rounded-2xl border border-navy-100 bg-navy-50 p-5">
+    <div className="rounded-2xl border border-navy-100 bg-white p-5">
       <p className="font-display text-sm font-bold text-navy-950">
         Rien à faire : c&apos;est déjà l&apos;option en cours
       </p>

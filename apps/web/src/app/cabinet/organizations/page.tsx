@@ -42,7 +42,7 @@ export default async function CabinetOrganizationsPage() {
           description="Un mandat vous est accordé par l'entreprise elle-même : demandez-le avec son NIF, elle valide depuis son tableau de bord."
         />
         <div>
-          <ButtonLink href="/cabinet/mandates" variant="accent">
+          <ButtonLink href="/cabinet/mandates" variant="accent" surface="sombre">
             Demander un mandat
           </ButtonLink>
         </div>
@@ -97,11 +97,11 @@ export default async function CabinetOrganizationsPage() {
 function EnTete() {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <p className="max-w-prose text-sm text-navy-600">
+      <p className="max-w-prose text-sm text-white/75">
         Les entreprises qui vous ont accordé un mandat actif. Ouvrir une fiche vous donne accès à
         ses factures, dans la limite du rôle qu&apos;elle vous a accordé.
       </p>
-      <ButtonLink href="/cabinet/mandates" variant="secondary">
+      <ButtonLink href="/cabinet/mandates" variant="secondary" surface="sombre">
         Demander un mandat
       </ButtonLink>
     </div>

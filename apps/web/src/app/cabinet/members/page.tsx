@@ -27,8 +27,8 @@ export default async function CabinetMembersPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="max-w-prose text-sm text-navy-600">
-        Les mandats sont accordés au <strong className="text-navy-950">cabinet</strong>, jamais à une
+      <p className="max-w-prose text-sm text-white/75">
+        Les mandats sont accordés au <strong className="text-white">cabinet</strong>, jamais à une
         personne. Retirer un collaborateur coupe donc d&apos;un seul coup tous ses accès aux
         entreprises que vous suivez — il n&apos;y a aucun accès résiduel à aller chercher.
       </p>

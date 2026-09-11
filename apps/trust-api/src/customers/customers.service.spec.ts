@@ -1,5 +1,5 @@
 import { ForbiddenException } from "@nestjs/common";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Tous les faux prisma de ce fichier passent par ici : organizationScopedClient()
 // appelle `$extends`, et setOrganizationScope() appelle `$executeRaw` dans les
@@ -1019,5 +1019,105 @@ describe("CustomersService — clients anonymisés (J2, ADR-116)", () => {
     const service = new CustomersService(prisma as any);
 
     await expect(service.proposeCreditLimit("cust-1", 2_000_000n, "user-1", "org-1")).rejects.toThrow(/anonymisé/i);
+  });
+});
+
+// ── Émission au comptoir sur un simple numéro (ADR-106) ─────────────────────
+//
+// create() ne peut pas servir ce parcours : il crée TOUJOURS, et se contente de
+// marquer l'existant en possibleDuplicateOf. Encaisser trois fois le même
+// client au comptoir fabriquerait trois fiches. resolveByPhone() est la variante
+// qui RENVOIE l'existant — sous le même verrou consultatif, donc réellement
+// atomique entre deux caisses.
+describe("CustomersService — resolveByPhone, vente au comptoir (ADR-106)", () => {
+  function fauxPrisma(opts: { existant?: any } = {}) {
+    const prisma: any = auClientScope({
+      $transaction: vi.fn((cb: any) => cb(prisma)),
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      customer: {
+        findFirst: vi.fn().mockResolvedValue(opts.existant ?? null),
+        create: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: "cust-new", ...data })),
+      },
+    });
+    return prisma;
+  }
+
+  it("renvoie le client existant sans jamais en créer un second", async () => {
+    const prisma = fauxPrisma({
+      existant: { id: "cust-7", organizationId: "org-1", name: "Aïcha Barry", phone: "+224622000000" },
+    });
+    const service = new CustomersService(prisma as any);
+
+    const resultat = await service.resolveByPhone("org-1", "+224622000000");
+
+    expect(resultat.id).toBe("cust-7");
+    expect(prisma.customer.create).not.toHaveBeenCalled();
+  });
+
+  it("crée un profil anonymisé « Client +224… » quand le numéro est inconnu", async () => {
+    const prisma = fauxPrisma();
+    const service = new CustomersService(prisma as any);
+
+    const resultat = await service.resolveByPhone("org-1", "+224622000000");
+
+    expect(prisma.customer.create).toHaveBeenCalledWith({
+      data: { organizationId: "org-1", name: "Client +224622000000", phone: "+224622000000" },
+    });
+    expect(resultat.name).toBe("Client +224622000000");
+  });
+
+  // Le verrou est ce qui rend l'opération atomique : sans lui, deux caisses qui
+  // encaissent le même numéro à la même seconde liraient toutes deux « aucun
+  // client » et créeraient chacune la leur.
+  it("pose le verrou consultatif AVANT de lire, sur la clé (organisation, numéro)", async () => {
+    const prisma = fauxPrisma();
+    const service = new CustomersService(prisma as any);
+
+    await service.resolveByPhone("org-1", "+224622000000");
+
+    // DEUX appels $executeRaw distincts dans cette transaction, et ils n'ont
+    // pas la même forme : setOrganizationScope() passe un `Prisma.sql` déjà
+    // assemblé (un objet, sans .join), le verrou est un template balisé. Le
+    // verrou est donc cherché par son CONTENU et jamais par son index — figer
+    // `calls[0]` reviendrait à casser ce test le jour où une instruction de
+    // scope de plus est posée avant lui.
+    expect(prisma.$executeRaw).toHaveBeenCalled();
+    const appels = prisma.$executeRaw.mock.calls;
+    const indexVerrou = appels.findIndex(
+      ([fragments]: [unknown]) =>
+        Array.isArray(fragments) && fragments.join("").includes("pg_advisory_xact_lock"),
+    );
+    expect(indexVerrou, "aucun pg_advisory_xact_lock posé").toBeGreaterThanOrEqual(0);
+    expect(appels[indexVerrou][1]).toBe("customer:org-1:+224622000000");
+    expect(prisma.$executeRaw.mock.invocationCallOrder[indexVerrou]).toBeLessThan(
+      prisma.customer.findFirst.mock.invocationCallOrder[0],
+    );
+  });
+
+  // J2, ADR-116 — une ligne anonymisée est GELÉE. La réveiller rendrait à un
+  // client le contact qu'il a demandé d'effacer.
+  it("ignore les lignes anonymisées (anonymizedAt: null dans le where)", async () => {
+    const prisma = fauxPrisma();
+    const service = new CustomersService(prisma as any);
+
+    await service.resolveByPhone("org-1", "+224622000000");
+
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", phone: "+224622000000", anonymizedAt: null },
+    });
+  });
+
+  // Le nom fabriqué ne doit jamais écraser celui d'une vraie fiche : un client
+  // enregistré sous « Aïcha Barry » reste « Aïcha Barry » après un encaissement
+  // au comptoir.
+  it("ne renomme jamais un client existant", async () => {
+    const prisma = fauxPrisma({
+      existant: { id: "cust-7", organizationId: "org-1", name: "Aïcha Barry", phone: "+224622000000" },
+    });
+    const service = new CustomersService(prisma as any);
+
+    const resultat = await service.resolveByPhone("org-1", "+224622000000");
+
+    expect(resultat.name).toBe("Aïcha Barry");
   });
 });
