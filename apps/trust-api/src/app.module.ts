@@ -19,6 +19,7 @@ import { CustomersModule } from "./customers/customers.module";
 import { BranchesModule } from "./branches/branches.module";
 import { PartnersModule } from "./partners/partners.module";
 import { VerificationModule } from "./verification/verification.module";
+import { AiModule } from "./ai/ai.module";
 import { CabinetViewModule } from "./cabinet-view/cabinet-view.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { UssdModule } from "./ussd/ussd.module";
@@ -113,6 +114,7 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     // la connexion Redis viennent tous de modules @Global), l'ordre n'est donc
     // qu'une convention de lecture.
     PdpModule,
+    AiModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même

@@ -191,6 +191,16 @@ export class RolesGuard implements CanActivate {
           }
           return template.organizationId;
         }
+        case "ocr-document": {
+          const scan = await this.prisma.ocrDocument.findUnique({
+            where: { id: request.params.id },
+            select: { organizationId: true },
+          });
+          if (!scan) {
+            throw new NotFoundException(RESSOURCE_INTROUVABLE);
+          }
+          return scan.organizationId;
+        }
         case "invoice": {
           const invoice = await this.prisma.invoice.findUnique({ where: { id: request.params.id } });
           if (!invoice) {

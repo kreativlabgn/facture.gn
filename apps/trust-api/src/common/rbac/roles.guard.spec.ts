@@ -16,7 +16,8 @@ function createReflector(
     | "branch"
     | "credit-limit-request"
     | "product"
-    | "recurring-template",
+    | "recurring-template"
+    | "ocr-document",
 ) {
   return {
     getAllAndOverride: vi.fn((key: string) => (key === ROLES_KEY ? roles : idSource)),
@@ -436,6 +437,38 @@ describe("RolesGuard", () => {
     };
     const guard = new RolesGuard(createReflector(["owner"], "recurring-template"), prisma);
     const context = buildContext({ user: { id: "user-1" }, params: { id: "template-inconnu" } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
+    expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("résout params.id comme un DOCUMENT SCANNÉ avec @OrganizationIdSource(\"ocr-document\") (ADR-122)", async () => {
+    const prisma: any = {
+      ocrDocument: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
+      organizationMember: { findUnique: vi.fn().mockResolvedValue({ role: "cashier", revokedAt: null }) },
+    };
+    const guard = new RolesGuard(createReflector(["owner", "cashier"], "ocr-document"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "scan-1" } });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.ocrDocument.findUnique).toHaveBeenCalledWith({
+      where: { id: "scan-1" },
+      select: { organizationId: true },
+    });
+    expect(prisma.organizationMember.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "user-1" } },
+    });
+  });
+
+  // L'oracle fermé : un tiers qui devine l'id d'un scan d'une autre PME reçoit
+  // le même 404 qu'un id inexistant — jamais un 403 qui confirmerait l'existence.
+  it("refuse (404) proprement quand le document scanné pointé par :id n'existe pas (ADR-122) — jamais un 500 brut", async () => {
+    const prisma: any = {
+      ocrDocument: { findUnique: vi.fn().mockResolvedValue(null) },
+      organizationMember: { findUnique: vi.fn() },
+    };
+    const guard = new RolesGuard(createReflector(["owner"], "ocr-document"), prisma);
+    const context = buildContext({ user: { id: "user-1" }, params: { id: "scan-inconnu" } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(NotFoundException);
     expect(prisma.organizationMember.findUnique).not.toHaveBeenCalled();
