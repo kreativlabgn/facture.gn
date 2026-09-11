@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ButtonLink } from "@/components/ui";
+import { EspaceCard } from "@/components/auth/EspaceCard";
+import { LoginMenu } from "@/components/auth/LoginMenu";
 import { CertificationLookupForm } from "@/components/CertificationLookupForm";
 import { Wordmark } from "@/components/Wordmark";
+import { ESPACE_PAR_DEFAUT, ESPACES } from "@/lib/espaces";
 
 export const metadata: Metadata = {
   title: "facture.gn — La preuve numérique de vos factures",
@@ -32,33 +35,6 @@ const ETAPES = [
     numero: "03",
     titre: "Suivez",
     texte: "Retrouvez l’état du document, les encaissements et le journal de certification dans votre espace.",
-  },
-];
-
-const ESPACES = [
-  {
-    eyebrow: "Pour votre entreprise",
-    titre: "Espace marchand",
-    texte: "Émettez vos factures, suivez vos clients et pilotez vos encaissements depuis une interface pensée pour le mobile.",
-    action: "Créer mon espace",
-    href: "/inscription",
-    accent: true,
-  },
-  {
-    eyebrow: "Pour les professionnels du chiffre",
-    titre: "Espace cabinet",
-    texte: "Suivez les mandats, les portefeuilles et les écritures de vos entreprises clientes dans un environnement séparé.",
-    action: "Accéder à l’espace cabinet",
-    href: "/espace-cabinet",
-    accent: false,
-  },
-  {
-    eyebrow: "Pour vos clients",
-    titre: "Portail acheteur",
-    texte: "Consultez les factures adressées à votre numéro, vérifiez-les et réglez-les après authentification par SMS.",
-    action: "Accéder à mes factures",
-    href: "/portail/auth",
-    accent: false,
   },
 ];
 
@@ -126,12 +102,18 @@ export default function LandingPage() {
               </a>
             ))}
           </nav>
-          <div className="flex items-center gap-3">
-            <Link href="/login" className="hidden text-sm font-semibold text-navy-950 hover:underline sm:inline">
-              Se connecter
-            </Link>
-            <ButtonLink href="/inscription" variant="primary">
-              Créer un espace
+          {/* Deux entrées, deux intentions. « Se connecter » ouvre un menu de
+              profil (marchand / cabinet / acheteur) parce que les trois n'entrent
+              pas par la même porte. « Créer mon espace » va DROIT au formulaire
+              marchand — le profil majoritaire — et non au hub /inscription : un
+              récapitulatif entre l'intention et le formulaire est un clic de
+              perdu, et c'était surtout le départ d'une boucle vers /login (voir
+              lib/espaces.ts). Le cabinet et l'acheteur ont leur porte dans
+              la section Espaces et dans le menu. */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <LoginMenu />
+            <ButtonLink href={ESPACE_PAR_DEFAUT.creation!.href} variant="primary">
+              Créer mon espace
             </ButtonLink>
           </div>
         </div>
@@ -153,7 +135,7 @@ export default function LandingPage() {
                 peuvent les vérifier et les régler simplement, même sans compte.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <ButtonLink href="/inscription" variant="accent" size="lg">
+                <ButtonLink href={ESPACE_PAR_DEFAUT.creation!.href} variant="accent" size="lg">
                   Créer mon espace marchand
                 </ButtonLink>
                 <ButtonLink href="#verification" variant="secondary" size="lg">
@@ -234,21 +216,7 @@ export default function LandingPage() {
             />
             <div className="mt-12 grid gap-5 lg:grid-cols-3">
               {ESPACES.map((espace) => (
-                <article
-                  key={espace.titre}
-                  className={`flex flex-col rounded-2xl border bg-white p-7 ${espace.accent ? "border-or" : "border-navy-100"}`}
-                >
-                  <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-navy-600">{espace.eyebrow}</p>
-                  <h3 className="mt-3 font-display text-2xl font-bold text-navy-950">{espace.titre}</h3>
-                  <p className="mt-3 text-sm leading-relaxed text-navy-600">{espace.texte}</p>
-                  <ButtonLink
-                    href={espace.href}
-                    variant={espace.accent ? "accent" : "secondary"}
-                    className="mt-auto w-full sm:mt-8"
-                  >
-                    {espace.action}
-                  </ButtonLink>
-                </article>
+                <EspaceCard key={espace.id} espace={espace} />
               ))}
             </div>
           </div>
@@ -313,10 +281,10 @@ export default function LandingPage() {
                 pourra contrôler.
               </p>
               <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-                <ButtonLink href="/inscription" variant="accent" size="lg">
+                <ButtonLink href={ESPACE_PAR_DEFAUT.creation!.href} variant="accent" size="lg">
                   Créer mon espace marchand
                 </ButtonLink>
-                <ButtonLink href="/login" variant="secondary" size="lg">
+                <ButtonLink href={ESPACE_PAR_DEFAUT.connexion.href} variant="secondary" size="lg">
                   J’ai déjà un compte
                 </ButtonLink>
               </div>
