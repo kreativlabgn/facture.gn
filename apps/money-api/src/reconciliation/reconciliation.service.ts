@@ -63,6 +63,18 @@ export class ReconciliationService {
           continue;
         }
 
+        // Le webhook a peut-être été traité sans que l'attempt ne soit passée
+        // success (la confirmation trust-api peut échouer). Si la ligne
+        // PaymentWebhook existe déjà, le paiement est déjà enregistré côté
+        // trust-api : on ne repasse pas par confirm().
+        const alreadyWebhooked = await this.prisma.paymentWebhook.findUnique({
+          where: { provider_providerRef: { provider: attempt.provider, providerRef: attempt.providerRef } },
+        });
+        if (alreadyWebhooked) {
+          summary.skipped++;
+          continue;
+        }
+
         const result = await provider.verifyTransaction(attempt.providerRef);
 
         if (result.status === "success") {

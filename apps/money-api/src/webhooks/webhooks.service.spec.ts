@@ -32,6 +32,7 @@ function createFakePrisma(overrides: { paymentWebhook?: any; paymentProviderAtte
     paymentWebhook: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
       ...overrides.paymentWebhook,
     },
     paymentProviderAttempt: {
@@ -133,7 +134,7 @@ describe("WebhooksService", () => {
     );
   });
 
-  it("status paid avec échec de confirmation trust-api → propage l'échec, N'insère PAS la ligne (pour permettre la redélivraison)", async () => {
+  it("status paid avec échec de confirmation trust-api → propage l'échec, retire la ligne pour permettre la redélivraison", async () => {
     const provider = createFakeProvider(paidResult);
     const resolver = createFakeResolver(provider);
     const confirmationClient = createFakeConfirmationClient("fail");
@@ -143,7 +144,10 @@ describe("WebhooksService", () => {
     await expect(service.handleIncomingWebhook("djomy", { provider_ref: "djomy-stub-inv-1" })).rejects.toThrow(
       "trust-api a répondu 500",
     );
-    expect(prisma.paymentWebhook.create).not.toHaveBeenCalled();
+    expect(prisma.paymentWebhook.create).toHaveBeenCalled();
+    expect(prisma.paymentWebhook.delete).toHaveBeenCalledWith({
+      where: { provider_providerRef: { provider: "djomy", providerRef: "djomy-stub-inv-1" } },
+    });
   });
 
   it("status pending/failed insère directement pour audit, sans jamais appeler trust-api", async () => {
@@ -162,8 +166,6 @@ describe("WebhooksService", () => {
   });
 
   it("une course concurrente sur l'insertion PaymentWebhook (deux livraisons quasi simultanées) est ignorée gracieusement, jamais un 500 brut", async () => {
-    // Forme exacte confirmée par un vrai P2002 déclenché contre Postgres sur
-    // @@unique([provider, providerRef]) : meta.target = ["provider", "provider_ref"].
     const uniqueViolation = Object.assign(new Error("Unique constraint failed"), {
       code: "P2002",
       meta: { modelName: "PaymentWebhook", target: ["provider", "provider_ref"] },
@@ -179,5 +181,6 @@ describe("WebhooksService", () => {
     await expect(
       service.handleIncomingWebhook("djomy", { provider_ref: "djomy-stub-inv-1" }),
     ).resolves.toBeUndefined();
+    expect(confirmationClient.confirm).not.toHaveBeenCalled();
   });
 });

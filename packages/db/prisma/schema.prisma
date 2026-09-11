@@ -1661,6 +1661,7 @@ model PaymentProviderAttempt {
   status   PaymentProviderAttemptStatus @default(pending)
 
   providerRef    String?   @map("provider_ref")
+  idempotencyKey String?   @map("idempotency_key")
   amountGnf      BigInt    @map("amount_gnf")
   feeGateway     BigInt    @default(0) @map("fee_gateway")
   feePlatform    BigInt    @default(0) @map("fee_platform")
@@ -1673,6 +1674,7 @@ model PaymentProviderAttempt {
   createdAt DateTime  @default(now()) @map("created_at")
   settledAt DateTime? @map("settled_at")
 
+  @@index([idempotencyKey])
   @@map("payment_provider_attempt")
 }
 

@@ -501,11 +501,23 @@ export class InvoicesService {
     // jamais prélevée sur le marchand (qui reçoit toujours le montant certifié
     // intégral, totalTtc, jamais touché par ce calcul).
     const platformFee = computePlatformFee(issuedInvoice.totalTtc, organization.commercialTier);
-    const paymentLink = await this.paymentLinkClient.tryGenerate({
-      invoiceId: issuedInvoice.id,
-      organizationId: issuedInvoice.organizationId,
-      amountGnf: issuedInvoice.totalTtc + platformFee,
-    });
+    let paymentLink;
+    try {
+      paymentLink = await this.paymentLinkClient.tryGenerate({
+        invoiceId: issuedInvoice.id,
+        organizationId: issuedInvoice.organizationId,
+        amountGnf: issuedInvoice.totalTtc + platformFee,
+      });
+    } catch (error) {
+      // Même garantie que l'update du lien ci-dessous : une panne Money Context
+      // (timeout, retry Moneroo, erreur réseau) ne doit jamais faire échouer
+      // une émission déjà certifiée et commitée. Le lien sera régénéré à la
+      // demande ou par la réconciliation.
+      this.logger.warn(
+        `Facture ${invoiceId} certifiée mais la génération du lien de paiement a échoué : ${(error as Error).message}`,
+      );
+      paymentLink = null;
+    }
     if (!paymentLink) {
       return issuedInvoice;
     }
@@ -857,23 +869,37 @@ export class InvoicesService {
       debites.push(canal);
     }
 
-    await this.paymentReminderService.send(
-      { phone: invoice.customer.phone, notificationChannel: invoice.customer.notificationChannel },
-      invoice.number as string,
-      invoice.amountDue / 100n,
-      resolveLocale(invoice.organization.preferredLanguage),
-    );
-
-    return this.prisma.$transaction(async (tx) => {
-      // RLS — première ligne du bloc (le client scopé ouvrirait une transaction
-      // imbriquée par opération).
+    // L'événement d'audit est crée DANS la transaction AVANT l'envoi SMS : si
+    // l'envoi échoue, la trace existe et la relance est retryable ; si la
+    // transaction échoue, aucun SMS n'a été envoyé (le send est après le commit).
+    // L'inverse (send avant transaction) laisserait un SMS envoyé sans trace
+    // si la transaction échouait — un trou d'auditabilité inacceptable sur une
+    // action financière (I2).
+    await this.prisma.$transaction(async (tx) => {
       await setOrganizationScope(tx, organizationId);
-
       await tx.invoiceEvent.create({
         data: { invoiceId, type: "payment_reminder_sent", actorId },
       });
-      return invoice;
     });
+
+    try {
+      await this.paymentReminderService.send(
+        { phone: invoice.customer.phone, notificationChannel: invoice.customer.notificationChannel },
+        invoice.number as string,
+        invoice.amountDue / 100n,
+        resolveLocale(invoice.organization.preferredLanguage),
+      );
+    } catch (error) {
+      // L'envoi a échoué après que la trace a été posée : la relance est
+      // retryable (l'événement existe, le débit est consommé). On ne masque pas
+      // l'erreur technique derrière un no-op : l'appelant la voit.
+      this.logger.error(
+        `Envoi de la relance pour la facture ${invoiceId} échoué après création de la trace : ${(error as Error).message}`,
+      );
+      throw error;
+    }
+
+    return invoice;
   }
 
   // C10 — lecture seule, jamais de valeur mise en cache (chaque appel relit la DB) :

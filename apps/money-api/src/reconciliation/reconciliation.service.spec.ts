@@ -23,12 +23,15 @@ function build(opts: {
   confirm?: () => Promise<void>;
   resolveNull?: boolean;
 }) {
-  const prisma = {
-    paymentProviderAttempt: {
-      findMany: vi.fn().mockResolvedValue(opts.stale ?? [attempt()]),
-      update: vi.fn().mockResolvedValue({}),
-    },
-  };
+const prisma = {
+      paymentProviderAttempt: {
+        findMany: vi.fn().mockResolvedValue(opts.stale ?? [attempt()]),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      paymentWebhook: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    };
   const provider = {
     name: "djomy",
     verifyTransaction: vi.fn(opts.verify ?? (async (ref: string) => ({ status: "pending", providerRef: ref }))),
