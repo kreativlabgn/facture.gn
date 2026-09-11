@@ -35,10 +35,17 @@ export class MonerooStubProvider implements PaymentProvider {
     };
   }
 
+  // PAS de chargeMobileMoney ici, et c'est délibéré (Chantier 3) : ce stub rend
+  // `feeGatewayGnf: 0n` faute de barème Moneroo modélisé. Pousser un débit dont
+  // on ne saurait pas annoncer les frais violerait la transparence tarifaire
+  // qu'ADR-106 exige — le payeur verrait « 0 GNF de frais réseau » puis serait
+  // débité d'autre chose. Tant que le barème n'est pas connu, Moneroo reste le
+  // provider du LIEN (le payeur voit alors les frais chez Moneroo), jamais du
+  // débit poussé. La méthode étant optionnelle sur l'interface, l'absence se
+  // teste et se refuse en amont — elle ne se découvre pas au moment du débit.
   async verifyTransaction(providerRef: string): Promise<VerifyTransactionResult> {
     return { status: "success", providerRef, settledAt: new Date() };
   }
-
   // TODO(Moneroo réel, ADR-075) : remplacer par la vraie vérification de signature
   // Moneroo quand des credentials existeront — voir le même correctif sur
   // DjomyStubProvider pour le raisonnement complet (dev-security-reviewer, C2 Phase 2b).

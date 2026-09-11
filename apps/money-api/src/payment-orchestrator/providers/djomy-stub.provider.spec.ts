@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { CreatePaymentLinkRequest } from "../provider.interface";
-import { DjomyStubProvider } from "./djomy-stub.provider";
+import type { ChargeMobileMoneyRequest, CreatePaymentLinkRequest } from "../provider.interface";import { DjomyStubProvider } from "./djomy-stub.provider";
 
 const request: CreatePaymentLinkRequest = {
   invoiceId: "3b3963da-d099-43ea-996b-80000060b28a",
@@ -80,5 +79,65 @@ describe("DjomyStubProvider — handleWebhook (garde contre la forgerie, C2 Phas
     const result = provider.handleWebhook({ provider_ref: "djomy-stub-inv-1", stub_secret: "peu-importe" });
 
     expect(result.signatureValid).toBe(false);
+  });
+});
+
+describe("DjomyStubProvider — débit Mobile Money poussé (Chantier 3)", () => {
+  const chargeRequest: ChargeMobileMoneyRequest = {
+    invoiceId: "3b3963da-d099-43ea-996b-80000060b28a",
+    msisdn: "+224622000000",
+    operator: "orange_money",
+    amountGnf: 100_000_000n,
+    idempotencyKey: "3b3963da-d099-43ea-996b-80000060b28a:charge:+224622000000",
+  };
+
+  // ADR-106 — le taux gateway ne dépend pas du canal d'encaissement. Un débit
+  // poussé et un lien de paiement sur le même montant doivent coûter la même
+  // chose au payeur, sinon le récapitulatif affiché avant le choix ment sur
+  // l'un des deux.
+  it("applique le même 1,4% que le lien de paiement, sur le même montant", async () => {
+    const provider = new DjomyStubProvider();
+
+    const parLien = await provider.createPaymentLink(request);
+    const parDebit = await provider.chargeMobileMoney(chargeRequest);
+
+    expect(parDebit.feeGatewayGnf).toBe(1_400_000n); // 1,4% de 100 000 000
+    expect(parDebit.feeGatewayGnf).toBe(parLien.feeGatewayGnf);
+  });
+
+  // Un débit Mobile Money n'est jamais acquis à l'aller : il attend que le
+  // porteur compose son code. Le stub ne s'autorise pas le raccourci d'un
+  // "success" immédiat, qui ferait croire à l'écran qu'il peut annoncer un
+  // paiement encaissé.
+  it("rend toujours 'pending', jamais un succès immédiat", async () => {
+    const provider = new DjomyStubProvider();
+
+    const result = await provider.chargeMobileMoney(chargeRequest);
+
+    expect(result.status).toBe("pending");
+  });
+
+  it("donne une instruction propre à l'opérateur choisi", async () => {
+    const provider = new DjomyStubProvider();
+
+    const orange = await provider.chargeMobileMoney(chargeRequest);
+    const mtn = await provider.chargeMobileMoney({ ...chargeRequest, operator: "mtn_momo" });
+
+    expect(orange.instruction).toContain("#144#");
+    expect(mtn.instruction).toContain("MoMo");
+    expect(orange.instruction).not.toBe(mtn.instruction);
+  });
+
+  // La référence porte la clé d'idempotence : deux débits pour le même couple
+  // (facture, numéro) sont reconnaissables comme le même geste, ce qui est ce
+  // que la garde de double-débit exploitera côté service.
+  it("dérive la référence provider de la clé d'idempotence", async () => {
+    const provider = new DjomyStubProvider();
+
+    const a = await provider.chargeMobileMoney(chargeRequest);
+    const b = await provider.chargeMobileMoney(chargeRequest);
+
+    expect(a.providerRef).toBe(b.providerRef);
+    expect(a.providerRef).toContain(chargeRequest.idempotencyKey);
   });
 });
