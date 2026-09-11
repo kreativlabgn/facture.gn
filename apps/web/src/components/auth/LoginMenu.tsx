@@ -73,9 +73,13 @@ export function LoginMenu() {
         aria-expanded={ouvert}
         aria-controls={menuId}
         onClick={() => setOuvert((v) => !v)}
-        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-[10px] px-3 text-sm font-semibold text-navy-950 transition hover:bg-navy-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
+        className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 text-sm font-semibold text-navy-950 transition hover:bg-navy-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
       >
-        Se connecter
+        {/* Sous 640 px, le header n'a pas la place de deux libellés longs côte à
+            côte (« Se connecter » + « Créer mon espace » débordaient sur trois
+            lignes) : un mot suffit, le menu dit le reste. */}
+        <span className="sm:hidden">Connexion</span>
+        <span className="hidden sm:inline">Se connecter</span>
         <svg
           aria-hidden="true"
           viewBox="0 0 20 20"

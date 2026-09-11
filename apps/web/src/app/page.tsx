@@ -112,8 +112,9 @@ export default function LandingPage() {
               la section Espaces et dans le menu. */}
           <div className="flex items-center gap-2 sm:gap-3">
             <LoginMenu />
-            <ButtonLink href={ESPACE_PAR_DEFAUT.creation!.href} variant="primary">
-              Créer mon espace
+            <ButtonLink href={ESPACE_PAR_DEFAUT.creation!.href} variant="primary" className="whitespace-nowrap">
+              <span className="sm:hidden">S’inscrire</span>
+              <span className="hidden sm:inline">Créer mon espace</span>
             </ButtonLink>
           </div>
         </div>
