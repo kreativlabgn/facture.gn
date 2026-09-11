@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ButtonLink, Card } from "@/components/ui";
+import { Card } from "@/components/ui";
+import { EspaceCard } from "@/components/auth/EspaceCard";
 import { ComptesDemo } from "@/components/ComptesDemo";
+import { ESPACES } from "@/lib/espaces";
 
 export const metadata: Metadata = { title: "Créer un compte — facture.gn" };
 
@@ -40,39 +42,15 @@ export default function InscriptionPage() {
         </p>
       </div>
 
-      <div className="grid gap-4">
-        <Card className="overflow-hidden border-or">
-          <div className="grid gap-5 p-6 sm:grid-cols-[1fr_auto] sm:items-end sm:p-7">
-            <div>
-              <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-navy-600 uppercase">Pour vendre et encaisser</p>
-              <h2 className="mt-2 font-display text-xl font-bold text-navy-950">Espace marchand</h2>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-navy-600">Émettez vos factures, partagez-les à vos clients et suivez vos règlements, même quand votre journée ne se passe pas derrière un bureau.</p>
-            </div>
-            <ButtonLink href="/espace-marchand" variant="accent">Découvrir l’espace marchand</ButtonLink>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="grid gap-5 p-6 sm:grid-cols-[1fr_auto] sm:items-end sm:p-7">
-            <div>
-              <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-navy-600 uppercase">Pour accompagner plusieurs entreprises</p>
-              <h2 className="mt-2 font-display text-xl font-bold text-navy-950">Espace cabinet</h2>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-navy-600">Organisez vos mandats, vos collaborateurs et votre portefeuille client depuis un espace pensé pour les professionnels du chiffre.</p>
-            </div>
-            <ButtonLink href="/espace-cabinet" variant="secondary">Découvrir l’espace cabinet</ButtonLink>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="grid gap-5 p-6 sm:grid-cols-[1fr_auto] sm:items-end sm:p-7">
-            <div>
-              <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-navy-600 uppercase">Pour régler une facture reçue</p>
-              <h2 className="mt-2 font-display text-xl font-bold text-navy-950">Portail client</h2>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-navy-600">Ouvrez la facture qui vous a été adressée, vérifiez-la et réglez-la avec un code reçu par SMS.</p>
-            </div>
-            <ButtonLink href="/portail/auth" variant="secondary">Accéder à mes factures</ButtonLink>
-          </div>
-        </Card>
+      {/* Mêmes cartes que la section Espaces de la landing, même source
+          (lib/espaces.ts) : deux boutons pour les professionnels, un seul pour
+          l'acheteur. Avant, ces cartes renvoyaient vers /espace-marchand et
+          /espace-cabinet — deux routes PROTÉGÉES — et un visiteur venu
+          s'inscrire finissait sur /login. */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {ESPACES.map((espace) => (
+          <EspaceCard key={espace.id} espace={espace} heading="h2" />
+        ))}
       </div>
 
       {/* L'agent terrain n'a PAS de voie d'inscription, et c'est voulu :
