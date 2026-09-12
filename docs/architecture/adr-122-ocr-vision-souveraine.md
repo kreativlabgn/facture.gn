@@ -161,10 +161,15 @@ il conditionne le positionnement « tiers de confiance privé certifié » et de
 
 ## Reste ouvert
 
-- Hébergement du modèle et souveraineté des données extraites. Au 11/09, le
-  port `OCR_VISION_PROVIDER` est lié à une implémentation qui répond 503
-  explicite : le registre, la double garde et l'insertion sont livrés et
-  testés, le point d'inférence ne l'est pas.
+- Hébergement du modèle et souveraineté des données extraites. Depuis le
+  12/09, le port `OCR_VISION_PROVIDER` est câblable : `OCR_VISION_ENDPOINT` +
+  `OCR_VISION_TOKEN` activent le connecteur `SovereignOcrVisionProvider`
+  (POST `{endpoint}/extractions` avec la référence d'image, enveloppe
+  `{ modelId, extraction }` en retour, 503 sur toute panne — le document reste
+  RECEIVED et se rejoue). Sans endpoint, l'implémentation répond toujours 503
+  explicite. Le point d'inférence est donc branché côté serveur ; ce qui reste
+  ouvert est OÙ il tourne — le connecteur ne sait rien de l'hébergement, et
+  la question de souveraineté reste entière tant qu'aucune URL n'est posée.
 - L'écran de relecture lui-même (corriger la lecture, puis insérer). Seule
   l'alerte `OcrReviewAlert` est livrée ; un scan en
   `DRAFT_PENDING_MANUAL_REVIEW` n'a aujourd'hui d'autre issue que la saisie
