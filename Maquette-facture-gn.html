@@ -603,8 +603,8 @@ button{font-family:inherit;}
 .ticket-row:last-child{border-bottom:none;}
 .sev{width:6px; height:34px; border-radius:4px; flex:none;}
 .sev.critique{background:var(--bad);}
-.sev.elevee{background:var(--accent);}
-.sev.moyenne{background:var(--text-dim);}
+.sev.majeur{background:var(--accent);}
+.sev.mineur{background:var(--text-dim);}
 .sev.faible{background:var(--surface-3);}
 .ticket-main{flex:1; min-width:0;}
 .ticket-main .subj{font-weight:600; font-size:13px;}
@@ -2615,8 +2615,8 @@ button{font-family:inherit;}
       <div class="filter-row" id="ops-ticket-filter-row">
         <button class="filter-chip active" data-sev="all">Tous · <span id="ops-count-all"></span></button>
         <button class="filter-chip" data-sev="critique">Critique · <span id="ops-count-critique"></span></button>
-        <button class="filter-chip" data-sev="elevee">Élevée · <span id="ops-count-elevee"></span></button>
-        <button class="filter-chip" data-sev="moyenne">Moyenne · <span id="ops-count-moyenne"></span></button>
+        <button class="filter-chip" data-sev="majeur">Majeur · <span id="ops-count-majeur"></span></button>
+        <button class="filter-chip" data-sev="mineur">Mineur · <span id="ops-count-mineur"></span></button>
       </div>
       <div class="card" id="ops-tickets-list"></div>
     </section>
@@ -4968,10 +4968,10 @@ const TICKETS = [
   { id:'t1', sev:'critique', subj:'Lien de paiement Djomy rejette systématiquement', org:'Boutique Aissatou', opened:'ouvert il y a 40 min',
     desc:"L'organisation signale que 4 clients consécutifs n'arrivent pas à finaliser un paiement Orange Money — le lien renvoie une erreur générique côté Djomy. À vérifier : bascule automatique vers Moneroo (circuit breaker 10s, ADR-072/073) semble ne pas s'être déclenchée.",
     slaMinutes: -12, slaTotal:'SLA dépassé' },
-  { id:'t2', sev:'elevee', subj:'Export FEC renvoie une erreur 500', org:'Cabinet Barry & Associés', opened:'ouvert il y a 2h',
+  { id:'t2', sev:'majeur', subj:'Export FEC renvoie une erreur 500', org:'Cabinet Barry & Associés', opened:'ouvert il y a 2h',
     desc:"Le cabinet ne parvient plus à exporter le FEC consolidé pour ses 2 organisations mandatées depuis ce matin. Erreur 500 côté serveur, aucun message d'erreur exploitable côté client.",
     slaMinutes: 80, slaTotal:'SLA 4h' },
-  { id:'t3', sev:'moyenne', subj:"Question sur l'export FEC", org:'Restaurant Le Damier', opened:'en cours',
+  { id:'t3', sev:'mineur', subj:"Question sur l'export FEC", org:'Restaurant Le Damier', opened:'en cours',
     desc:"L'organisation demande si le format d'export FEC est compatible avec son logiciel comptable actuel (Sage). Question informative, pas de dysfonctionnement signalé.",
     slaMinutes: 1080, slaTotal:'SLA 24h' },
 ];
@@ -4990,8 +4990,8 @@ function renderTickets(){
   const open = TICKETS.filter(t => !t.resolved);
   document.getElementById('ops-count-all').textContent = open.length;
   document.getElementById('ops-count-critique').textContent = open.filter(t => t.sev === 'critique').length;
-  document.getElementById('ops-count-elevee').textContent = open.filter(t => t.sev === 'elevee').length;
-  document.getElementById('ops-count-moyenne').textContent = open.filter(t => t.sev === 'moyenne').length;
+  document.getElementById('ops-count-majeur').textContent = open.filter(t => t.sev === 'majeur').length;
+  document.getElementById('ops-count-mineur').textContent = open.filter(t => t.sev === 'mineur').length;
   const list = ticketSevFilter === 'all' ? open : open.filter(t => t.sev === ticketSevFilter);
   document.getElementById('ops-tickets-list').innerHTML = list.length ? list.map(t => `
     <div class="ticket-row" onclick="ops_showTicketDetail('${t.id}')" style="cursor:pointer;">
