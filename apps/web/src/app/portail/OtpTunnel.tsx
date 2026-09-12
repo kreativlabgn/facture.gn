@@ -15,7 +15,21 @@ import { requestOtpAction, verifyOtpAction, type OtpActionState } from "./action
 //
 // `retour` permet de rendre la main là d'où l'on vient : sur la facture
 // demandée quand on arrive par un lien SMS, sur l'accueil sinon.
-export function OtpTunnel({ retour, titre, intro }: { retour?: string; titre?: string; intro?: string }) {
+//
+// `encadre` : dans la coquille du portail (page facture sans session), le
+// tunnel est une carte posée sur le fond gris. Dans AuthLayout, la colonne
+// d'action EST la carte — on ne pose pas une bordure dans une bordure.
+export function OtpTunnel({
+  retour,
+  titre,
+  intro,
+  encadre = true,
+}: {
+  retour?: string;
+  titre?: string;
+  intro?: string;
+  encadre?: boolean;
+}) {
   const [etatDemande, demander, demandeEnCours] = useActionState<OtpActionState, FormData>(
     requestOtpAction,
     null,
@@ -33,8 +47,8 @@ export function OtpTunnel({ retour, titre, intro }: { retour?: string; titre?: s
 
   return (
     <div className="mx-auto w-full max-w-md">
-      <div className="rounded-2xl border border-navy-100 bg-white p-6 sm:p-8">
-        <h1 className="font-display text-xl font-bold text-navy-950">
+      <div className={encadre ? "rounded-2xl border border-navy-100 bg-white p-6 sm:p-8" : ""}>
+        <h1 className="font-display text-2xl font-bold text-navy-950">
           {titre ?? "Accéder à mes factures"}
         </h1>
         <p className="mt-1 text-sm text-navy-600">

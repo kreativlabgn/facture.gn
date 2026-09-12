@@ -6,7 +6,7 @@ import { getPortalToken } from "@/lib/portal-session";
 import { TrustApiError, type PortalOrganizationSummary } from "@/lib/trust-api";
 import { StatusPill } from "@/components/StatusPill";
 import { ButtonLink, Card } from "@/components/ui";
-import { OtpTunnel } from "../OtpTunnel";
+import { OtpTunnel } from "@/app/portail/OtpTunnel";
 
 export const metadata: Metadata = { title: "Votre facture — facture.gn" };
 

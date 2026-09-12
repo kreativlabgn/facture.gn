@@ -1,12 +1,15 @@
 import { SiteHeader } from "@/components/SiteHeader";
 
-// Groupe de routes `(auth)` : les parenthèses ne changent aucune URL —
-// /register reste /register. Il ne porte que le tunnel d'entrée (inscription
-// puis configuration de la PME).
+// Groupe de routes `(auth)` : les parenthèses ne changent aucune URL. Il porte
+// les écrans du tunnel qui suivent la création du compte — hub /inscription,
+// /onboarding (organisation), /nouveau-cabinet (structure) — sous le
+// SiteHeader public.
 //
-// /login reste volontairement hors du groupe : il rend déjà son propre
-// SiteHeader et vit dans une PR en cours. L'y déplacer ne changerait pas son
-// URL mais créerait un conflit pour rien.
+// /login, /register et /portail/auth n'en font PAS partie : ce sont les
+// écrans d'ENTRÉE, rendus par AuthLayout (components/auth) en page entière —
+// écran scindé, zone d'information par profil, sorties « changer de profil ».
+// /register vit dans le groupe `(entree)` pour échapper à ce layout-ci sans
+// changer d'URL.
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
