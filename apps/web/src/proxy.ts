@@ -93,6 +93,8 @@ export const config = {
     "/daf/:path*",
     "/espace-marchand/:path*",
     "/espace-cabinet/:path*",
+    // ADR-123 — démonstrations commerciales habillées par la coquille (app).
+    "/demo/:path*",
     // Chantier 3 — pas une route protégée : ouverture de la session de checkout.
     "/pay/:path*",
   ],
