@@ -166,6 +166,7 @@ button{font-family:inherit;}
 .tabbar-item svg{width:20px; height:20px;}
 .tabbar-item.active{color:var(--accent); font-weight:600;}
 .tabbar-item[hidden]{display:none;}
+#shell-1 [hidden]{display:none !important;}
 .tabbar-cta{width:50px; height:50px; border-radius:50%; background:var(--accent); border:4px solid var(--surface);
   display:flex; align-items:center; justify-content:center; cursor:pointer; margin-top:-28px; box-shadow:0 10px 24px rgba(251,181,0,.35); flex:none;}
 .tabbar-cta svg{width:22px; height:22px; color:var(--accent-ink);}
@@ -602,8 +603,8 @@ button{font-family:inherit;}
 .ticket-row:last-child{border-bottom:none;}
 .sev{width:6px; height:34px; border-radius:4px; flex:none;}
 .sev.critique{background:var(--bad);}
-.sev.elevee{background:var(--accent);}
-.sev.moyenne{background:var(--text-dim);}
+.sev.majeur{background:var(--accent);}
+.sev.mineur{background:var(--text-dim);}
 .sev.faible{background:var(--surface-3);}
 .ticket-main{flex:1; min-width:0;}
 .ticket-main .subj{font-weight:600; font-size:13px;}
@@ -870,6 +871,14 @@ button{font-family:inherit;}
     <option value="field_agent">field_agent — Agent terrain</option>
     <option value="delivery_driver">delivery_driver — Livreur</option>
   </select>
+  <select id="plan-select" aria-label="Simuler le palier commercial">
+    <option value="Freemium">Freemium — 0 GNF/mois</option>
+    <option value="Starter">Starter — 100 000 GNF/mois</option>
+    <option value="Starter Plus">Starter Plus — 250 000 GNF/mois</option>
+    <option value="Pro">Pro — 500 000 GNF/mois</option>
+    <option value="Enterprise">Enterprise — 750 000 GNF/mois</option>
+    <option value="Custom">Custom — 1 500 000 GNF/mois</option>
+  </select>
   <div class="sync-toggle" role="group" aria-label="Simuler l'état de synchronisation">
     <button data-sync="ok" class="active">Synchronisé</button>
     <button data-sync="offline">Hors ligne</button>
@@ -896,6 +905,7 @@ button{font-family:inherit;}
   <div class="branch-strip" id="branch-strip">
     <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M9 13h1M14 9h1M14 13h1"/></svg>
     <div class="txt">Succursale active : <b id="branch-strip-name">Boutique principale</b></div>
+    <span class="pill neutral" id="branch-strip-cap"></span>
     <button class="action" onclick="s1_showScreen('s-succursales')">Changer</button>
   </div>
 
@@ -909,7 +919,7 @@ button{font-family:inherit;}
             <circle cx="48" cy="48" r="42" fill="none" stroke="var(--surface-2)" stroke-width="8"/>
             <circle id="gauge-arc" cx="48" cy="48" r="42" fill="none" stroke="var(--good)" stroke-width="8" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="263.9"/>
           </svg>
-          <div class="val"><span class="n">96,4</span><span class="pct">%</span></div>
+          <div class="val"><span class="n" id="home-trust-rate">96,4</span><span class="pct">%</span></div>
         </div>
         <div class="trust-body">
           <div class="label">Paiements vérifiés</div>
@@ -923,7 +933,7 @@ button{font-family:inherit;}
       <div class="queue" id="queue"></div>
 
       <div class="stats-strip">
-        <div class="stat-mini"><div class="lbl">Encaissé ce mois</div><div class="val mono">4,82M</div></div>
+        <div class="stat-mini"><div class="lbl">Encaissé ce mois</div><div class="val mono" id="home-month-cashed">4,82M</div></div>
         <div class="stat-mini"><div class="lbl">Palier</div><div class="val" id="home-tier-val">Freemium</div></div>
       </div>
       <div class="chain-note">
@@ -1138,59 +1148,154 @@ button{font-family:inherit;}
 
   <!-- ================= ANALYTICS (business_manager, ADR-084) ================= -->
   <section class="screen" id="s-analytics">
-    <h1 style="font-size:20px; margin-bottom:16px;">Analytics</h1>
+    <h1 style="font-size:20px; margin-bottom:4px;">Analytics</h1>
+    <p id="ana-tier-note" style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;"></p>
 
-    <div class="filter-row">
-      <button class="filter-chip active">Par produit</button>
-      <button class="filter-chip" id="tab-client" style="opacity:.45; cursor:default;">Par client · à venir</button>
-      <button class="filter-chip" id="tab-branch" style="opacity:.45; cursor:default;">Par succursale · à venir</button>
+    <!-- Basique (Grille §3.1) — visible à tous les paliers ; Avancé = « tout Basique + » -->
+    <div id="ana-basic">
+      <div class="stats-strip" style="margin-top:0; margin-bottom:8px;">
+        <div class="stat-mini"><div class="lbl">Taux d'encaissement</div><div class="val mono" id="ana-rate" style="color:var(--good);">96,4 %</div></div>
+        <div class="stat-mini"><div class="lbl">Encaissé ce mois</div><div class="val mono" id="ana-month">4,82M</div></div>
+        <div class="stat-mini"><div class="lbl">Encaissé cumulé</div><div class="val mono">38,6M</div></div>
+      </div>
+      <p style="font-size:10.5px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Le taux d'encaissement est le score de confiance de l'Accueil (ADR-093) — paiements réglés par lien / total des paiements.<span id="ana-fixed-note"> Vue fixe sur le mois en cours.</span></p>
+
+      <div class="card" style="padding:16px; margin-bottom:14px;">
+        <div class="panel-title" style="margin-bottom:10px;">Factures par statut — mois en cours</div>
+        <div class="detail-row" style="padding:8px 0;"><span class="k">Payées</span><span class="mono">31</span></div>
+        <div class="detail-row" style="padding:8px 0;"><span class="k">En attente</span><span class="mono">4</span></div>
+        <div class="detail-row" style="padding:8px 0;"><span class="k">Partielles</span><span class="mono">2</span></div>
+        <div class="detail-row" style="padding:8px 0; border-bottom:none;"><span class="k">Annulées</span><span class="mono">1</span></div>
+      </div>
+
+      <div class="card" style="padding:16px; margin-bottom:14px;">
+        <div class="panel-title" style="margin-bottom:12px;">Cash vs non-cash</div>
+        <div style="display:flex; height:8px; border-radius:100px; overflow:hidden; background:var(--surface-2);">
+          <div style="width:96.4%; background:var(--accent);"></div>
+          <div style="width:3.6%; background:var(--surface-3);"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:6px;"><span>Non-cash (lien de paiement) · 96,4 % · 4,65M</span><span>Cash · 3,6 % · 0,17M</span></div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px;">
+        <div class="panel-head"><span class="panel-title">En retard de plus de 30 jours</span><span class="pill void">2</span></div>
+        <div class="invoice-row"><div class="row-main"><span class="name">Fatoumata Camara</span><span class="sub">FG-2026-000352 · solde 120 000 GNF</span></div><span class="pill void">52 j</span></div>
+        <div class="invoice-row"><div class="row-main"><span class="name">Boubacar Camara — livraison foraine</span><span class="sub">FG-2026-000371 · 60 000 GNF</span></div><span class="pill void">38 j</span></div>
+      </div>
+
+      <div id="ana-basic-lock" class="card" style="padding:14px 16px; margin-bottom:14px; opacity:.6; display:flex; gap:10px; align-items:center;">
+        <span style="flex:none;">🔒</span>
+        <span style="font-size:12px; line-height:1.5;">Analyse par produit, top clients, CA par succursale, tendances, sélecteur de période et export CSV — disponibles au palier Pro.</span>
+      </div>
     </div>
 
-    <div class="stats-strip" style="margin-top:0; margin-bottom:16px;">
-      <div class="stat-mini"><div class="lbl">CA ce mois</div><div class="val mono">7,68M</div></div>
-      <div class="stat-mini"><div class="lbl">Marge ce mois</div><div class="val mono" style="color:var(--good);">1,42M</div></div>
-      <div class="stat-mini"><div class="lbl">Délai moyen</div><div class="val mono">6,2 j</div></div>
+    <!-- Avancé (Grille §3.2) — Pro et au-delà -->
+    <div id="ana-advanced" hidden>
+      <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
+        <select id="ana-period" style="flex:1; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-size:12.5px; font-family:'Inter'; background:var(--surface); color:var(--text);">
+          <option>Mois en cours</option><option>Trimestre en cours</option><option>12 derniers mois</option><option>Période personnalisée…</option>
+        </select>
+        <button class="btn-ghost" onclick="s1_exportAnalyticsCsv()">Export CSV</button>
+      </div>
+      <p id="ana-export-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:-6px 0 12px;"></p>
+
+      <div class="filter-row">
+        <button class="filter-chip active">Par produit</button>
+        <button class="filter-chip" id="tab-client" style="opacity:.45; cursor:default;">Par client · à venir</button>
+        <button class="filter-chip" id="tab-branch" style="opacity:.45; cursor:default;">Par succursale · à venir</button>
+      </div>
+
+      <div class="stats-strip" style="margin-top:0; margin-bottom:16px;">
+        <div class="stat-mini"><div class="lbl">CA ce mois</div><div class="val mono">7,68M</div></div>
+        <div class="stat-mini"><div class="lbl">Marge ce mois</div><div class="val mono" style="color:var(--good);">1,42M</div></div>
+        <div class="stat-mini"><div class="lbl">Délai moyen</div><div class="val mono">6,2 j</div></div>
+      </div>
+
+      <div class="card" style="padding:16px;">
+        <div class="panel-title" style="margin-bottom:14px;">Par produit — chiffre d'affaires et marge</div>
+
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Sac de riz 50kg</span><span class="mono">3 190 000 GNF</span></div>
+          <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:100%; height:100%; background:var(--accent);"></div></div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>620 unités</span><span>marge 18 % · 574 200 GNF</span></div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Huile 5L</span><span class="mono">2 040 000 GNF</span></div>
+          <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:64%; height:100%; background:var(--accent);"></div></div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>340 unités</span><span style="color:var(--good);">marge 22 % · 448 800 GNF</span></div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Sucre 50kg</span><span class="mono">1 785 000 GNF</span></div>
+          <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:56%; height:100%; background:var(--accent);"></div></div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>210 unités</span><span>marge 14 % · 249 900 GNF</span></div>
+        </div>
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Savon (carton)</span><span class="mono">665 000 GNF</span></div>
+          <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:21%; height:100%; background:var(--accent);"></div></div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>95 unités</span><span style="color:var(--good);">marge 31 % · 206 150 GNF</span></div>
+        </div>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:12px; text-align:center;">
+        Marge calculée sur le coût au moment de la vente (cost_price_at_time) — jamais recalculée rétroactivement si le coût change ensuite.
+      </p>
+
+      <div class="card" style="margin-top:14px; margin-bottom:14px;">
+        <div class="panel-head"><span class="panel-title">Clients — top 3 et à risque</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Mamadou Sylla — Grossiste tissus</span><span class="sub">CA 2 450 000 GNF · 9 factures</span></div><span class="pill neutral">Top 1</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Boutique Sory</span><span class="sub">CA 1 300 000 GNF · 4 factures</span></div><span class="pill neutral">Top 2</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Restaurant Le Damier</span><span class="sub">CA 860 000 GNF · 6 factures</span></div><span class="pill neutral">Top 3</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Fatoumata Camara</span><span class="sub">running_balance 120 000 GNF · 2 retards répétés</span></div><span class="pill void">À risque</span></div>
+      </div>
+
+      <div class="card" style="padding:16px; margin-bottom:14px;">
+        <div class="panel-title" style="margin-bottom:12px;">CA par succursale — mois en cours</div>
+        <div id="ana-branch-revenue"></div>
+      </div>
+
+      <div class="card" style="padding:16px; margin-bottom:14px;">
+        <div class="panel-title" style="margin-bottom:10px;">Répartition par mode de paiement</div>
+        <div class="detail-row" style="padding:7px 0;"><span class="k">Orange Money (Djomy)</span><span class="mono">52,0 %</span></div>
+        <div class="detail-row" style="padding:7px 0;"><span class="k">MTN MoMo (Djomy)</span><span class="mono">31,0 %</span></div>
+        <div class="detail-row" style="padding:7px 0;"><span class="k">Virement</span><span class="mono">9,4 %</span></div>
+        <div class="detail-row" style="padding:7px 0;"><span class="k">Carte</span><span class="mono">4,0 %</span></div>
+        <div class="detail-row" style="padding:7px 0; border-bottom:none;"><span class="k">Cash</span><span class="mono">3,6 %</span></div>
+      </div>
+
+      <div class="card" style="padding:16px; margin-bottom:14px;">
+        <div class="panel-title" style="margin-bottom:4px;">Tendance — taux d'encaissement, mois par mois</div>
+        <div style="font-size:10.5px; color:var(--text-dim); margin-bottom:12px;">▲ +2,1 pts sur le dernier mois · 6 mois consécutifs de hausse</div>
+        <div style="display:flex; align-items:flex-end; gap:8px; height:64px;">
+          <div style="flex:1; text-align:center;"><div style="height:34px; background:var(--surface-3); border-radius:4px 4px 0 0;"></div><div class="mono" style="font-size:9.5px; color:var(--text-dim); margin-top:4px;">Avr 91,0</div></div>
+          <div style="flex:1; text-align:center;"><div style="height:40px; background:var(--surface-3); border-radius:4px 4px 0 0;"></div><div class="mono" style="font-size:9.5px; color:var(--text-dim); margin-top:4px;">Mai 92,4</div></div>
+          <div style="flex:1; text-align:center;"><div style="height:43px; background:var(--surface-3); border-radius:4px 4px 0 0;"></div><div class="mono" style="font-size:9.5px; color:var(--text-dim); margin-top:4px;">Juin 93,1</div></div>
+          <div style="flex:1; text-align:center;"><div style="height:46px; background:var(--surface-3); border-radius:4px 4px 0 0;"></div><div class="mono" style="font-size:9.5px; color:var(--text-dim); margin-top:4px;">Juil 93,8</div></div>
+          <div style="flex:1; text-align:center;"><div style="height:48px; background:var(--surface-3); border-radius:4px 4px 0 0;"></div><div class="mono" style="font-size:9.5px; color:var(--text-dim); margin-top:4px;">Août 94,3</div></div>
+          <div style="flex:1; text-align:center;"><div style="height:58px; background:var(--accent); border-radius:4px 4px 0 0;"></div><div class="mono" style="font-size:9.5px; color:var(--text); font-weight:600; margin-top:4px;">Sept 96,4</div></div>
+        </div>
+      </div>
     </div>
 
-    <div class="card" style="padding:16px;">
-      <div class="panel-title" style="margin-bottom:14px;">Par produit — chiffre d'affaires et marge</div>
-
-      <div style="margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Sac de riz 50kg</span><span class="mono">3 190 000 GNF</span></div>
-        <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:100%; height:100%; background:var(--accent);"></div></div>
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>620 unités</span><span>marge 18 % · 574 200 GNF</span></div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Huile 5L</span><span class="mono">2 040 000 GNF</span></div>
-        <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:64%; height:100%; background:var(--accent);"></div></div>
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>340 unités</span><span style="color:var(--good);">marge 22 % · 448 800 GNF</span></div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Sucre 50kg</span><span class="mono">1 785 000 GNF</span></div>
-        <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:56%; height:100%; background:var(--accent);"></div></div>
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>210 unités</span><span>marge 14 % · 249 900 GNF</span></div>
-      </div>
-      <div>
-        <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">Savon (carton)</span><span class="mono">665 000 GNF</span></div>
-        <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:21%; height:100%; background:var(--accent);"></div></div>
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-top:4px;"><span>95 unités</span><span style="color:var(--good);">marge 31 % · 206 150 GNF</span></div>
+    <!-- Sur mesure (Grille §3.4) — Enterprise et Custom : mention informative, aucune intégration réelle dans la maquette -->
+    <div id="ana-custom" hidden>
+      <div class="card" style="margin-bottom:14px;">
+        <div class="panel-head"><span class="panel-title">Sur mesure — inclus dans votre palier</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Accès API analytics</span><span class="sub">les mêmes données que cet écran, par API (developer_api)</span></div><span class="pill neutral">inclus</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Connecteur BI Metabase</span><span class="sub">instance mutualisée, collections scopées par organisation (Grille §3.5)</span></div><span class="pill neutral">inclus</span></div>
+        <div class="client-row"><div class="row-main"><span class="name">Rapports automatisés par email</span><span class="sub">fréquence définie avec votre support dédié</span></div><span class="pill neutral">inclus</span></div>
       </div>
     </div>
-    <p style="font-size:11px; color:var(--text-dim); margin-top:12px; text-align:center;">
-      Marge calculée sur le coût au moment de la vente (cost_price_at_time) — jamais recalculée rétroactivement si le coût change ensuite.
-    </p>
   </section>
 
   <!-- ================= PRODUITS & STOCK (inventory_manager, ADR-097) ================= -->
   <section class="screen" id="s-stock">
     <h1 style="font-size:20px; margin-bottom:4px;">Produits &amp; Stock</h1>
-    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Un stock insuffisant ne bloque jamais l'émission d'une facture. Aucun coût d'achat ni marge affiché ici (ADR-097).</p>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 16px; line-height:1.5;">Un stock insuffisant ne bloque jamais l'émission d'une facture. Aucun coût d'achat affiché ici — territoire de business_manager (ADR-097).</p>
 
     <div class="card" style="padding:16px; margin-bottom:18px;">
       <div class="panel-title" style="margin-bottom:12px;">Réceptionner du stock</div>
       <div class="field" style="margin-bottom:10px;"><label>Produit</label><select id="stock-product"><option>Sac de riz 50kg</option><option>Huile 5L</option><option>Sucre 50kg</option><option>Savon (carton)</option></select></div>
       <div style="display:flex; gap:10px;">
-        <div class="field" style="flex:1.3; margin-bottom:0;"><label>Succursale</label><select id="stock-branch"><option>Boutique principale</option><option>Entrepôt Kaloum</option></select></div>
+        <div class="field" style="flex:1.3; margin-bottom:0;"><label>Succursale</label><select id="stock-branch"></select></div>
         <div class="field" style="flex:1; margin-bottom:0;"><label>Quantité</label><input type="text" id="stock-qty" value="20"></div>
       </div>
       <div class="field" style="margin-top:10px; margin-bottom:0;"><label>Motif</label><select><option>Réception fournisseur</option><option>Ajustement d'inventaire</option><option>Perte / casse</option></select></div>
@@ -1376,8 +1481,8 @@ button{font-family:inherit;}
     <h1 style="font-size:20px; margin-bottom:16px;">Paramètres organisation</h1>
     <div class="card">
       <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-org-detail')"><div class="row-main"><span class="name">Organisation</span><span class="sub">Boutique Aissatou · NIF 123456789 · eTax vérifié</span></div><span class="sub" style="flex:none;">›</span></div>
-      <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-succursales')"><div class="row-main"><span class="name">Succursales</span><span class="sub">2 · Boutique principale, Entrepôt Kaloum</span></div><span class="sub" style="flex:none;">›</span></div>
-      <div class="client-row" style="opacity:.5;"><div class="row-main"><span class="name">Branding personnalisé</span><span class="sub">Verrouillé — palier Pro requis</span></div><span class="sub" style="flex:none;">🔒</span></div>
+      <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-succursales')"><div class="row-main"><span class="name">Succursales</span><span class="sub" id="param-branches-sub">2 · Boutique principale, Entrepôt Kaloum</span></div><span class="sub" style="flex:none;">›</span></div>
+      <div class="client-row" id="param-branding-row" style="opacity:.5;"><div class="row-main"><span class="name">Branding personnalisé</span><span class="sub" id="param-branding-sub">Verrouillé — logo dès Starter</span></div><span class="sub" style="flex:none;" id="param-branding-ico">🔒</span></div>
       <div class="client-row" style="cursor:pointer;" onclick="s1_showScreen('s-equipe')"><div class="row-main"><span class="name">Sécurité</span><span class="sub">Administrateur de secours : <span id="param-backup-admin">Ibrahima Bah</span></span></div><span class="sub" style="flex:none;">›</span></div>
       <div class="client-row"><div class="row-main"><span class="name">Abonnement</span><span class="sub" id="param-plan">Freemium</span></div><button class="btn-ghost" id="param-upgrade-btn" onclick="s1_upgradePlan()">Passer à Starter</button></div>
     </div>
@@ -1459,18 +1564,23 @@ button{font-family:inherit;}
     <div class="card" style="padding:16px; margin-bottom:18px;">
       <div class="panel-title" style="margin-bottom:12px;">Nouveau ticket</div>
       <div class="field" style="margin-bottom:10px;"><label>Sujet</label><input type="text" id="tk-subject" placeholder="Décrivez votre problème en une phrase"></div>
-      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select id="tk-severity"><option>Faible</option><option>Moyenne</option><option>Élevée</option><option>Critique</option></select></div>
+      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select id="tk-severity"><option value="Critique">Critique — encaissement ou émission bloqué</option><option value="Majeur">Majeur — fonctionnalité dégradée</option><option value="Mineur" selected>Mineur — question, cosmétique</option></select></div>
       <div class="field" style="margin-bottom:0;"><label>Détails</label><input type="text" id="tk-details" placeholder="Plus de contexte…"></div>
       <button class="btn-primary" onclick="s1_submitTicket()">Envoyer</button>
       <p id="tk-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:10px 0 0;"></p>
     </div>
+
+    <div class="section-head" style="margin-top:0;"><h2>Vos délais de réponse</h2><span class="count" id="sla-plan-label">Freemium</span></div>
+    <div class="card" id="sla-matrix"></div>
+    <p style="font-size:10.5px; color:var(--text-dim); margin:8px 0 18px; line-height:1.5;">Temps de réponse en heures ouvrées, selon la sévérité et votre palier — jamais un temps de résolution (Grille §7.1, ADR-085).</p>
 
     <div class="section-head" style="margin-top:0;"><h2>Mes tickets</h2></div>
     <div class="card" style="margin-bottom:18px;" id="ticket-list"></div>
 
     <div class="section-head" style="margin-top:0;"><h2>Contact direct</h2></div>
     <div class="card" style="padding:6px 16px;">
-      <a class="client-row" style="text-decoration:none; color:inherit;" href="https://wa.me/224600000000" target="_blank" rel="noopener"><div class="row-main"><span class="name">WhatsApp</span><span class="sub">Réponse sous 2h en heures ouvrées</span></div><span class="sub" style="flex:none;">↗</span></a>
+      <div class="client-row"><div class="row-main"><span class="name">Canal de votre palier</span><span class="sub" id="support-channel">FAQ / communauté</span></div></div>
+      <a class="client-row" id="support-whatsapp" style="text-decoration:none; color:inherit;" href="https://wa.me/224600000000" target="_blank" rel="noopener"><div class="row-main"><span class="name">WhatsApp</span><span class="sub">Canal réservé aux tickets Critiques · 4h ouvrées</span></div><span class="sub" style="flex:none;">↗</span></a>
       <a class="client-row" style="text-decoration:none; color:inherit;" href="tel:+224600000000"><div class="row-main"><span class="name">Téléphone</span><span class="sub">+224 6XX XX XX XX</span></div><span class="sub" style="flex:none;">↗</span></a>
     </div>
   </section>
@@ -1485,6 +1595,7 @@ button{font-family:inherit;}
     <div class="card">
       <div class="detail-row"><span class="k">Sévérité</span><span id="tkd-severity"></span></div>
       <div class="detail-row"><span class="k">Ouvert</span><span id="tkd-opened"></span></div>
+      <div class="detail-row"><span class="k">Engagement</span><span id="tkd-sla-label" style="text-align:right;"></span></div>
       <div class="detail-row" style="border-bottom:none;"><span class="k">SLA restant</span><span class="mono" id="tkd-sla"></span></div>
     </div>
   </section>
@@ -1655,7 +1766,7 @@ button{font-family:inherit;}
     <div class="section-head" style="margin-top:0;"><h2>Nouveau ticket</h2></div>
     <div class="card" style="padding:16px; margin-bottom:18px;">
       <div class="field" style="margin-bottom:10px;"><label>Sujet</label><input type="text" id="agt-tk-subject" placeholder="Décrivez votre problème en une phrase"></div>
-      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select id="agt-tk-severity"><option>Faible</option><option>Moyenne</option><option>Élevée</option><option>Critique</option></select></div>
+      <div class="field" style="margin-bottom:10px;"><label>Sévérité</label><select id="agt-tk-severity"><option value="Critique">Critique — encaissement ou émission bloqué</option><option value="Majeur">Majeur — fonctionnalité dégradée</option><option value="Mineur" selected>Mineur — question, cosmétique</option></select></div>
       <div class="field" style="margin-bottom:0;"><label>Détails</label><input type="text" id="agt-tk-details" placeholder="Plus de contexte…"></div>
       <button class="btn-primary" onclick="agt_submitTicket()">Envoyer</button>
       <p id="agt-tk-confirm" hidden style="font-size:11.5px; color:var(--good); font-weight:600; margin:10px 0 0;"></p>
@@ -1755,7 +1866,9 @@ button{font-family:inherit;}
     <div class="pay-method agt-plan selected" data-plan="freemium"><div class="pay-icon">🆓</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Freemium — 0 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">1 succursale, 1 collaborateur — fenêtre d'accueil à tarif Starter le 1er trimestre (ADR-092)</div></div></div>
     <div class="pay-method agt-plan" data-plan="starter"><div class="pay-icon">⭐</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Starter — 100 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">2 succursales, 4 collaborateurs, récurrence automatique, rappels SMS/WhatsApp</div></div></div>
     <div class="pay-method agt-plan" data-plan="starterplus"><div class="pay-icon">🔶</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Starter Plus — 250 000 GNF/mois <span class="pill neutral" style="margin-left:4px;">Nouveau</span></div><div style="font-size:10.5px; color:var(--text-dim);">5 succursales, 7 collaborateurs — même sophistication que Starter, plus d'échelle (ADR-106)</div></div></div>
-    <div class="pay-method agt-plan" data-plan="pro"><div class="pay-icon">💠</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Pro — 500 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">Succursales et collaborateurs illimités, analytics avancés, approbations, API</div></div></div>
+    <div class="pay-method agt-plan" data-plan="pro"><div class="pay-icon">💠</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Pro — 500 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">Succursales illimitées, 10 collaborateurs, analytics avancés (marge), approbations, API</div></div></div>
+    <div class="pay-method agt-plan" data-plan="enterprise"><div class="pay-icon">🏢</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Enterprise — 750 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">Succursales et collaborateurs illimités, analytics sur mesure (API, BI), support dédié + SLA</div></div></div>
+    <div class="pay-method agt-plan" data-plan="custom"><div class="pay-icon">🧩</div><div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">Custom — 1 500 000 GNF/mois</div><div style="font-size:10.5px; color:var(--text-dim);">Succursales et collaborateurs illimités, SLA et commission négociés, dashboards sur devis</div></div></div>
     <div class="card" style="padding:14px 16px; margin-top:14px; border-color:var(--good);">
       <div style="font-weight:600; font-size:12.5px; color:var(--good); margin-bottom:4px;">Avantage CGA</div>
       <p style="font-size:11.5px; color:var(--text-dim); line-height:1.6; margin:0;">Toutes les formules donnent accès à l'adhésion CGA (Centre de Gestion Agréé) — abattement fiscal de -50 % la 1ʳᵉ année, -25 % les deux suivantes. facture.gn structure l'adhésion mais ne se substitue jamais à la DGI (ADR-079).</p>
@@ -2502,8 +2615,8 @@ button{font-family:inherit;}
       <div class="filter-row" id="ops-ticket-filter-row">
         <button class="filter-chip active" data-sev="all">Tous · <span id="ops-count-all"></span></button>
         <button class="filter-chip" data-sev="critique">Critique · <span id="ops-count-critique"></span></button>
-        <button class="filter-chip" data-sev="elevee">Élevée · <span id="ops-count-elevee"></span></button>
-        <button class="filter-chip" data-sev="moyenne">Moyenne · <span id="ops-count-moyenne"></span></button>
+        <button class="filter-chip" data-sev="majeur">Majeur · <span id="ops-count-majeur"></span></button>
+        <button class="filter-chip" data-sev="mineur">Mineur · <span id="ops-count-mineur"></span></button>
       </div>
       <div class="card" id="ops-tickets-list"></div>
     </section>
@@ -2851,8 +2964,9 @@ const STATUS_LABEL = { paid:'Payée', pending:'Attente', partial:'Partiel', void
 const ACTION_LABEL = { marquer_paye:'Marquer payé (virement reçu)', avoir:'Émettre un avoir (credit_note)' };
 
 function renderInvoicesList(){
-  const scoped = INVOICES.filter(inv => !inv.branch || inv.branch === currentBranch);
-  document.getElementById('factures-count').textContent = scoped.length + ' facture' + (scoped.length > 1 ? 's' : '') + ' · ' + BRANCHES.find(b => b.key === currentBranch).name;
+  const single = visibleBranches().length === 1;
+  const scoped = single ? INVOICES : INVOICES.filter(inv => !inv.branch || inv.branch === currentBranch);
+  document.getElementById('factures-count').textContent = scoped.length + ' facture' + (scoped.length > 1 ? 's' : '') + (single ? '' : ' · ' + BRANCHES.find(b => b.key === currentBranch).name);
   if (!scoped.length) {
     document.getElementById('factures-list').innerHTML = '<div style="padding:20px; text-align:center; font-size:12.5px; color:var(--text-dim);">Aucune facture dans cette succursale.</div>';
     return;
@@ -3136,13 +3250,7 @@ function onboardingStep3(){
 function finishOnboarding(){
   const name = document.getElementById('onb-name').value.trim();
   document.querySelectorAll('.org-name').forEach(el => el.textContent = name);
-  document.getElementById('home-tier-chip').textContent = 'Freemium · T1';
-  document.getElementById('home-tier-val').textContent = 'Freemium';
-  const upgradeBtn = document.getElementById('param-upgrade-btn');
-  upgradeBtn.textContent = 'Passer à Starter';
-  upgradeBtn.disabled = false;
-  upgradeBtn.style.opacity = '1';
-  document.getElementById('param-plan').textContent = 'Freemium';
+  setPlan('Freemium');
   showScreen('s-accueil');
 }
 
@@ -3250,35 +3358,51 @@ function decideApproval(id, decision){
 
 // ===== Produits & Stock (inventory_manager, ADR-097) =====
 const STOCK = {
-  'Sac de riz 50kg': { principale:4, kaloum:0 },
-  'Huile 5L': { principale:32, kaloum:18 },
-  'Sucre 50kg': { principale:15, kaloum:22 },
-  'Savon (carton)': { principale:9, kaloum:3 },
+  'Sac de riz 50kg': { principale:4, kaloum:0, matam:6, kindia:12 },
+  'Huile 5L': { principale:32, kaloum:18, matam:9, kindia:0 },
+  'Sucre 50kg': { principale:15, kaloum:22, matam:4, kindia:30 },
+  'Savon (carton)': { principale:9, kaloum:3, matam:11, kindia:5 },
 };
-const BRANCH_KEY = { 'Boutique principale':'principale', 'Entrepôt Kaloum':'kaloum' };
 function renderStock(){
+  const vis = visibleBranches();
   document.getElementById('stock-list').innerHTML = Object.entries(STOCK).map(([name, s]) => {
-    const total = s.principale + s.kaloum;
-    const pFmt = currentBranch === 'principale' ? `<b style="color:var(--accent);">${s.principale}</b>` : s.principale;
-    const kFmt = currentBranch === 'kaloum' ? `<b style="color:var(--accent);">${s.kaloum}</b>` : s.kaloum;
-    return `<div class="invoice-row"><div class="row-main"><span class="name">${name}</span><span class="sub">Boutique principale : ${pFmt} · Entrepôt Kaloum : ${kFmt}</span></div><span class="pill ${total < 10 ? 'void' : 'paid'}">${total} en stock</span></div>`;
+    const total = vis.reduce((sum, b) => sum + (s[b.key] || 0), 0);
+    const detail = vis.map(b => b.name + ' : ' + (vis.length > 1 && b.key === currentBranch ? `<b style="color:var(--accent);">${s[b.key] || 0}</b>` : (s[b.key] || 0))).join(' · ');
+    return `<div class="invoice-row"><div class="row-main"><span class="name">${name}</span><span class="sub">${detail}</span></div><span class="pill ${total < 10 ? 'void' : 'paid'}">${total} en stock</span></div>`;
   }).join('');
 }
 
 // ===== Succursale active (multi-succursale, Paramètres) =====
+// Liste de démo complète ; le palier (Grille §2 : 1 → 2 → 5 → illimité) décide combien en sont ouvertes.
 const BRANCHES = [
   { key:'principale', name:'Boutique principale', loc:'Madina, Conakry' },
   { key:'kaloum', name:'Entrepôt Kaloum', loc:'Kaloum, Conakry' },
+  { key:'matam', name:'Comptoir Matam', loc:'Matam, Conakry' },
+  { key:'kindia', name:'Dépôt Kindia', loc:'Kindia' },
 ];
 let currentBranch = 'principale';
+function visibleBranches(){
+  const cap = planRules().branches;
+  return cap ? BRANCHES.slice(0, cap) : BRANCHES;
+}
+function applyPlanBranches(){
+  const vis = visibleBranches();
+  const cap = planRules().branches;
+  if (!vis.some(b => b.key === currentBranch)) currentBranch = vis[0].key; // downgrade : la succursale active peut sortir du périmètre
+  document.getElementById('branch-strip').hidden = vis.length === 1; // Freemium : une seule succursale, rien à switcher
+  document.getElementById('branch-strip-cap').textContent = cap ? vis.length + ' / ' + cap : 'illimité';
+  document.getElementById('param-branches-sub').textContent = vis.length + ' · ' + vis.map(b => b.name).join(', ') + (cap ? ' · plafond ' + cap : ' · illimité');
+  document.getElementById('stock-branch').innerHTML = vis.map(b => `<option value="${b.key}">${b.name}</option>`).join('');
+  applyBranch();
+}
 function renderBranches(){
-  document.getElementById('branches-list').innerHTML = BRANCHES.map(b => `
+  document.getElementById('branches-list').innerHTML = visibleBranches().map(b => `
     <div class="client-row" style="cursor:pointer;" onclick="s1_selectBranch('${b.key}')"><div class="row-main"><span class="name">${b.name}</span><span class="sub">${b.loc}</span></div><span class="pill ${b.key === currentBranch ? 'paid' : 'neutral'}">${b.key === currentBranch ? 'Vous êtes ici' : 'Ouverte'}</span></div>`).join('');
 }
 function applyBranch(){
   const b = BRANCHES.find(x => x.key === currentBranch);
   document.getElementById('branch-strip-name').textContent = b.name;
-  document.getElementById('stock-branch').value = b.name;
+  document.getElementById('stock-branch').value = b.key;
   renderBranches();
   renderStock();
   renderInvoicesList();
@@ -3290,14 +3414,14 @@ function selectBranch(key){
 }
 function receiveStock(){
   const product = document.getElementById('stock-product').value;
-  const branch = BRANCH_KEY[document.getElementById('stock-branch').value];
+  const branch = document.getElementById('stock-branch').value;
   const qty = parseInt(document.getElementById('stock-qty').value, 10) || 0;
   if (!STOCK[product] || qty <= 0) return;
-  STOCK[product][branch] += qty;
+  STOCK[product][branch] = (STOCK[product][branch] || 0) + qty;
   renderStock();
   const confirm = document.getElementById('stock-confirm');
   confirm.hidden = false;
-  confirm.textContent = `+${qty} ${product} enregistré — ${document.getElementById('stock-branch').value}.`;
+  confirm.textContent = `+${qty} ${product} enregistré — ${BRANCHES.find(b => b.key === branch).name}.`;
   const qi = QUEUE_ITEMS.find(i => i.title.includes(product));
   if (qi) {
     const total = STOCK[product].principale + STOCK[product].kaloum;
@@ -3558,52 +3682,137 @@ function generateApiKey(){
   el.textContent = 'Nouvelle clé (copiez-la maintenant, elle ne sera plus affichée) : ' + full;
 }
 
-// ===== Paramètres organisation (owner/admin) — grille à 6 paliers, ADR-106 =====
-const PLAN_SEQUENCE = ['Freemium', 'Starter', 'Starter Plus', 'Pro'];
+// ===== Palier commercial — grille à 6 paliers (Grille des Offres §2, ADR-106) =====
+// Un seul état, piloté par #plan-select (proto-bar) ; upgradePlan() (Paramètres) n'est qu'un raccourci narratif dessus.
+const PLAN_SEQUENCE = ['Freemium', 'Starter', 'Starter Plus', 'Pro', 'Enterprise', 'Custom'];
+// branches : plafond de succursales (null = illimité) · analytics : Grille §3 · sla : bucket Grille §7 · support/branding : Grille §2
+const PLAN_RULES = {
+  'Freemium':     { branches:1,    analytics:'basic',    sla:'base',       support:'FAQ / communauté',           branding:'Verrouillé — logo dès Starter' },
+  'Starter':      { branches:2,    analytics:'basic',    sla:'base',       support:'Email',                       branding:'Logo seul — complet dès Pro' },
+  'Starter Plus': { branches:5,    analytics:'basic',    sla:'base',       support:'Email',                       branding:'Logo seul — complet dès Pro' },
+  'Pro':          { branches:null, analytics:'advanced', sla:'pro',        support:'Email prioritaire',           branding:'Complet — logo et couleurs' },
+  'Enterprise':   { branches:null, analytics:'custom',   sla:'enterprise', support:'Support dédié + SLA',         branding:'Complet + multi-marque' },
+  'Custom':       { branches:null, analytics:'custom',   sla:'custom',     support:'Support dédié + SLA négocié', branding:'Complet — négocié' },
+};
 let currentPlanIndex = 0;
-function upgradePlan(){
-  if (currentPlanIndex >= PLAN_SEQUENCE.length - 1) return;
-  currentPlanIndex += 1;
-  const plan = PLAN_SEQUENCE[currentPlanIndex];
+const planSelect = document.getElementById('plan-select');
+function currentPlan(){ return PLAN_SEQUENCE[currentPlanIndex]; }
+function planRules(){ return PLAN_RULES[currentPlan()]; }
+function setPlan(plan){
+  const idx = PLAN_SEQUENCE.indexOf(plan);
+  if (idx < 0) return;
+  currentPlanIndex = idx;
+  planSelect.value = plan;
   document.getElementById('param-plan').textContent = plan;
-  document.getElementById('home-tier-chip').textContent = plan + ' · T1';
+  document.getElementById('home-tier-chip').textContent = plan + ' · T' + (idx + 1);
   document.getElementById('home-tier-val').textContent = plan;
   const btn = document.getElementById('param-upgrade-btn');
-  if (currentPlanIndex >= PLAN_SEQUENCE.length - 1) {
-    btn.textContent = 'Palier actuel';
-    btn.disabled = true;
-    btn.style.opacity = '.5';
-  } else {
-    btn.textContent = 'Passer à ' + PLAN_SEQUENCE[currentPlanIndex + 1];
-  }
+  const last = idx >= PLAN_SEQUENCE.length - 1;
+  btn.textContent = last ? 'Palier actuel' : 'Passer à ' + PLAN_SEQUENCE[idx + 1];
+  btn.disabled = last;
+  btn.style.opacity = last ? '.5' : '1';
+  document.getElementById('param-branding-sub').textContent = planRules().branding;
+  document.getElementById('param-branding-row').style.opacity = plan === 'Freemium' ? '.5' : '1';
+  document.getElementById('param-branding-ico').textContent = plan === 'Freemium' ? '🔒' : '›';
+  applyPlanBranches();
+  applyAnalyticsTier();
+  applySupportTier();
+}
+function upgradePlan(){
+  if (currentPlanIndex >= PLAN_SEQUENCE.length - 1) return;
+  setPlan(PLAN_SEQUENCE[currentPlanIndex + 1]);
+}
+planSelect.addEventListener('change', () => setPlan(planSelect.value));
+
+// ===== Analytics — gate par palier (Grille §3), orthogonal au gate de rôle du tiroir (ADR-095, data-roles) =====
+// Un owner/admin reste soumis au palier de son organisation : Basique en Freemium/Starter/Starter Plus même avec tous les droits.
+const ENCAISSEMENT_DEMO = { rate:96.4, rateLabel:'96,4', month:'4,82M' }; // source unique : score de confiance de l'Accueil (ADR-093) = taux d'encaissement
+const BRANCH_REVENUE = { principale:{ label:'3,90M', pct:100 }, kaloum:{ label:'2,10M', pct:54 }, matam:{ label:'1,10M', pct:28 }, kindia:{ label:'0,58M', pct:15 } };
+const ANALYTICS_TIER_NOTE = {
+  basic:'Vue Basique — mois en cours, sans sélection de période. Le tiroir reste gaté par votre rôle ; le contenu, par le palier de votre organisation.',
+  advanced:'Vue Avancée — marge produit, clients, succursales, tendances, période personnalisée et export.',
+  custom:'Vue Sur mesure — tout l\'Avancé, plus l\'accès API, le connecteur BI et les rapports automatisés.',
+};
+const ANALYTICS_DRAWER_SUB = { basic:'vue basique', advanced:'marge produit · ADR-084', custom:'sur mesure · API & BI' };
+function renderBranchRevenue(){
+  document.getElementById('ana-branch-revenue').innerHTML = visibleBranches().map((b, i, arr) => `
+    <div style="margin-bottom:${i === arr.length - 1 ? 0 : 12}px;">
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px;"><span style="font-weight:600;">${b.name}</span><span class="mono">${BRANCH_REVENUE[b.key].label}</span></div>
+      <div style="height:6px; background:var(--surface-2); border-radius:100px; overflow:hidden;"><div style="width:${BRANCH_REVENUE[b.key].pct}%; height:100%; background:var(--accent);"></div></div>
+    </div>`).join('');
+}
+function applyAnalyticsTier(){
+  const tier = planRules().analytics;
+  document.getElementById('ana-basic-lock').hidden = tier !== 'basic';
+  document.getElementById('ana-fixed-note').hidden = tier !== 'basic';
+  document.getElementById('ana-advanced').hidden = tier === 'basic';
+  document.getElementById('ana-custom').hidden = tier !== 'custom';
+  document.getElementById('ana-tier-note').textContent = ANALYTICS_TIER_NOTE[tier];
+  document.querySelector('.drawer-item[data-screen="s-analytics"] .sub').textContent = ANALYTICS_DRAWER_SUB[tier];
+  document.getElementById('ana-export-confirm').hidden = true;
+  if (tier !== 'basic') renderBranchRevenue();
+}
+function exportAnalyticsCsv(){
+  const el = document.getElementById('ana-export-confirm');
+  el.hidden = false;
+  el.textContent = 'Export CSV généré — ' + document.getElementById('ana-period').value.toLowerCase() + ' (démo : aucun fichier réel).';
 }
 
-// ===== Support =====
-const SEVERITY_SLA = { 'Faible':72, 'Moyenne':24, 'Élevée':8, 'Critique':2 };
+// ===== Support — SLA par sévérité × palier (Grille §7, ADR-085) =====
+// Temps de réponse en heures ouvrées, jamais temps de résolution. hours:null = texte seul, aucun compte à rebours.
+// Le compte à rebours de la démo court en heures pleines (5 j ouvrés → 120h) — simplification de maquette.
+// HYPOTHÈSE NON TRANCHÉE PAR LE SPONSOR : Grille §7 n'a que 4 colonnes (Freemium/Starter | Pro | Enterprise | Custom) pour 6 paliers.
+// Starter Plus est rangé ici dans le bucket Freemium/Starter — cohérent avec §2.1 (Starter Plus n'ouvre que l'échelle,
+// jamais la sophistication), mais aucune ligne de la Grille ne le dit explicitement. À confirmer avant toute communication commerciale.
+const SLA_MATRIX = {
+  base:       { Critique:{ label:'48h ouvrées', hours:48 },                 Majeur:{ label:'72h ouvrées', hours:72 }, Mineur:{ label:'Best effort — FAQ / communauté', hours:null } },
+  pro:        { Critique:{ label:'24h ouvrées', hours:24 },                 Majeur:{ label:'48h ouvrées', hours:48 }, Mineur:{ label:'5 j ouvrés', hours:120 } },
+  enterprise: { Critique:{ label:'4h ouvrées · canal WhatsApp', hours:4 },  Majeur:{ label:'24h ouvrées', hours:24 }, Mineur:{ label:'48h ouvrées', hours:48 } },
+  custom:     { Critique:{ label:'Négocié · plancher 2h', hours:null },     Majeur:{ label:'Négocié', hours:null },   Mineur:{ label:'Négocié', hours:null } },
+};
+const SEVERITY_ORDER = ['Critique', 'Majeur', 'Mineur'];
+function slaFor(severity){ return SLA_MATRIX[planRules().sla][severity]; }
+// Le SLA d'un ticket n'est jamais stocké : il dépend du palier courant de l'organisation, calculé à l'affichage.
 const SUPPORT_TICKETS = [
-  { id:'tk1', subject:'Lien de paiement expiré sans raison', severity:'Moyenne', status:'pending', opened:'ouvert il y a 5h', slaHours:24, elapsedHours:5 },
-  { id:'tk2', subject:"Question sur l'export FEC", severity:'Faible', status:'resolved', opened:'répondu hier' },
+  { id:'tk0', subject:'USSD *620# inopérant depuis ce matin', severity:'Critique', status:'pending', opened:'ouvert il y a 1h', elapsedHours:1 },
+  { id:'tk1', subject:'Lien de paiement expiré sans raison', severity:'Majeur', status:'pending', opened:'ouvert il y a 5h', elapsedHours:5 },
+  { id:'tk2', subject:"Question sur l'export FEC", severity:'Mineur', status:'resolved', opened:'répondu hier' },
 ];
+function renderSlaMatrix(){
+  document.getElementById('sla-plan-label').textContent = currentPlan();
+  document.getElementById('sla-matrix').innerHTML = SEVERITY_ORDER.map(sev => `
+    <div class="detail-row"><span class="k">${sev}</span><span class="mono" style="font-size:11.5px; text-align:right;">${slaFor(sev).label}</span></div>`).join('');
+}
+function applySupportTier(){
+  const rules = planRules();
+  document.getElementById('support-channel').textContent = rules.support;
+  document.getElementById('support-whatsapp').hidden = !(rules.sla === 'enterprise' || rules.sla === 'custom'); // canal Critique Enterprise/Custom (§7.2)
+  SUPPORT_TICKETS.forEach(t => { delete t.deadline; }); // le SLA effectif change avec le palier : compte à rebours recalculé
+  renderSlaMatrix();
+  renderTickets();
+  if (currentTicketId && document.getElementById('s-ticket-detail').classList.contains('active')) showTicketDetail(currentTicketId);
+}
 function renderTickets(){
   document.getElementById('ticket-list').innerHTML = SUPPORT_TICKETS.map(t => `
-    <div class="client-row" onclick="s1_showTicketDetail('${t.id}')" style="cursor:pointer;"><div class="row-main"><span class="name">${t.subject}</span><span class="sub">Sévérité ${t.severity.toLowerCase()} · ${t.opened}</span></div><span class="pill ${t.status === 'resolved' ? 'paid' : 'pending'}">${t.status === 'resolved' ? 'Résolu' : 'En cours'}</span></div>`).join('');
+    <div class="client-row" onclick="s1_showTicketDetail('${t.id}')" style="cursor:pointer;"><div class="row-main"><span class="name">${t.subject}</span><span class="sub">${t.severity} · ${t.opened}${t.status === 'resolved' ? '' : ' · SLA ' + slaFor(t.severity).label}</span></div><span class="pill ${t.status === 'resolved' ? 'paid' : 'pending'}" style="flex:none;">${t.status === 'resolved' ? 'Résolu' : 'En cours'}</span></div>`).join('');
 }
 function submitTicket(){
   const subject = document.getElementById('tk-subject').value.trim();
   const severity = document.getElementById('tk-severity').value;
   if (!subject) return;
-  const sla = SEVERITY_SLA[severity];
-  SUPPORT_TICKETS.unshift({ id:'tk' + (SUPPORT_TICKETS.length + 1), subject, severity, status:'pending', opened:"ouvert à l'instant", slaHours:sla, elapsedHours:0 });
+  SUPPORT_TICKETS.unshift({ id:'tk' + Date.now(), subject, severity, status:'pending', opened:"ouvert à l'instant", elapsedHours:0 });
   renderTickets();
   const confirm = document.getElementById('tk-confirm');
   confirm.hidden = false;
-  confirm.textContent = `Ticket envoyé — SLA ${sla}h.`;
+  confirm.textContent = `Ticket ${severity.toLowerCase()} envoyé — engagement ${currentPlan()} : ${slaFor(severity).label}.`;
   document.getElementById('tk-subject').value = '';
   document.getElementById('tk-details').value = '';
 }
 let ticketCountdownTimer = null;
+let currentTicketId = null;
 function showTicketDetail(id){
   const t = SUPPORT_TICKETS.find(x => x.id === id);
+  currentTicketId = id;
   document.getElementById('tkd-subject').textContent = t.subject;
   const pill = document.getElementById('tkd-status');
   pill.className = 'pill ' + (t.status === 'resolved' ? 'paid' : 'pending');
@@ -3612,10 +3821,14 @@ function showTicketDetail(id){
   document.getElementById('tkd-opened').textContent = t.opened;
   if (ticketCountdownTimer) { clearInterval(ticketCountdownTimer); ticketCountdownTimer = null; }
   const slaEl = document.getElementById('tkd-sla');
+  const sla = slaFor(t.severity);
+  document.getElementById('tkd-sla-label').textContent = sla.label;
   if (t.status === 'resolved') {
     slaEl.textContent = '—';
+  } else if (sla.hours === null) {
+    slaEl.textContent = sla.label; // Best effort / Négocié : aucun compte à rebours numérique
   } else {
-    if (!t.deadline) t.deadline = Date.now() + Math.max(0, (t.slaHours - t.elapsedHours)) * 3600000;
+    if (!t.deadline) t.deadline = Date.now() + Math.max(0, (sla.hours - t.elapsedHours)) * 3600000;
     const tick = () => {
       const remain = t.deadline - Date.now();
       if (remain <= 0) { slaEl.textContent = 'SLA dépassé'; clearInterval(ticketCountdownTimer); ticketCountdownTimer = null; return; }
@@ -3631,7 +3844,11 @@ function showTicketDetail(id){
 // ===== Jauge de confiance (dessin au chargement) =====
 window.addEventListener('DOMContentLoaded', () => {
   const arc = document.getElementById('gauge-arc');
-  const circumference = 263.9, pct = 0.964;
+  const circumference = 263.9, pct = ENCAISSEMENT_DEMO.rate / 100;
+  document.getElementById('home-trust-rate').textContent = ENCAISSEMENT_DEMO.rateLabel;
+  document.getElementById('home-month-cashed').textContent = ENCAISSEMENT_DEMO.month;
+  document.getElementById('ana-rate').textContent = ENCAISSEMENT_DEMO.rateLabel + ' %';
+  document.getElementById('ana-month').textContent = ENCAISSEMENT_DEMO.month;
   requestAnimationFrame(() => {
     arc.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
     arc.style.strokeDashoffset = String(circumference * (1 - pct));
@@ -3648,7 +3865,7 @@ window.addEventListener('DOMContentLoaded', () => {
   renderAuditLog('all');
   renderApiKeys();
   renderTickets();
-  renderBranches();
+  setPlan(PLAN_SEQUENCE[0]);
   showScreen('s-accueil');
 });
 
@@ -3676,6 +3893,7 @@ window.s1_changeBackupAdmin = changeBackupAdmin;
 window.s1_revokeApiKey = revokeApiKey;
 window.s1_generateApiKey = generateApiKey;
 window.s1_upgradePlan = upgradePlan;
+window.s1_exportAnalyticsCsv = exportAnalyticsCsv;
 window.s1_submitTicket = submitTicket;
 window.s1_showTicketDetail = showTicketDetail;
 window.s1_selectBranch = selectBranch;
@@ -3904,7 +4122,7 @@ function finishRegistrationWelcome(invoiceSummary){
   const activite = document.getElementById('agt-reg-activite').value;
   const plan = document.querySelector('.agt-plan.selected')?.dataset.plan || 'freemium';
   const pm = document.querySelector('.agt-pm.selected')?.dataset.pm || 'orange';
-  const PLAN_LABEL = {freemium:'Freemium', starter:'Starter', starterplus:'Starter Plus', pro:'Pro'};
+  const PLAN_LABEL = {freemium:'Freemium', starter:'Starter', starterplus:'Starter Plus', pro:'Pro', enterprise:'Enterprise', custom:'Custom'};
   const PM_LABEL = {orange:'Orange Money (Djomy)', mtn:'MTN MoMo (Djomy)'};
   const feePending = registrationMode === 'agent' && !!invoiceSummary;
   lastOnboardedMerchant = { name: shopname || 'Nouveau marchand', sub: PLAN_LABEL[plan] + ' · ' + activite + ' · ' + AGT_ZONES[agtZone], status: feePending ? 'Frais en attente' : 'Opérationnel' };
@@ -4750,10 +4968,10 @@ const TICKETS = [
   { id:'t1', sev:'critique', subj:'Lien de paiement Djomy rejette systématiquement', org:'Boutique Aissatou', opened:'ouvert il y a 40 min',
     desc:"L'organisation signale que 4 clients consécutifs n'arrivent pas à finaliser un paiement Orange Money — le lien renvoie une erreur générique côté Djomy. À vérifier : bascule automatique vers Moneroo (circuit breaker 10s, ADR-072/073) semble ne pas s'être déclenchée.",
     slaMinutes: -12, slaTotal:'SLA dépassé' },
-  { id:'t2', sev:'elevee', subj:'Export FEC renvoie une erreur 500', org:'Cabinet Barry & Associés', opened:'ouvert il y a 2h',
+  { id:'t2', sev:'majeur', subj:'Export FEC renvoie une erreur 500', org:'Cabinet Barry & Associés', opened:'ouvert il y a 2h',
     desc:"Le cabinet ne parvient plus à exporter le FEC consolidé pour ses 2 organisations mandatées depuis ce matin. Erreur 500 côté serveur, aucun message d'erreur exploitable côté client.",
     slaMinutes: 80, slaTotal:'SLA 4h' },
-  { id:'t3', sev:'moyenne', subj:"Question sur l'export FEC", org:'Restaurant Le Damier', opened:'en cours',
+  { id:'t3', sev:'mineur', subj:"Question sur l'export FEC", org:'Restaurant Le Damier', opened:'en cours',
     desc:"L'organisation demande si le format d'export FEC est compatible avec son logiciel comptable actuel (Sage). Question informative, pas de dysfonctionnement signalé.",
     slaMinutes: 1080, slaTotal:'SLA 24h' },
 ];
@@ -4772,8 +4990,8 @@ function renderTickets(){
   const open = TICKETS.filter(t => !t.resolved);
   document.getElementById('ops-count-all').textContent = open.length;
   document.getElementById('ops-count-critique').textContent = open.filter(t => t.sev === 'critique').length;
-  document.getElementById('ops-count-elevee').textContent = open.filter(t => t.sev === 'elevee').length;
-  document.getElementById('ops-count-moyenne').textContent = open.filter(t => t.sev === 'moyenne').length;
+  document.getElementById('ops-count-majeur').textContent = open.filter(t => t.sev === 'majeur').length;
+  document.getElementById('ops-count-mineur').textContent = open.filter(t => t.sev === 'mineur').length;
   const list = ticketSevFilter === 'all' ? open : open.filter(t => t.sev === ticketSevFilter);
   document.getElementById('ops-tickets-list').innerHTML = list.length ? list.map(t => `
     <div class="ticket-row" onclick="ops_showTicketDetail('${t.id}')" style="cursor:pointer;">
