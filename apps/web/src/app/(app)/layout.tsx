@@ -6,6 +6,7 @@ import { TrustApiError, listMyPractices } from "@/lib/trust-api";
 import { AppHeader } from "@/components/shell/AppHeader";
 import { BottomTabBar } from "@/components/shell/BottomTabBar";
 import { NavGate } from "@/components/shell/NavGate";
+import { SidebarNavigation } from "@/components/shell/SidebarNavigation";
 
 // Coquille de l'espace connecté (ADR-095). Groupe de routes `(app)` : les
 // parenthèses ne changent aucune URL — /dashboard reste /dashboard — elles
@@ -47,30 +48,40 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const role = active.role;
   const tabs = visibleTabs(role);
   const moreEntries = visibleMoreEntries(role);
+  const cabinetHref = practices.length > 0 ? "/dashboard/espace-cabinet" : null;
 
+  // Deux dispositions pour une seule coquille. Sous `md` : flux normal, la
+  // page défile avec le document et la barre basse est fixée. À partir de
+  // `md` : la coquille prend exactement la hauteur de la fenêtre (h-dvh), la
+  // barre latérale et l'en-tête restent en place, et SEULE la zone de travail
+  // défile (min-h-0 + overflow-y-auto) — sans min-h-0, un enfant flex refuse de
+  // descendre sous la hauteur de son contenu et rien ne défile.
   return (
-    <div className="flex min-h-full flex-col bg-white">
-      <AppHeader
-        tabs={tabs}
-        moreEntries={moreEntries}
-        cabinetHref={practices.length > 0 ? "/dashboard/espace-cabinet" : null}
-        organizations={organizations}
-        active={active}
-      />
+    <div className="flex min-h-full bg-white md:h-dvh">
+      <SidebarNavigation tabs={tabs} moreEntries={moreEntries} cabinetHref={cabinetHref} active={active} />
 
-      {/* pb-24 laisse la place à la barre basse : sans lui, la dernière ligne
-          de chaque liste passe sous les onglets et devient intouchable. */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-24 sm:px-6 md:pb-10">
-        <NavGate role={role}>{children}</NavGate>
-      </main>
+      <div className="flex min-w-0 flex-1 flex-col md:min-h-0">
+        <AppHeader organizations={organizations} active={active} />
 
-      <BottomTabBar
-        tabs={tabs}
-        moreEntries={moreEntries}
-        canEmit={canEmit(role)}
-        cabinetHref={practices.length > 0 ? "/dashboard/espace-cabinet" : null}
-        role={role}
-      />
+        {/* pb-24 laisse la place à la barre basse : sans lui, la dernière ligne
+            de chaque liste passe sous les onglets et devient intouchable. Le
+            gabarit centré est DANS <main> et non sur lui : c'est <main> qui
+            défile, et sa barre de défilement doit longer le bord de la fenêtre,
+            pas le bord du gabarit. */}
+        <main className="flex-1 md:min-h-0 md:overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl px-4 pt-6 pb-24 sm:px-6 md:pb-10">
+            <NavGate role={role}>{children}</NavGate>
+          </div>
+        </main>
+
+        <BottomTabBar
+          tabs={tabs}
+          moreEntries={moreEntries}
+          canEmit={canEmit(role)}
+          cabinetHref={cabinetHref}
+          role={role}
+        />
+      </div>
     </div>
   );
 }
