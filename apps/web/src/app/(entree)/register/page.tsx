@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { EtapeIndicateur } from "@/components/auth/EtapeIndicateur";
 import { profilDepuisReturnTo } from "@/lib/auth-contexte";
 import { ESPACES } from "@/lib/espaces";
+import { ETAPES_INSCRIPTION } from "@/lib/etapes-inscription";
 import { getSessionToken } from "@/lib/session";
 import { RegisterForm } from "./RegisterForm";
 
@@ -33,6 +35,7 @@ export default async function RegisterPage({
 
   return (
     <AuthLayout role={profil}>
+      <EtapeIndicateur profil={profil} etape="compte" />
       <h1 className="font-display text-2xl font-bold text-navy-950">
         {profil === "cabinet" ? "Inscrire mon cabinet" : "Créer mon compte"}
       </h1>
@@ -41,6 +44,7 @@ export default async function RegisterPage({
           ? "D'abord votre compte, puis la structure du cabinet à l'étape suivante."
           : "Aucune information fiscale n'est requise pour commencer à facturer : le NIF et le numéro eTax restent optionnels (ADR-035)."}
       </p>
+      <p className="mt-1 text-xs text-navy-600">{ETAPES_INSCRIPTION[profil].apercu}</p>
       <div className="mt-6">
         <RegisterForm returnTo={returnTo} />
       </div>

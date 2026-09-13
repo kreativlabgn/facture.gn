@@ -91,16 +91,21 @@ export default async function DashboardHomePage() {
           <span className="text-xs text-navy-600">Sur les {windowKpis.windowSize} dernières factures</span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <ActionPrioritaire
-            titre="Créer une facture"
-            description={
-              brouillons > 0
-                ? `${brouillons} brouillon${brouillons > 1 ? "s" : ""} à finaliser`
-                : "Partagez une nouvelle facture certifiée"
-            }
-            href={brouillons > 0 ? "/dashboard/invoices" : "/dashboard/invoices/new"}
-            accent={brouillons > 0}
-          />
+          {/* Même garde que le CTA d'en-tête : les deux mènent à la création
+              d'une facture (invoices:create), un viewer ou un contrôleur
+              fiscal en lecture seule n'a pas ce droit côté trust-api. */}
+          {canEmit(organization.role) ? (
+            <ActionPrioritaire
+              titre="Créer une facture"
+              description={
+                brouillons > 0
+                  ? `${brouillons} brouillon${brouillons > 1 ? "s" : ""} à finaliser`
+                  : "Partagez une nouvelle facture certifiée"
+              }
+              href={brouillons > 0 ? "/dashboard/invoices" : "/dashboard/invoices/new"}
+              accent={brouillons > 0}
+            />
+          ) : null}
           <ActionPrioritaire
             titre="Suivre les encaissements"
             description={

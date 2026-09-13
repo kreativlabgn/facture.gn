@@ -5,7 +5,7 @@
 // /daf — console de l'acheteur public. Route de premier niveau au même titre
 // que /cabinet : son occupant n'est membre d'aucune organisation PME, ni
 // /dashboard ni /cabinet ne le concerne.
-export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/nouveau-cabinet", "/daf", "/espace-marchand", "/espace-cabinet", "/demo"];
+export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/nouveau-cabinet", "/daf", "/demo"];
 
 // Un seul « / » initial, suivi ni de « / » ni de « \ » : les navigateurs
 // normalisent « /\evil.com » en « //evil.com » (protocol-relative), donc les

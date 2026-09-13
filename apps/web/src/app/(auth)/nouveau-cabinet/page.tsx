@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
+import { EtapeIndicateur } from "@/components/auth/EtapeIndicateur";
 import { requireSessionToken } from "@/lib/session";
 import { listMyPractices } from "@/lib/trust-api";
 import { PracticeForm } from "./PracticeForm";
@@ -29,19 +30,22 @@ export default async function NouveauCabinetPage() {
   }
 
   return (
-    <AuthCard
-      title="Votre cabinet"
-      description="Créez la structure depuis laquelle vous suivrez vos clients. Vous en devenez l'administrateur, et vous pourrez ensuite inviter vos collaborateurs."
-      footer={
-        <>
-          Vous cherchiez plutôt à gérer votre propre entreprise ?{" "}
-          <Link href="/dashboard" className="font-semibold text-navy-950 underline underline-offset-2">
-            Aller à votre espace
-          </Link>
-        </>
-      }
-    >
-      <PracticeForm />
-    </AuthCard>
+    <div className="mx-auto w-full max-w-md">
+      <EtapeIndicateur profil="cabinet" etape="structure" />
+      <AuthCard
+        title="Votre cabinet"
+        description="Créez la structure depuis laquelle vous suivrez vos clients. Vous en devenez l'administrateur, et vous pourrez ensuite inviter vos collaborateurs."
+        footer={
+          <>
+            Vous cherchiez plutôt à gérer votre propre entreprise ?{" "}
+            <Link href="/dashboard" className="font-semibold text-navy-950 underline underline-offset-2">
+              Aller à votre espace
+            </Link>
+          </>
+        }
+      >
+        <PracticeForm />
+      </AuthCard>
+    </div>
   );
 }

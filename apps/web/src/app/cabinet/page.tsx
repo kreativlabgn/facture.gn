@@ -162,7 +162,7 @@ function SurveillanceCabinet({
               ? `${sansActivite.length} entreprise${sansActivite.length > 1 ? "s" : ""} sans facture émise`
               : "Toutes les entreprises ont une activité"
           }
-          href="/cabinet"
+          href="/cabinet/organizations"
           alerte={sansActivite.length > 0}
         />
         <SignalCabinet
@@ -172,7 +172,7 @@ function SurveillanceCabinet({
               ? `${indisponibles.length} entreprise${indisponibles.length > 1 ? "s" : ""} non chargée${indisponibles.length > 1 ? "s" : ""}`
               : "Toutes les données sont disponibles"
           }
-          href="/cabinet"
+          href="/cabinet/organizations"
           alerte={indisponibles.length > 0}
         />
         <SignalCabinet

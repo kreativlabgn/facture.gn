@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { canRevokeMandate } from "@/lib/cabinet-nav";
+import { canRequestMandate, canRevokeMandate } from "@/lib/cabinet-nav";
 import { resolveActivePractice } from "@/lib/active-practice";
 import { requireSessionToken } from "@/lib/session";
 import { listPracticeMandates } from "@/lib/trust-api";
@@ -19,8 +19,11 @@ export default async function CabinetMandatesPage() {
   // Même source que la navigation du cabinet — une seule recopie du RBAC
   // backend (assertPracticeAdmin), pas une comparaison de chaîne par écran.
   // Seule la RÉVOCATION est administrative : elle retire un accès que
-  // l'organisation avait consenti. La demande, elle, est ouverte à tout membre.
+  // l'organisation avait consenti. La demande, elle, est ouverte à tout membre
+  // actif (mandate:request, ADR-068/078) — deux droits distincts, deux
+  // variables distinctes.
   const canManage = canRevokeMandate(practice.role);
+  const canAsk = canRequestMandate(practice.role);
 
   return (
     <div>
@@ -63,7 +66,7 @@ export default async function CabinetMandatesPage() {
         )}
       </div>
 
-      {canManage ? <RequestMandateForm /> : null}
+      {canAsk ? <RequestMandateForm /> : null}
     </div>
   );
 }
