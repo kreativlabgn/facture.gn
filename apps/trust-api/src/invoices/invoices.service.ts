@@ -218,6 +218,10 @@ export class InvoicesService {
         // K3, ADR-090 — recopiée telle quelle, jamais vérifiée côté serveur (même
         // discipline que referenceCurrency ci-dessus). undefined si non fournie.
         referenceMarche: dto.referenceMarche,
+        // F — "Valable jusqu'au" d'un devis, recopiée telle quelle, jamais
+        // vérifiée côté serveur (même discipline que referenceMarche
+        // ci-dessus) ni croisée avec documentType. undefined si non fournie.
+        quoteValidUntil: dto.quoteValidUntil,
         // Lot C, ADR-109 — B2G structuré, déclaratif, jamais vérifié. `??` sur
         // cadreFacturation : les appelants directs (USSD, récurrent) ne passent
         // pas par le .default() de Zod. Jamais dans CertifiablePayload (posé ici,

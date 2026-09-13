@@ -374,6 +374,45 @@ describe("InvoicesService — référence marché commande publique B2G (K3, ADR
   });
 });
 
+describe("InvoicesService — date de validité du devis (F, quoteValidUntil)", () => {
+  it("persiste quoteValidUntil tel quel quand fourni sur un devis — aucune vérification automatique", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "quote",
+      lines: [{ description: "Devis rénovation toiture", quantity: 1, unitPrice: 2_500_000n }],
+      quoteValidUntil: new Date("2026-12-31"),
+    } as any);
+
+    expect(result.quoteValidUntil).toEqual(new Date("2026-12-31"));
+  });
+
+  it("sans quoteValidUntil, le comportement reste strictement inchangé — non-régression", async () => {
+    const prisma = createFakePrismaForCreateDraft("normal_tva");
+    const service = new InvoicesService(
+      prisma as any,
+      createFakeNumbering() as any,
+      createFakeSigningKeyService() as any,
+      createFakePaymentLinkClient() as any,
+    );
+
+    const result = await service.createDraft({
+      organizationId: "org-1",
+      documentType: "quote",
+      lines: [{ description: "Devis rénovation toiture", quantity: 1, unitPrice: 2_500_000n }],
+    } as any);
+
+    expect(result.quoteValidUntil).toBeUndefined();
+  });
+});
+
 function createFakePrismaForConvertToInvoice(
   proforma: any,
   regimeFiscal: string,

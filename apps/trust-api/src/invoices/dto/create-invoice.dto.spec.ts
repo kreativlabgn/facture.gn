@@ -244,3 +244,33 @@ describe("createInvoiceSchema — champs EN 16931 / B2G (Lot C, ADR-109)", () =>
     if (result.success) expect(result.data.numeroContrat).toBe("");
   });
 });
+
+describe("createInvoiceSchema — date de validité du devis (F, quoteValidUntil)", () => {
+  const base = {
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    documentType: "quote" as const,
+    lines: [{ description: "Devis rénovation toiture", quantity: 1, unitPrice: "2500000" }],
+  };
+
+  it("accepte quoteValidUntil au format date et le parse en Date", () => {
+    const result = createInvoiceSchema.safeParse({
+      ...base,
+      quoteValidUntil: "2026-12-31",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.quoteValidUntil).toBeInstanceOf(Date);
+      expect(result.data.quoteValidUntil).toEqual(new Date("2026-12-31"));
+    }
+  });
+
+  it("accepte une création sans quoteValidUntil — non-régression explicite", () => {
+    const result = createInvoiceSchema.safeParse(base);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.quoteValidUntil).toBeUndefined();
+    }
+  });
+});

@@ -60,6 +60,18 @@ export const createInvoiceSchema = z
     // avec "AUCUNE vérification automatique" : ce DTO ne juge pas le
     // contenu du champ, il le transporte tel quel.
     referenceMarche: z.string().optional(),
+    // F — "Valable jusqu'au", saisi uniquement pour un devis (documentType
+    // "quote"). DÉCLARATIF, jamais vérifié : même discipline que
+    // referenceMarche ci-dessus, AUCUN .refine() croisé avec documentType (un
+    // devis sans date de validité suit le même parcours qu'un devis avec
+    // date, et un appelant direct posant ce champ sur une facture n'est pas
+    // bloqué ici — la distinction produit reste portée côté web, jamais dans
+    // ce DTO).
+    // z.coerce.date() : un <input type="date"> HTML envoie "YYYY-MM-DD" sans
+    // fuseau horaire, interprété en UTC minuit — comportement accepté tel
+    // quel (même risque documenté que fxRateDate ci-dessus), pas une logique
+    // de fuseau horaire à inventer ici.
+    quoteValidUntil: z.coerce.date().optional(),
     // Lot C, ADR-109 — contexte et références B2G structurées, alignement
     // EN 16931. Tous DÉCLARATIFS, recopiés tels quels, AUCUNE vérification
     // (même discipline qu'ADR-090 : la cohérence est rapprochée humainement
