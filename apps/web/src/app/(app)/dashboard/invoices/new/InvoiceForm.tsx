@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { CustomerListItem } from "@/lib/trust-api";
 import { createAndIssueInvoiceAction, type CreateInvoiceActionState } from "./actions";
 import { Button } from "@/components/ui";
@@ -14,10 +15,29 @@ interface LineDraft {
 const EMPTY_LINE: LineDraft = { description: "", quantity: "1", unitPriceGnf: "" };
 
 export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
+  const router = useRouter();
   const [state, formAction, pending] = useActionState<CreateInvoiceActionState, FormData>(
     createAndIssueInvoiceAction,
     null,
   );
+
+  // L'action ne redirige plus elle-même (elle est partagée avec
+  // VenteComptoirForm, qui affiche une confirmation inline à la place) —
+  // c'est donc à cet écran de retrouver, côté client, le comportement
+  // qu'il avait avant : retour au tableau de bord dès l'émission réussie.
+  //
+  // ADR-064 — un devis n'est jamais émis : son succès porte `quoteId`, pas
+  // `invoiceId` (voir actions.ts), et redirige vers sa propre fiche plutôt que
+  // le tableau de bord — c'est là que "Convertir en facture" vit.
+  useEffect(() => {
+    if (state && "invoiceId" in state) {
+      router.push("/dashboard");
+    } else if (state && "quoteId" in state) {
+      router.push(`/dashboard/invoices/${state.quoteId}`);
+    }
+  }, [state, router]);
+
+  const [documentType, setDocumentType] = useState<"invoice" | "quote">("invoice");
   const [lines, setLines] = useState<LineDraft[]>([{ ...EMPTY_LINE }]);
   // Le choix d'une fiche client l'emporte sur le champ téléphone (voir
   // actions.ts). Le champ est donc neutralisé plutôt que laissé actif à ne
@@ -116,13 +136,31 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
           <select
             id="documentType"
             name="documentType"
-            defaultValue="invoice"
+            value={documentType}
+            onChange={(event) => setDocumentType(event.target.value as "invoice" | "quote")}
             className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
           >
             <option value="invoice">Facture</option>
             <option value="quote">Devis</option>
           </select>
         </div>
+
+        {/* ADR-064 — un devis est un document préliminaire, jamais engageant :
+            aucune vérification côté serveur sur cette date (même discipline
+            que referenceMarche), purement informative pour le client. */}
+        {documentType === "quote" ? (
+          <div className="mb-4">
+            <label htmlFor="quoteValidUntil" className="mb-1.5 block font-sans text-[11px] font-semibold tracking-wide text-navy-950 uppercase">
+              Valable jusqu&apos;au — optionnel
+            </label>
+            <input
+              type="date"
+              id="quoteValidUntil"
+              name="quoteValidUntil"
+              className="w-full rounded-lg border border-navy-200 bg-white px-3.5 py-2.5 text-sm text-navy-950 focus:border-2 focus:border-navy-950 focus:outline-none"
+            />
+          </div>
+        ) : null}
 
         <div className="mb-4">
           <label htmlFor="referenceMarche" className="mb-1.5 block font-sans text-[11px] font-semibold tracking-wide text-navy-950 uppercase">
@@ -194,13 +232,23 @@ export function InvoiceForm({ customers }: { customers: CustomerListItem[] }) {
           <span>Total (estimé, HT/taxe calculés à l&apos;émission)</span>
           <span className="font-mono">{totalGnf.toLocaleString("fr-FR")} GNF</span>
         </div>
-        {state?.error ? <p className="mt-4 text-sm text-red-text">{state.error}</p> : null}
+        {state && "error" in state ? <p className="mt-4 text-sm text-red-text">{state.error}</p> : null}
         <Button type="submit" disabled={pending} size="lg" className="mt-5 w-full">
-          {pending ? "Émission..." : "Émettre et certifier"}
+          {pending
+            ? documentType === "quote"
+              ? "Création..."
+              : "Émission..."
+            : documentType === "quote"
+              ? "Créer le devis"
+              : "Émettre et certifier"}
         </Button>
+        {/* Un devis n'est jamais scellé ni certifié à cette étape (ADR-064) —
+            ce texte ne doit donc jamais parler de scellement ou de
+            certification pour ce type de document. */}
         <p className="mt-3 text-xs leading-relaxed text-navy-600">
-          Votre facture sera scellée et rattachée à la suite de vos factures : ni elle ni les
-          précédentes ne pourront être modifiées après coup.
+          {documentType === "quote"
+            ? "Ce devis reste un document préliminaire, sans numéro légal ni preuve de certification. Vous pourrez le convertir en facture depuis sa fiche une fois le client d'accord."
+            : "Votre facture sera scellée et rattachée à la suite de vos factures : ni elle ni les précédentes ne pourront être modifiées après coup."}
         </p>
       </div>
     </form>

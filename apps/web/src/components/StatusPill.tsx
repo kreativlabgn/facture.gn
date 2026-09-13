@@ -36,6 +36,18 @@ export function DuplicateWarningPill() {
   return <Badge tone="amber">● Doublon possible</Badge>;
 }
 
+// ADR-064 — un devis n'est jamais une facture certifiée : ce badge le
+// rappelle partout où une facture et un devis peuvent apparaître côte à côte
+// (liste, détail). `null` pour tout le reste (invoice, proforma) — jamais un
+// signal neutre à côté d'un document qui n'en a pas besoin. Tone `blue`, déjà
+// validé pour un statut "info/partiel" — aucun nouveau token couleur.
+export function DocumentTypeBadge({ documentType }: { documentType: string }) {
+  if (documentType !== "quote") {
+    return null;
+  }
+  return <Badge tone="blue">Devis</Badge>;
+}
+
 // dispute_status "none" n'affiche jamais de pastille — un litige inexistant
 // n'est pas une information, jamais un faux signal neutre à côté du statut.
 export function DisputeStatusPill({ disputeStatus }: { disputeStatus: string }) {

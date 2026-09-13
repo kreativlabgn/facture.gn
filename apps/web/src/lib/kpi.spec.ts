@@ -17,6 +17,7 @@ function invoice(overrides: Partial<InvoiceListItem>): InvoiceListItem {
     validatedByAdministration: false,
     etaxStatus: null,
     etaxReceiptNumber: null,
+    documentType: "invoice",
     ...overrides,
   };
 }

@@ -1,12 +1,15 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
 import {
+  convertToInvoiceAction,
   issueInvoiceAction,
   regeneratePaymentLinkAction,
   sendReminderAction,
   voidInvoiceAction,
+  type ConvertToInvoiceActionState,
   type InvoiceActionState,
 } from "./actions";
 
@@ -64,6 +67,55 @@ export function IssueInvoiceForm({ invoiceId }: { invoiceId: string }) {
         </Button>
       </div>
       <Retour state={state} />
+    </form>
+  );
+}
+
+// ── Conversion en facture (C15/C16, ADR-064) ────────────────────────────────
+// Calqué sur IssueInvoiceForm : même case à cocher de confirmation, même
+// forme. La différence est dans le useEffect — la Server Action reste pure
+// (jamais de redirect() serveur, même précédent que InvoiceForm.tsx) : c'est
+// ce composant client qui redirige, dès que l'état porte l'identifiant de la
+// nouvelle facture brouillon créée.
+export function ConvertToInvoiceForm({ invoiceId }: { invoiceId: string }) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<ConvertToInvoiceActionState, FormData>(
+    convertToInvoiceAction,
+    null,
+  );
+  const [confirme, setConfirme] = useState(false);
+
+  useEffect(() => {
+    if (state && "newInvoiceId" in state) {
+      router.push(`/dashboard/invoices/${state.newInvoiceId}`);
+    }
+  }, [state, router]);
+
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="invoiceId" value={invoiceId} />
+      <label className="flex items-start gap-2.5 text-sm text-navy-700">
+        <input
+          type="checkbox"
+          checked={confirme}
+          onChange={(event) => setConfirme(event.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-navy-950"
+        />
+        <span>
+          Je confirme la conversion. Une nouvelle facture brouillon sera créée à partir de ce
+          document ; celui-ci restera consultable, marqué « Convertie ».
+        </span>
+      </label>
+      <div className="mt-3">
+        <Button type="submit" variant="accent" disabled={!confirme || pending}>
+          {pending ? "Conversion…" : "Convertir en facture"}
+        </Button>
+      </div>
+      {state && "error" in state ? (
+        <p role="status" className="mt-2 text-sm text-bad-text">
+          {state.error}
+        </p>
+      ) : null}
     </form>
   );
 }

@@ -221,6 +221,12 @@ export interface InvoiceListItem {
   validatedByAdministration: boolean;
   etaxStatus: string | null;
   etaxReceiptNumber: string | null;
+
+  // ADR-064 — "invoice" | "proforma" | "quote". Même situation que
+  // disputeStatus/validatedByAdministration ci-dessus : le champ traverse déjà
+  // l'API, seul le typage manquait. Permet à la liste/au badge de distinguer
+  // un devis d'une facture sans appel réseau supplémentaire.
+  documentType: string;
 }
 
 export async function listInvoices(
@@ -431,6 +437,11 @@ export interface CreateInvoiceInput {
   // vérification automatique côté serveur. Optionnel : une facture sans
   // référence suit exactement le même parcours qu'une facture avec référence.
   referenceMarche?: string;
+  // F, ADR-064 — date de validité d'un devis, purement déclarative (aucun
+  // refine croisé avec documentType côté DTO, même discipline que
+  // referenceMarche). Format "YYYY-MM-DD" tel que rendu par un <input
+  // type="date">, jamais recalculé ici.
+  quoteValidUntil?: string;
 }
 
 export interface InvoiceDetail {
@@ -439,6 +450,15 @@ export interface InvoiceDetail {
   status: string;
   totalTtc: string;
   certificationId: string | null;
+  // POST /invoices/:id/issue renvoie l'enregistrement Invoice complet
+  // (InvoicesService.issue() — meilleur effort, jamais couplé à la
+  // certification déjà committée) : ces deux colonnes sont déjà peuplées à
+  // l'issue de l'émission si la génération du lien a réussi, `null` sinon
+  // (panne Money Context, organisation avec paymentLinkAutoSend=false, Z de
+  // caisse — voir invoices.service.ts). Absentes de createInvoice(), dont la
+  // facture n'a pas encore de lien à ce stade.
+  paymentLinkUrl: string | null;
+  paymentLinkExpiresAt: string | null;
 }
 
 export async function createInvoice(token: string, input: CreateInvoiceInput): Promise<InvoiceDetail> {
@@ -461,6 +481,22 @@ export async function issueInvoice(token: string, invoiceId: string): Promise<In
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new TrustApiError(body?.message ?? "Émission de la facture impossible", response.status);
+  }
+  return response.json();
+}
+
+// C15/C16, ADR-064 — un proforma ou un devis n'est jamais émis directement
+// (issue() les rejette en 409, voir invoices.service.ts) : ce geste crée une
+// NOUVELLE facture brouillon distincte, qui reste elle-même à émettre via
+// IssueInvoiceForm. Même forme que voidInvoice() : POST sans corps, message
+// de trust-api relayé tel quel.
+export async function convertToInvoice(token: string, invoiceId: string): Promise<InvoiceDetail> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/convert-to-invoice`, token, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Conversion en facture impossible", response.status);
   }
   return response.json();
 }
@@ -531,6 +567,10 @@ export interface InvoiceFullDetail {
   paymentLinkExpiresAt: string | null;
 
   referenceMarche: string | null;
+  // F, ADR-064 — déclaratif, jamais vérifié côté serveur (même discipline que
+  // referenceMarche). `null` pour toute facture — n'a de sens que sur un
+  // document de type devis.
+  quoteValidUntil: string | null;
   issuedAt: string | null;
   createdAt: string;
 

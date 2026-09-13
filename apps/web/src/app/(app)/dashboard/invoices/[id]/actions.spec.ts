@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireSessionTokenMock = vi.fn();
 const chooseFinancingMock = vi.fn();
+const convertToInvoiceMock = vi.fn();
 const revalidatePathMock = vi.fn();
 
 vi.mock("@/lib/session", () => ({
@@ -22,6 +23,7 @@ vi.mock("@/lib/trust-api", async () => {
   return {
     ...actual,
     chooseFinancing: (...args: unknown[]) => chooseFinancingMock(...args),
+    convertToInvoice: (...args: unknown[]) => convertToInvoiceMock(...args),
   };
 });
 
@@ -29,7 +31,7 @@ vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
 }));
 
-const { chooseFinancingAction } = await import("./actions");
+const { chooseFinancingAction, convertToInvoiceAction } = await import("./actions");
 const { TrustApiError } = await import("@/lib/trust-api");
 
 function formulaire(fields: Record<string, string> = {}): FormData {
@@ -274,5 +276,73 @@ describe("chooseFinancingAction — idempotence concurrentielle (K5, ADR-089)", 
 
     const detail = revalidatePathMock.mock.calls.filter(([chemin]) => chemin === "/dashboard/invoices/inv-1");
     expect(detail).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C15/C16, ADR-064 — convertToInvoiceAction(). Ce que ce couple d'actions
+// distingue des quatre autres de ce fichier : elle ne réutilise PAS
+// executer() (qui ne rend qu'un { ok } statique) parce que le composant
+// client a besoin de l'identifiant de la NOUVELLE facture brouillon pour y
+// rediriger côté client — jamais un redirect() serveur ici.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("convertToInvoiceAction — conversion d'un devis/proforma en facture", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requireSessionTokenMock.mockResolvedValue("jeton-pme");
+  });
+
+  function formulaireConversion(invoiceId = "devis-1"): FormData {
+    const formData = new FormData();
+    if (invoiceId) formData.set("invoiceId", invoiceId);
+    return formData;
+  }
+
+  // Test D1
+  it("refuse une conversion sans identifiant, sans appeler convertToInvoice", async () => {
+    const state = await convertToInvoiceAction(null, formulaireConversion(""));
+
+    expect(state).toEqual({ error: "Action impossible : identifiant de facture manquant" });
+    expect(convertToInvoiceMock).not.toHaveBeenCalled();
+  });
+
+  // Test D2 — le message de trust-api distingue déjà « pas un devis/proforma »
+  // et « déjà converti » : le relayer tel quel est ce qui fait qu'un 409 se lit
+  // comme un fait acquis, pas comme une panne.
+  it("relaie le message de TrustApiError tel quel sur échec", async () => {
+    convertToInvoiceMock.mockRejectedValue(new TrustApiError("Proforma devis-1 ne peut être converti depuis le statut converted", 409));
+
+    const state = await convertToInvoiceAction(null, formulaireConversion());
+
+    expect(state).toEqual({ error: "Proforma devis-1 ne peut être converti depuis le statut converted" });
+  });
+
+  it("ne laisse pas fuir une panne réseau brute vers l'écran", async () => {
+    convertToInvoiceMock.mockRejectedValue(new Error("ECONNREFUSED 127.0.0.1:3000"));
+
+    const state = await convertToInvoiceAction(null, formulaireConversion());
+
+    expect(state).toEqual({ error: "Action temporairement indisponible" });
+  });
+
+  // Test D3
+  it("retourne newInvoiceId sur succès et revalide les trois mêmes chemins que les autres actions", async () => {
+    convertToInvoiceMock.mockResolvedValue({ id: "facture-2" });
+
+    const state = await convertToInvoiceAction(null, formulaireConversion());
+
+    expect(state).toEqual({ newInvoiceId: "facture-2" });
+    expect(convertToInvoiceMock).toHaveBeenCalledWith("jeton-pme", "devis-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard/invoices/devis-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard/invoices");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("ne revalide rien quand la conversion a échoué", async () => {
+    convertToInvoiceMock.mockRejectedValue(new TrustApiError("Déjà converti", 409));
+
+    await convertToInvoiceAction(null, formulaireConversion());
+
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 });
