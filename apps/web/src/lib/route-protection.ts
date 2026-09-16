@@ -7,11 +7,25 @@
 // /dashboard ni /cabinet ne le concerne.
 export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/nouveau-cabinet", "/daf", "/demo"];
 
-// Un seul « / » initial, suivi ni de « / » ni de « \ » : les navigateurs
-// normalisent « /\evil.com » en « //evil.com » (protocol-relative), donc les
-// deux motifs sont des redirections ouvertes.
+// Point d'ancrage local fictif : new URL() résout `value` exactement comme le
+// ferait un navigateur (contre-oblique normalisée en séparateur de chemin,
+// tabulations/retours ignorés, hôte alternatif détecté) sans réimplémenter
+// cette normalisation à la main — l'ancienne version en regex ne bloquait que
+// la contre-oblique littérale et aurait laissé passer une variante comme
+// « /\t/evil.com » (tabulation strippée par l'algorithme d'analyse d'URL,
+// donc équivalente à « //evil.com » une fois résolue). La contre-oblique
+// reste en plus rejetée d'entrée, explicitement.
+const ANCRAGE_LOCAL = "http://facture-gn.internal";
+
 export function destinationInterne(value: string, fallback = "/dashboard"): string {
-  return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : fallback;
+  if (!value.startsWith("/") || value.includes("\\")) {
+    return fallback;
+  }
+  try {
+    return new URL(value, ANCRAGE_LOCAL).origin === ANCRAGE_LOCAL ? value : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // Logique pure isolée du glue Next.js (middleware.ts) pour rester testable sans
