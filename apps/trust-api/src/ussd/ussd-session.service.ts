@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { VerificationService } from "../verification/verification.service";
@@ -10,6 +10,9 @@ import { UssdPaymentService } from "./ussd-payment.service";
 import { UssdInvoiceListService } from "./ussd-invoice-list.service";
 import { UssdAccountService } from "./ussd-account.service";
 import { ClientPortalService } from "../client-portal/client-portal.service";
+import { UssdFlashSuggestionService } from "./ussd-flash-suggestion.service";
+import { UssdInvoiceSearchService } from "./ussd-invoice-search.service";
+import { UssdCashCollectionService } from "./ussd-cash-collection.service";
 
 const SESSION_TTL_MS = 3 * 60_000; // marge au-delà des <90s réels d'une séquence (DAT §Performance)
 const PIN_FORMAT = /^\d{4}$/;
@@ -65,10 +68,35 @@ interface SessionContext {
   // automatique ou numérotée), transmis jusqu'à l'émission finale.
   publicOrderCustomerId?: string;
   publicOrderCustomerOptions?: { id: string; name: string }[];
+
+  // *620#, capacité 1 (interception flash) — facture suggérée au CLIENT à
+  // l'entrée d'une session authentifiée.
+  flashInvoiceId?: string;
+  flashInvoiceNumber?: string;
+  flashOrganizationId?: string;
+
+  // *620#, capacité 2 — option 3 : liste affichée (invoice_history_menu),
+  // index -> facture ; recherche composite téléphone + montant.
+  historyOptions?: { id: string; number: string }[];
+  searchPhone?: string;
+  searchResultOptions?: { id: string; number: string }[];
+
+  // *620#, capacité 3 — encaissement cash. Aucun montant stashé ici à dessein
+  // (cashCollectAmountDue volontairement absent, décision d'architecture #6 du
+  // plan) : amountDue est TOUJOURS relu à chaud au moment de collect(), jamais
+  // une valeur mémorisée à l'étape de sélection.
+  cashCollectInvoiceId?: string;
+  cashCollectInvoiceNumber?: string;
+  cashCollectOrganizationId?: string;
+  cashCollectTerminalMessage?: string;
 }
 
 type UssdSessionRow = {
   id: string;
+  // *620#, capacité 3 — le sessionId OPÉRATEUR (distinct de `id`, l'UUID
+  // Prisma de la ligne) : base de l'idempotencyKey d'encaissement cash
+  // (`ussd-cash:${sessionId}`, décision d'architecture #5 du plan).
+  sessionId: string;
   state: string;
   phone: string;
   contextData: unknown;
@@ -118,7 +146,21 @@ type UssdState =
   // pour ce state, tombant silencieusement sur "Session invalide" en cas de
   // rejeu — exactement la classe de panne silencieuse que ce fix visait à
   // éliminer.
-  | "authenticated_stub";
+  | "authenticated_stub"
+  // *620#, capacité 1 (interception flash) — écran "Facture récente trouvée",
+  // 1=voir et payer / 2=menu principal.
+  | "flash_intercept"
+  // *620#, capacité 2/3 — ex-renderMyInvoices (option 3), devient interactif :
+  // liste numérotée (sélection → encaissement cash) + option recherche.
+  | "invoice_history_menu"
+  | "search_awaiting_phone"
+  | "search_awaiting_amount"
+  | "search_result_select"
+  // *620#, capacité 3 (encaissement cash) — pendants de emit_processing/
+  // emit_terminal (même mécanisme, tryClaimProcessingState élargie).
+  | "cash_collect_confirm"
+  | "cash_collect_processing"
+  | "cash_collect_terminal";
 
 // F13, ADR-096/ADR-108 — "7. Factures reçues" est délibérément distinct de
 // "3. Mes factures" : l'option 3 liste les factures ÉMISES par l'organisation
@@ -193,6 +235,9 @@ export class UssdSessionService {
     private readonly ussdAccount: UssdAccountService,
     @Inject(PASSWORD_SERVICE) private readonly passwordService: PasswordService,
     private readonly clientPortal: ClientPortalService,
+    private readonly ussdFlashSuggestion: UssdFlashSuggestionService,
+    private readonly ussdInvoiceSearch: UssdInvoiceSearchService,
+    private readonly ussdCashCollection: UssdCashCollectionService,
   ) {}
 
   async handleRequest(sessionId: string, phone: string, input: string): Promise<UssdResponse> {
@@ -281,6 +326,25 @@ export class UssdSessionService {
       // reçoit un message terminal propre, jamais "Session invalide".
       case "authenticated_stub":
         return { continue: false, text: "Cette opération a déjà été traitée." };
+      case "flash_intercept":
+        return this.handleFlashIntercept(session, context, input);
+      case "invoice_history_menu":
+        return this.handleInvoiceHistoryMenu(session, context, input);
+      case "search_awaiting_phone":
+        return this.handleSearchAwaitingPhone(session, input);
+      case "search_awaiting_amount":
+        return this.handleSearchAwaitingAmount(session, context, input);
+      case "search_result_select":
+        return this.handleSearchResultSelect(session, context, input);
+      case "cash_collect_confirm":
+        return this.handleCashCollectConfirm(session, context, input);
+      // *620#, capacité 3 — mêmes pendants que emit_processing/emit_terminal
+      // ci-dessus (Security Audit 2026-08-23, finding #4) : un rejeu ne
+      // déclenche jamais un second collect().
+      case "cash_collect_processing":
+        return { continue: false, text: "Traitement en cours, veuillez patienter." };
+      case "cash_collect_terminal":
+        return { continue: false, text: context.cashCollectTerminalMessage ?? "Cette opération a déjà été traitée." };
       default:
         return { continue: false, text: "Session invalide." };
     }
@@ -398,7 +462,7 @@ export class UssdSessionService {
     // uniquement par *620#.
     await this.ussdAuth.confirmPhoneOwnership(session.phone);
 
-    return this.completeAuthentication(session.id, context, session.state);
+    return this.completeAuthentication(session, context, session.state);
   }
 
   // Security Audit 2026-08-23, finding #6 — le PIN candidat est haché (argon2id,
@@ -427,14 +491,56 @@ export class UssdSessionService {
     }
 
     await this.ussdAuth.createPin(context.authUserId as string, input);
-    return this.completeAuthentication(session.id, context, session.state);
+    return this.completeAuthentication(session, context, session.state);
   }
 
   private async completeAuthentication(
-    sessionId: string,
+    session: UssdSessionRow,
     context: SessionContext,
     currentState: string,
   ): Promise<UssdResponse> {
+    const sessionId = session.id;
+
+    // *620#, capacité 1 (interception flash suggestive) — uniquement pour les
+    // options AUTHENTIFIÉES marchand (jamais "anon_emit", contrat UX
+    // minimal-friction ADR-054 préservé, voir Alternatives écartées du plan).
+    // Le CLIENT qui vient de prouver la possession de SON numéro (PIN) voit
+    // d'abord une suggestion de facture récente qui LUI est destinée, avant la
+    // logique propre à l'option marchande choisie.
+    if (context.pendingOption && AUTHENTICATED_OPTIONS.has(context.pendingOption)) {
+      const candidate = await this.ussdFlashSuggestion.findCandidate(session.phone);
+      if (candidate) {
+        // Best-effort (voir UssdFlashSuggestionService.markSuggested) : ne
+        // bloque jamais l'affichage de la suggestion elle-même.
+        await this.ussdFlashSuggestion.markSuggested(candidate.id, candidate.organizationId);
+        // userId persisté sur la LIGNE (pas seulement le contexte) : requis
+        // par handlePayConfirmation (option 1 ci-dessous), qui lit
+        // session.userId — même précédent que les branches pendingOption
+        // "1"/"3"/"4"/"5"/"6"/"7" plus bas dans cette méthode.
+        await this.prisma.ussdSession.update({
+          where: { id: sessionId },
+          data: {
+            state: "flash_intercept" satisfies UssdState,
+            userId: context.authUserId,
+            contextData: {
+              flashInvoiceId: candidate.id,
+              flashInvoiceNumber: candidate.number as string,
+              flashOrganizationId: candidate.organizationId,
+            },
+          },
+        });
+        return {
+          continue: true,
+          text: [
+            "Facture récente trouvée :",
+            `${candidate.number} — ${formatGnfPlainText(candidate.amountDue.toString())}`,
+            "1. Voir et payer",
+            "2. Menu principal",
+          ].join("\n"),
+        };
+      }
+    }
+
     // §5 Spec USSD — raccourci d'émission anonyme : montant déjà connu
     // (stocké dès handleAnonymousEmissionShortcut), jamais de collecte de
     // téléphone client (anonyme), jamais de resolveOrCreateCustomer.
@@ -454,7 +560,7 @@ export class UssdSessionService {
       // fois, voir tryClaimProcessingState() pour le détail de la garde.
       // currentState provient de session.state (string, colonne DB non typée) —
       // même cast défensif que dispatch(), voir la note UssdState plus haut.
-      const claimed = await this.tryClaimProcessingState(sessionId, currentState as UssdState, context);
+      const claimed = await this.tryClaimProcessingState(sessionId, currentState as UssdState, "emit_processing", context);
       if (!claimed) {
         return { continue: false, text: "Traitement en cours, veuillez patienter." };
       }
@@ -490,20 +596,15 @@ export class UssdSessionService {
       return { continue: true, text: "Montant de la facture (GNF) :" };
     }
 
+    // *620#, capacité 2/3 — option 3 devient interactive (historique +
+    // recherche + encaissement cash), donc doit désormais persister
+    // l'organisation RÉSOLUE (pas context.authOrganizationId seul, souvent
+    // undefined pour le chemin d'authentification le plus courant — Security
+    // Audit 2026-08-23, finding #7, même précédent que les options 5/6/7
+    // ci-dessous) : les tours suivants (handleInvoiceHistoryMenu,
+    // handleSearchAwaitingPhone, etc.) lisent session.organizationId sur la
+    // LIGNE, pas depuis un context reconstruit à chaque tour.
     if (context.pendingOption === "3") {
-      await this.prisma.ussdSession.update({
-        where: { id: sessionId },
-        data: {
-          // Quality Audit 2026-08-23, revue post-fix #2 (finding #10) — le
-          // littéral ci-dessous est désormais vérifié contre UssdState via ce
-          // type explicite (Prisma.InputJsonValue/String côté colonne DB
-          // n'aurait rien signalé sur une faute de frappe sans ça).
-          state: "authenticated_stub" satisfies UssdState,
-          userId: context.authUserId,
-          organizationId: context.authOrganizationId,
-          contextData: {},
-        },
-      });
       const organizationId = await this.ussdInvoice.resolveOrganizationForEmission(
         context.authUserId as string,
         context.authOrganizationId,
@@ -511,7 +612,16 @@ export class UssdSessionService {
       if (!organizationId) {
         return { continue: false, text: "Aucune organisation habilitée trouvée pour ce compte." };
       }
-      return this.renderMyInvoices(organizationId);
+      await this.prisma.ussdSession.update({
+        where: { id: sessionId },
+        data: {
+          state: "invoice_history_menu" satisfies UssdState,
+          userId: context.authUserId,
+          organizationId,
+          contextData: {},
+        },
+      });
+      return this.renderInvoiceHistoryMenu(sessionId, organizationId);
     }
 
     if (context.pendingOption === "5") {
@@ -646,7 +756,7 @@ export class UssdSessionService {
     // garde ATOMIQUE que la branche anon_emit de completeAuthentication()
     // ci-dessus : where:{state: "emit_awaiting_customer_phone"} garantit qu'une
     // seule requête concurrente peut gagner la transition, jamais les deux.
-    const claimed = await this.tryClaimProcessingState(session.id, "emit_awaiting_customer_phone", context);
+    const claimed = await this.tryClaimProcessingState(session.id, "emit_awaiting_customer_phone", "emit_processing", context);
     if (!claimed) {
       return { continue: false, text: "Traitement en cours, veuillez patienter." };
     }
@@ -672,18 +782,187 @@ export class UssdSessionService {
     return { continue: false, text: message };
   }
 
-  // §2.3 Spec USSD — labels français exacts du texte spec, jamais le nom de
-  // statut technique brut affiché au marchand.
-  private async renderMyInvoices(organizationId: string): Promise<UssdResponse> {
+  // *620#, capacité 2/3 — ex-renderMyInvoices (§2.3 Spec USSD, labels
+  // français exacts du texte spec), désormais INTERACTIF : liste numérotée
+  // (sélection → écran de confirmation d'encaissement cash, capacité 3) +
+  // option "Rechercher une facture" en N+1 (capacité 2), y compris quand la
+  // liste est vide (l'option de recherche reste alors la SEULE ligne, jamais
+  // un message statique "Aucune facture").
+  private async renderInvoiceHistoryMenu(sessionId: string, organizationId: string): Promise<UssdResponse> {
     const invoices = await this.ussdInvoiceList.listRecent(organizationId);
-    if (invoices.length === 0) {
-      return { continue: false, text: "Aucune facture pour le moment." };
-    }
+    const historyOptions = invoices.map((invoice) => ({ id: invoice.id as string, number: invoice.number as string }));
+    const searchOptionIndex = historyOptions.length + 1;
+
+    await this.setState(sessionId, "invoice_history_menu", { historyOptions });
 
     const lines = invoices.map(
-      (invoice) => `${invoice.number} — ${STATUS_LABELS[invoice.status] ?? invoice.status} — ${formatGnfPlainText(invoice.totalTtc.toString())}`,
+      (invoice, index) =>
+        `${index + 1}. ${invoice.number} — ${STATUS_LABELS[invoice.status] ?? invoice.status} — ${formatGnfPlainText(invoice.totalTtc.toString())}`,
     );
-    return { continue: false, text: lines.join("\n") };
+    lines.push(`${searchOptionIndex}. Rechercher une facture`);
+    lines.push("Choisissez un numéro :");
+    return { continue: true, text: lines.join("\n") };
+  }
+
+  // *620#, capacité 2/3 — sélection d'une facture de l'historique (→ écran de
+  // confirmation d'encaissement cash) ou entrée dans le sous-flux de
+  // recherche composite (option N+1).
+  private async handleInvoiceHistoryMenu(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    const options = context.historyOptions ?? [];
+    const index = Number(input) - 1;
+
+    if (Number.isInteger(index) && index >= 0 && index < options.length) {
+      const organizationId = session.organizationId as string;
+      return this.presentCashCollectConfirmation(session, organizationId, options[index].id);
+    }
+
+    if (Number(input) === options.length + 1) {
+      await this.setState(session.id, "search_awaiting_phone", {});
+      return { continue: true, text: "Numéro de téléphone du client :" };
+    }
+
+    return { continue: false, text: "Choix invalide." };
+  }
+
+  // *620#, capacité 2 — saisie du téléphone client, première étape de la
+  // recherche composite.
+  private async handleSearchAwaitingPhone(session: UssdSessionRow, input: string): Promise<UssdResponse> {
+    const phone = input.trim();
+    if (!MSISDN_FORMAT.test(phone)) {
+      return { continue: true, text: "Numéro invalide. Réessayez :" };
+    }
+    await this.setState(session.id, "search_awaiting_amount", { searchPhone: phone });
+    return { continue: true, text: "Montant de la facture (GNF) :" };
+  }
+
+  // *620#, capacité 2 — saisie du montant, déclenche la recherche composite
+  // (téléphone + montant + jour, scopée à l'organisation de l'appelant
+  // authentifié — UssdInvoiceSearchService.searchByPhoneAndAmount). 0 résultat
+  // termine la session (aucun effet de bord, un rejeu ré-exécute la même
+  // recherche sans risque) ; 1 résultat saute directement à la confirmation
+  // d'encaissement ; N résultats ouvrent l'écran de désambiguïsation.
+  private async handleSearchAwaitingAmount(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    if (!AMOUNT_FORMAT.test(input)) {
+      return { continue: true, text: "Montant invalide. Réessayez :" };
+    }
+
+    const organizationId = session.organizationId as string;
+    const phone = context.searchPhone as string;
+    const amountCentimes = BigInt(input) * 100n;
+
+    const results = await this.ussdInvoiceSearch.searchByPhoneAndAmount(organizationId, phone, amountCentimes);
+
+    if (results.length === 0) {
+      return { continue: false, text: "Aucune facture ne correspond à ce téléphone et ce montant aujourd'hui." };
+    }
+
+    if (results.length === 1) {
+      return this.presentCashCollectConfirmation(session, organizationId, results[0].id);
+    }
+
+    const options = results.map((invoice) => ({ id: invoice.id as string, number: invoice.number as string }));
+    await this.setState(session.id, "search_result_select", { searchResultOptions: options });
+    const lines = options.map((option, index) => `${index + 1}. ${option.number}`);
+    return { continue: true, text: [...lines, "Plusieurs factures correspondent — choisissez un numéro :"].join("\n") };
+  }
+
+  // *620#, capacité 2 — écran de désambiguïsation quand la recherche composite
+  // renvoie plusieurs factures pour le même jour (dédoublonnage même-jour).
+  private async handleSearchResultSelect(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    const options = context.searchResultOptions ?? [];
+    const index = Number(input) - 1;
+    const selected = Number.isInteger(index) ? options[index] : undefined;
+    if (!selected) {
+      return { continue: false, text: "Numéro invalide." };
+    }
+
+    const organizationId = session.organizationId as string;
+    return this.presentCashCollectConfirmation(session, organizationId, selected.id);
+  }
+
+  // *620#, capacité 3 — écran de confirmation partagé, appelé aussi bien
+  // depuis l'historique (capacité 2/3) que depuis la recherche (capacité 2) :
+  // jamais deux implémentations de cet écran. Revérifie la facture via
+  // UssdCashCollectionService.previewCollectible() (scopé, statut payable) —
+  // jamais une donnée mémorisée à l'étape de sélection précédente.
+  private async presentCashCollectConfirmation(
+    session: UssdSessionRow,
+    organizationId: string,
+    invoiceId: string,
+  ): Promise<UssdResponse> {
+    const invoice = await this.ussdCashCollection.previewCollectible(organizationId, invoiceId);
+    if (!invoice) {
+      return { continue: false, text: "Cette facture n'est plus disponible pour un encaissement." };
+    }
+
+    await this.setState(session.id, "cash_collect_confirm", {
+      cashCollectInvoiceId: invoice.id,
+      cashCollectInvoiceNumber: invoice.number as string,
+      cashCollectOrganizationId: organizationId,
+    });
+
+    return {
+      continue: true,
+      text: [
+        `Facture ${invoice.number}`,
+        `Montant dû : ${formatGnfPlainText(invoice.amountDue.toString())}`,
+        "Encaisser en CASH ? (1 = Oui)",
+      ].join("\n"),
+    };
+  }
+
+  // *620#, capacité 3 — confirmation finale de l'encaissement cash. Garde
+  // atomique (même mécanisme que les 3 flux d'émission, tryClaimProcessingState
+  // élargie) puis délégation entière à UssdCashCollectionService.collect() —
+  // jamais une seconde implémentation de l'idempotence/du seuil de preuve ici.
+  // sessionId opérateur (session.sessionId), pas l'id UUID Prisma de la ligne
+  // (décision d'architecture #5 du plan).
+  private async handleCashCollectConfirm(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    if (input !== "1") {
+      return { continue: false, text: "Encaissement annulé." };
+    }
+
+    const claimed = await this.tryClaimProcessingState(session.id, "cash_collect_confirm", "cash_collect_processing", context);
+    if (!claimed) {
+      return { continue: false, text: "Traitement en cours, veuillez patienter." };
+    }
+
+    const invoiceId = context.cashCollectInvoiceId as string;
+    const organizationId = context.cashCollectOrganizationId as string;
+    const actorId = session.userId as string;
+
+    try {
+      const result = await this.ussdCashCollection.collect(session.sessionId, invoiceId, organizationId, actorId);
+      await this.setState(session.id, "cash_collect_terminal", { cashCollectTerminalMessage: result.message });
+      return { continue: false, text: result.message };
+    } catch (error) {
+      if (
+        error instanceof ForbiddenException ||
+        error instanceof NotFoundException ||
+        error instanceof ConflictException ||
+        error instanceof BadRequestException
+      ) {
+        await this.setState(session.id, "cash_collect_terminal", { cashCollectTerminalMessage: error.message });
+        return { continue: false, text: error.message };
+      }
+      throw error;
+    }
   }
 
   // F13, ADR-096/ADR-108 — résumé un seul écran (un organisme par ligne, solde
@@ -721,9 +1000,20 @@ export class UssdSessionService {
       return { continue: false, text: "Aucune facture payable ne correspond à ce numéro." };
     }
 
+    return this.presentPaymentPreview(session.id, organizationId, invoice);
+  }
+
+  // Extrait de handlePayInvoiceNumber (D3) — réutilisé tel quel par
+  // handleFlashIntercept (capacité 1, option 1 "Voir et payer") : même aperçu
+  // montant dû + frais + total, même transition vers pay_awaiting_confirmation.
+  private async presentPaymentPreview(
+    sessionId: string,
+    organizationId: string,
+    invoice: { id: string; number: string | null; amountDue: bigint },
+  ): Promise<UssdResponse> {
     const fee = await this.ussdPayment.previewFee(organizationId, invoice.amountDue);
     const total = invoice.amountDue + fee;
-    await this.setState(session.id, "pay_awaiting_confirmation", {
+    await this.setState(sessionId, "pay_awaiting_confirmation", {
       payInvoiceId: invoice.id,
       payInvoiceNumber: invoice.number as string,
       payOrganizationId: organizationId,
@@ -739,6 +1029,30 @@ export class UssdSessionService {
         "Confirmer ? (1 = Oui)",
       ].join("\n"),
     };
+  }
+
+  // *620#, capacité 1 (interception flash) — écran "Facture récente trouvée".
+  // Option 1 réutilise findPayableInvoice/previewFee (comme D3), en relisant
+  // TOUJOURS la facture à chaud par son numéro — jamais un amountDue mémorisé
+  // à l'étape de suggestion, qui pourrait être devenu périmé. Option 2 (ou
+  // toute autre saisie) renvoie au ROOT_MENU nominal, jamais à l'option
+  // marchande d'origine (décision d'architecture #6 du plan).
+  private async handleFlashIntercept(
+    session: UssdSessionRow,
+    context: SessionContext,
+    input: string,
+  ): Promise<UssdResponse> {
+    if (input === "1") {
+      const organizationId = context.flashOrganizationId as string;
+      const invoice = await this.ussdPayment.findPayableInvoice(organizationId, context.flashInvoiceNumber as string);
+      if (!invoice) {
+        return { continue: false, text: "Cette facture n'est plus disponible." };
+      }
+      return this.presentPaymentPreview(session.id, organizationId, invoice);
+    }
+
+    await this.setState(session.id, "root", {});
+    return { continue: true, text: ROOT_MENU };
   }
 
   private async handlePayConfirmation(
@@ -971,7 +1285,7 @@ export class UssdSessionService {
     // garde ATOMIQUE que emit_awaiting_customer_phone (Option 4) et anon_emit :
     // where:{state: "public_order_awaiting_reference"} garantit qu'une seule
     // requête concurrente peut gagner la transition.
-    const claimed = await this.tryClaimProcessingState(session.id, "public_order_awaiting_reference", context);
+    const claimed = await this.tryClaimProcessingState(session.id, "public_order_awaiting_reference", "emit_processing", context);
     if (!claimed) {
       return { continue: false, text: "Traitement en cours, veuillez patienter." };
     }
@@ -1058,19 +1372,28 @@ export class UssdSessionService {
   // est un update() INCONDITIONNEL : deux requêtes réellement concurrentes pour le
   // même sessionId (le vrai scénario de rejeu réseau agrégateur, pas seulement un
   // rejeu séquentiel après commit) liraient toutes deux le même état initial avant
-  // qu'aucune n'ait écrit "emit_processing", et passeraient donc TOUTES LES DEUX
-  // jusqu'à emitInvoice() — double émission. Le where:{state: expectedState} rend
-  // la transition atomique au niveau DB : une seule des deux requêtes concurrentes
-  // peut gagner la ligne (count===1), l'autre voit count===0 et n'appelle jamais
-  // emitInvoice().
+  // qu'aucune n'ait écrit l'état de traitement, et passeraient donc TOUTES LES DEUX
+  // jusqu'à l'action protégée — double émission/double encaissement. Le
+  // where:{state: expectedState} rend la transition atomique au niveau DB : une
+  // seule des deux requêtes concurrentes peut gagner la ligne (count===1),
+  // l'autre voit count===0 et n'appelle jamais l'action protégée.
+  //
+  // *620#, capacité 3 (plan 2026-09-16-ussd-flash-recherche-encaissement-cash.md,
+  // Groupe D) — processingState généralisé (jusqu'ici codé en dur
+  // "emit_processing") : réutilisé tel quel par l'encaissement cash
+  // (cash_collect_confirm -> cash_collect_processing), sans faire transiter une
+  // session d'encaissement par un état littéralement nommé « émission ». Les 3
+  // appels préexistants passent désormais "emit_processing" explicitement —
+  // aucun changement de comportement pour eux.
   private async tryClaimProcessingState(
     sessionId: string,
     expectedState: UssdState,
+    processingState: UssdState,
     context: SessionContext,
   ): Promise<boolean> {
     const claimed = await this.prisma.ussdSession.updateMany({
       where: { id: sessionId, state: expectedState },
-      data: { state: "emit_processing", contextData: context as Prisma.InputJsonValue },
+      data: { state: processingState, contextData: context as Prisma.InputJsonValue },
     });
     return claimed.count === 1;
   }

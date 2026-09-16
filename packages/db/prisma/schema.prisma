@@ -1292,6 +1292,15 @@ model Invoice {
   // facture est venue de *620# ou d'un agent terrain. Jamais dans CertifiablePayload.
   emissionChannel EmissionChannel @default(pwa) @map("emission_channel")
 
+  // *620#, capacité 1 (interception flash) — horodatage de la suggestion faite
+  // au CLIENT (pas au marchand) à l'entrée d'une session authentifiée. Nullable,
+  // jamais réinitialisé, AUCUNE purge séparée : la fenêtre d'éligibilité de la
+  // capacité (issuedAt < 30 min) borne déjà, gratuitement, la durée pendant
+  // laquelle ce champ a le moindre effet — au-delà, la facture cesse d'être
+  // candidate de toute façon. Un flag par CLIENT (sur User/Customer) aurait été
+  // trop grossier (masquerait une DEUXIÈME facture légitime émise entre-temps).
+  flashSuggestedAt DateTime? @map("flash_suggested_at")
+
   validatedByAdministration Boolean @default(false) @map("validated_by_administration")
 
   totalHt  BigInt @default(0) @map("total_ht")
@@ -1411,6 +1420,15 @@ model Invoice {
   @@unique([organizationId, reportingSeriesNumber])
   // E1 — reconstruction de la preuve d'inclusion (feuilles d'une tranche).
   @@index([anchorBatchId])
+  // *620#, capacité 1 (interception flash) — jointure cross-organisation
+  // Customer.phone -> Invoice.customerId. Aucun index n'existait jusqu'ici sur
+  // customer_id.
+  @@index([customerId, issuedAt])
+  // *620#, capacité 2 (recherche composite téléphone + montant) — égalités en
+  // tête (organizationId, totalTtc), plage en dernier (issuedAt) : scan d'index
+  // resserré, pas de scan séquentiel. status volontairement absent de l'index
+  // (faible sélectivité, filtré en post-scan sur un jeu déjà minuscule).
+  @@index([organizationId, totalTtc, issuedAt])
   @@map("invoice")
 }
 
@@ -1518,6 +1536,19 @@ model Payment {
   depositType       DepositType?  @map("deposit_type")
   providerRef       String?       @map("provider_ref")
   status            PaymentStatus @default(pending)
+
+  // Canal d'origine de LA COLLECTE (à distinguer d'Invoice.emissionChannel, qui
+  // parle de l'ÉMISSION de la facture, pas de son règlement). NULL =
+  // inconnu/legacy : tout paiement enregistré avant ce champ, quel que soit son
+  // canal réel — jamais migré rétroactivement vers "pwa" (même discipline
+  // qu'Invoice.signingKeyId : un système de confiance ne réécrit jamais un fait
+  // qu'il n'a pas observé). Seul recordCashPayment() le peuple aujourd'hui, via
+  // un PARAMÈTRE dédié (jamais dans CreatePaymentDto) — même précédent
+  // qu'InvoicesService.createDraft(dto, channel). Réutilise EmissionChannel
+  // (pas un enum dédié) : couple désormais les deux modèles à un seul enum —
+  // toute future valeur ajoutée pour l'un des deux usages doit être évaluée
+  // pour les deux.
+  collectionChannel EmissionChannel? @map("collection_channel")
 
   // Contrainte unique = mécanisme d'idempotence (header Idempotency-Key, ADR-016) —
   // pas de Redis dans ce repo, un replay renvoie ce paiement plutôt que d'en recréer un.
