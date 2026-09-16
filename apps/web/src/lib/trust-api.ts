@@ -367,17 +367,29 @@ export async function mergeCustomer(
   return response.json();
 }
 
+// Catalogue produits/services (docs/plans/2026-09-16-catalogue-produits-services.md).
+// Deux valeurs seulement, mêmes libellés que ProductType côté schema.prisma —
+// "type" est immuable après création (§3 du plan), jamais accepté par
+// updateProduct() ci-dessous.
+export type ProductType = "product" | "service";
+
 // Champs consommés par la liste produits (dashboard) — mirroir de GET /products
 // (ProductsService.findAllByOrganization). possibleDuplicateOf : UUID brut
 // (même convention que CustomerListItem), utilisé seulement comme signal
 // booléen pour le badge — le nom lisible du candidat n'est résolu que sur
 // l'écran détail (ProductDetail ci-dessous, getProduct()). costPrice en
 // centimes GNF sérialisé string (comme creditLimit), nullable — E6 : la
-// création d'un produit n'est jamais bloquée par l'absence de coût.
+// création d'un produit n'est jamais bloquée par l'absence de coût. salePrice
+// suit la même convention (centimes GNF, string, nullable) — catégorie « sur
+// devis » quand absent, jamais confondu avec costPrice (E6/ADR-084, territoire
+// séparé). isActive : statut réversible, jamais un signal d'erreur.
 export interface ProductListItem {
   id: string;
   name: string;
+  type: ProductType;
   costPrice: string | null;
+  salePrice: string | null;
+  isActive: boolean;
   possibleDuplicateOf: string | null;
 }
 
@@ -406,7 +418,11 @@ export async function listProducts(
 export interface ProductDetail {
   id: string;
   name: string;
+  type: ProductType;
+  description: string | null;
   costPrice: string | null;
+  salePrice: string | null;
+  isActive: boolean;
   possibleDuplicateOf: string | null;
   duplicateOf: { id: string; name: string } | null;
 }
@@ -415,6 +431,67 @@ export async function getProduct(token: string, productId: string): Promise<Prod
   const response = await authenticatedFetch(`/products/${encodeURIComponent(productId)}`, token);
   if (!response.ok) {
     throw new TrustApiError("Impossible de charger ce produit", response.status);
+  }
+  return response.json();
+}
+
+// POST /products — DTO étendu (plan §4a). `type` est le seul champ
+// structurellement requis en plus de `name` : la création n'est pas
+// "minimale", un marchand qui a toute l'information la donne en un seul
+// formulaire. `salePrice` en centimes GNF (string) — la conversion depuis la
+// saisie GNF de l'écran se fait dans le Server Action appelant
+// (products/new/actions.ts), jamais ici, même discipline que
+// CreateInvoiceLineInput.unitPrice. `isActive` n'est volontairement pas de la
+// partie : toujours `true` à la naissance d'une fiche (défaut serveur).
+export interface CreateProductInput {
+  organizationId: string;
+  name: string;
+  type: ProductType;
+  description?: string;
+  salePrice?: string;
+}
+
+export async function createProduct(token: string, input: CreateProductInput): Promise<ProductDetail> {
+  const response = await authenticatedFetch("/products", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new TrustApiError(await messageDErreur(response, "Création du produit impossible"), response.status);
+  }
+  return response.json();
+}
+
+// PATCH /products/:id — nouvelle route (plan §4b). `null` efface un champ
+// (repasse `description`/`salePrice` à vide — un produit "sur devis" à
+// nouveau), `undefined` ne le touche pas, même convention que
+// UpdateOrganizationInput. `type` est absent À DESSEIN : immuable après
+// création, PATCH /products/:id ne l'accepte de toute façon jamais côté
+// trust-api (update-product.dto.ts) — aucun écran d'édition de ce dépôt ne
+// doit donc jamais tenter de l'envoyer.
+export interface UpdateProductInput {
+  name?: string;
+  description?: string | null;
+  salePrice?: string | null;
+  isActive?: boolean;
+}
+
+export async function updateProduct(
+  token: string,
+  productId: string,
+  input: UpdateProductInput,
+): Promise<ProductDetail> {
+  const response = await authenticatedFetch(`/products/${encodeURIComponent(productId)}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    // 404 masqué : identifiant inconnu OU produit d'une autre organisation
+    // rendent le même statut côté trust-api (OrganizationIdSource("product")) —
+    // messageDErreur relaie le message générique tel quel, jamais reformulé.
+    throw new TrustApiError(await messageDErreur(response, "Modification du produit impossible"), response.status);
   }
   return response.json();
 }

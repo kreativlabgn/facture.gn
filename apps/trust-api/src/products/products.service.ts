@@ -3,6 +3,7 @@ import type { PrismaClient } from "@facture-gn/db";
 import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import type { CreateProductDto } from "./dto/create-product.dto";
+import type { UpdateProductDto } from "./dto/update-product.dto";
 
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGE_SIZE = 100;
@@ -70,9 +71,35 @@ export class ProductsService {
         data: {
           organizationId,
           name,
+          type: dto.type,
+          description: dto.description ?? null,
+          salePrice: dto.salePrice ?? null,
           possibleDuplicateOf: existingMatch?.id ?? null,
         },
       });
+    });
+  }
+
+  // Catalogue produits/services (2026-09-16) — même squelette que
+  // OrganizationsService.update() : lecture scopée AVANT l'écriture (même
+  // garde que setCostPrice ci-dessus, update() exige un `where` unique et ne
+  // peut donc pas porter la colonne de scope), puis spread conditionnel par
+  // champ : `undefined` (champ absent du DTO) → absent de `data`, ne touche
+  // pas la valeur existante ; `null` explicite → passé tel quel à Prisma,
+  // efface le champ. `type` n'existe structurellement pas sur UpdateProductDto
+  // (voir update-product.dto.ts) : rien à exclure explicitement ici, il n'y a
+  // aucun chemin par lequel il pourrait atteindre `data`.
+  async update(productId: string, dto: UpdateProductDto, organizationId: string) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    await scoped.product.findFirstOrThrow({ where: { id: productId, organizationId } });
+    return scoped.product.update({
+      where: { id: productId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.salePrice !== undefined ? { salePrice: dto.salePrice } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      },
     });
   }
 

@@ -1013,6 +1013,16 @@ model Branch {
   @@map("branch")
 }
 
+// Catalogue produit/service (2026-09-16, docs/plans/2026-09-16-catalogue-produits-services.md)
+// — deux valeurs seulement : ProductStock (mouvements de stock) n'a de sens
+// que pour "product", jamais pour "service". Casse alignée sur les autres
+// enums du schéma (OrganizationRole, PracticeMemberRole,
+// CommissionBypassLevel : identifiants anglais en snake_case minuscule).
+enum ProductType {
+  product
+  service
+}
+
 // E10 — champs fidèles à l'ERD (ERD-facture-gn.md §PRODUCT). costPrice nullable :
 // "la création du produit n'est jamais bloquée en son absence" (E6, ADR-084) —
 // cette story ne construit AUCUN endpoint qui le renseigne (territoire E6),
@@ -1024,9 +1034,41 @@ model Branch {
 // informatif pour une résolution manuelle éventuelle (aucun ProductsService.merge()
 // n'existe : le Backlog ne demande la fusion QUE pour les clients, E4).
 model Product {
-  id                   String  @id @default(uuid())
-  organizationId       String  @map("organization_id")
-  name                 String
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  name           String
+  description    String?
+  // Catalogue produit/service (2026-09-16) — enum PRISMA, PAS un type
+  // TypeScript local : contrairement au type de mouvement de ProductStock
+  // (jamais persisté), celui-ci EST une colonne (product.type), donc doit
+  // apparaître dans le client Prisma généré. Seul champ obligatoire en plus
+  // de name à la création (POST /products) : ProductStock n'a de sens que
+  // pour un produit physique, jamais un service.
+  //
+  // IMMUABLE après création. UpdateProductDto (PATCH /products/:id) ne
+  // déclare volontairement PAS ce champ dans son schéma Zod (même mécanisme
+  // que commercialTier/dgiVerificationStatus délibérément exclus de
+  // UpdateOrganizationDto) : un produit déjà lié à du ProductStock ou à une
+  // InvoiceLine.productId ne doit jamais changer de nature après coup.
+  // Retenu plutôt qu'une garde runtime (bloquer l'update si des lignes
+  // ProductStock existent) parce que c'est strictement plus simple, ne
+  // demande aucun test de garde séparé, et couvre aussi bien le cas "jamais
+  // eu de stock" que "en a eu puis plus" sans distinction à maintenir.
+  type ProductType
+  // Prix de vente, centimes GNF — même convention que costPrice ci-dessous et
+  // InvoiceLine.unitPrice (jamais une unité flottante). Nullable : une partie
+  // des services PME sont "sur devis" (prix variable, connu seulement à
+  // l'émission) — rendre ce champ obligatoire exclurait cette catégorie.
+  // Distinct de costPrice dans le NOM (pas seulement la valeur) pour éviter
+  // toute confusion avec le territoire E6/ADR-084 (coût d'achat, jamais
+  // montré à un client) : les deux champs cohabitent sur la même ligne sans
+  // jamais se confondre au moment de la lecture du schéma.
+  salePrice BigInt? @map("sale_price")
+  // Retrait du catalogue affiché sans suppression définitive — Product est
+  // référencé par InvoiceLine (FK historique, onDelete: SetNull) : un produit
+  // discontinué reste attaché à l'historique de facturation déjà émis,
+  // "éditer" doit donc pouvoir le retirer de la liste active sans le détruire.
+  isActive             Boolean @default(true) @map("is_active")
   taxExemptionCategory String? @map("tax_exemption_category")
   costPrice            BigInt? @map("cost_price")
   possibleDuplicateOf  String? @map("possible_duplicate_of")
