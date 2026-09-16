@@ -40,7 +40,27 @@ export function OtpTunnel({
   );
   const [msisdn, setMsisdn] = useState("");
 
-  const envoye = etatDemande && "envoye" in etatDemande ? etatDemande.envoye : null;
+  // Récupération après un mauvais numéro : tant que `corriger` est vrai,
+  // l'écran numéro reste affiché même si un envoi précédent a réussi. `msisdn`
+  // (au-dessus) n'est pas remis à zéro : l'utilisateur corrige ce qu'il a
+  // déjà tapé plutôt que de tout retaper.
+  const [corriger, setCorriger] = useState(false);
+
+  // Dès qu'un NOUVEL envoi réussit (premier essai, ou renvoi après correction
+  // du numéro), on quitte le mode correction — sans quoi un renvoi réussi
+  // resterait bloqué sur l'écran numéro. Ajustement PENDANT le rendu (pattern
+  // React « adjusting state when a prop changes »), pas dans un useEffect :
+  // `react-hooks/set-state-in-effect` interdit d'appeler setState de façon
+  // synchrone dans un effet, précisément pour ce genre de synchronisation.
+  const [etatDemandeTraite, setEtatDemandeTraite] = useState(etatDemande);
+  if (etatDemande !== etatDemandeTraite) {
+    setEtatDemandeTraite(etatDemande);
+    if (etatDemande && "envoye" in etatDemande) {
+      setCorriger(false);
+    }
+  }
+
+  const envoye = !corriger && etatDemande && "envoye" in etatDemande ? etatDemande.envoye : null;
   const erreur =
     (etatVerif && "error" in etatVerif ? etatVerif.error : null) ??
     (etatDemande && "error" in etatDemande ? etatDemande.error : null);
@@ -83,6 +103,15 @@ export function OtpTunnel({
             <Button type="submit" size="lg" disabled={verifEnCours}>
               {verifEnCours ? "Vérification…" : "Ouvrir mes factures"}
             </Button>
+            {/* Récupération après un mauvais numéro : sans ce bouton, la seule
+                issue était de recharger toute la page pour recommencer. */}
+            <button
+              type="button"
+              onClick={() => setCorriger(true)}
+              className="self-start rounded-sm text-sm font-medium text-navy-600 underline underline-offset-2 hover:text-navy-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
+            >
+              Ce n&apos;est pas le bon numéro ? Modifier
+            </button>
           </form>
         ) : (
           <form action={demander} className="mt-6 flex flex-col gap-4">

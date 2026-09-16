@@ -5,6 +5,7 @@ import { chargerPortail, type LigneFacture } from "@/lib/portal";
 import { getPortalToken } from "@/lib/portal-session";
 import { TrustApiError, type PortalOrganizationSummary } from "@/lib/trust-api";
 import { StatusPill } from "@/components/StatusPill";
+import { AuthLayout } from "@/components/auth/AuthLayout";
 import { ButtonLink, Card } from "@/components/ui";
 import { OtpTunnel } from "@/app/portail/OtpTunnel";
 
@@ -36,12 +37,28 @@ export default async function PortailFacturePage({
     // Pas de redirection vers /portail/auth : on garde l'URL de la facture,
     // pour y revenir dès le code validé. C'est le lien reçu par SMS, il ne
     // doit pas se perdre en chemin.
+    //
+    // AuthLayout (même écran scindé que /portail/auth, ADR-095/096) plutôt
+    // qu'un simple <OtpTunnel/> nu : ce lien SMS demande à l'acheteur de
+    // taper son numéro en réponse à un message reçu — le terrain même de la
+    // méfiance envers un hameçonnage — et les tuiles « comment ça marche » /
+    // « vos données restent à vous » / le lien FAQ y répondent, sans gêner le
+    // geste : sur mobile (l'essentiel de ce point d'entrée), le formulaire
+    // reste affiché EN PREMIER, la réassurance en dessous. Les sorties
+    // « Changer de profil » / « Retour à l'accueil » comblent aussi un vrai
+    // manque : ce point d'entrée n'en offrait aucune. `encadre={false}` :
+    // dans AuthLayout, la colonne d'action EST déjà la carte. Le layout
+    // parent ((coquille)/layout.tsx) court-circuite son propre en-tête tant
+    // que le token est absent, pour ne pas doubler le chrome posé ici.
     return (
-      <OtpTunnel
-        retour={`/portail/${encodeURIComponent(invoiceId)}`}
-        titre="Consulter cette facture"
-        intro="Nous vous envoyons un code par SMS pour confirmer que cette facture vous est bien adressée."
-      />
+      <AuthLayout role="acheteur">
+        <OtpTunnel
+          retour={`/portail/${encodeURIComponent(invoiceId)}`}
+          titre="Consulter cette facture"
+          intro="Nous vous envoyons un code par SMS pour confirmer que cette facture vous est bien adressée."
+          encadre={false}
+        />
+      </AuthLayout>
     );
   }
 
