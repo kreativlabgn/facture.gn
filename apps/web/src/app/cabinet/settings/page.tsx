@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { resolveActivePractice } from "@/lib/active-practice";
 import { canManagePractice, PRACTICE_TYPE_LABELS, practiceRoleLabel } from "@/lib/cabinet-nav";
+import { chargerPartageHonoraires, type PartageHonoraires } from "@/lib/cabinet";
+import { formatGnf } from "@/lib/format";
 import { requireSessionToken } from "@/lib/session";
-import { Badge, Card, DataField, EmptyState } from "@/components/ui";
+import { Badge, Card, DataField, EmptyState, KpiTile } from "@/components/ui";
 import { ModeReversementForm, PalierForm, modeLabel, palierLabel } from "./ReglagesForms";
 
 export const metadata: Metadata = { title: "Paramètres du cabinet — facture.gn" };
@@ -34,6 +36,12 @@ export default async function CabinetSettingsPage() {
   }
 
   const modeActuel = practice.revenueShareSettlementMode ?? "payout";
+
+  // Le partage d'honoraires ne se charge qu'ici : cette page entière est déjà
+  // réservée à practice_admin (garde ci-dessus), donc un seul appel réseau
+  // supplémentaire, jamais un pour un rôle qui ne verra de toute façon pas
+  // l'écran.
+  const partage = await chargerPartageHonoraires(token, practice.id);
 
   return (
     <div className="flex flex-col gap-6">
@@ -105,6 +113,62 @@ export default async function CabinetSettingsPage() {
           </div>
         </Card>
       </section>
+
+      <PartageDHonoraires partage={partage} />
     </div>
+  );
+}
+
+// Ce que le cabinet touche en amenant ses clients sur la plateforme : 10 % de
+// la commission déjà perçue par facture.gn, plafonnés à 5 000 GNF par mois et
+// par entreprise (H4/H3, ADR-071). À côté de Palier et Reversement — les
+// conditions commerciales du cabinet — parce que c'est le même thème :
+// combien le cabinet gagne, comment, et ce qui lui reste dû.
+function PartageDHonoraires({ partage }: { partage: PartageHonoraires }) {
+  return (
+    <section>
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="font-display text-lg font-semibold text-white">Partage d&apos;honoraires</h2>
+        <p className="font-mono text-xs text-white/75">{partage.periodMonth}</p>
+      </div>
+
+      {partage.indisponible ? (
+        <Card>
+          <p className="p-6 text-sm text-amber-text">
+            Le partage d&apos;honoraires n&apos;a pas pu être chargé. Les montants ci-dessous
+            seraient faux — ils ne sont donc pas affichés.
+          </p>
+        </Card>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <KpiTile
+            libelle="Acquis ce mois"
+            valeur={formatGnf(partage.crediteCeMois)}
+            mono
+            note={`Sur ${partage.clientsRemunerateurs} entreprise${partage.clientsRemunerateurs > 1 ? "s" : ""} — 10 % de la commission, plafonnés à 5 000 GNF par entreprise et par mois.`}
+          />
+          <KpiTile
+            libelle="En attente de reversement"
+            valeur={formatGnf(partage.enAttente)}
+            mono
+            note="Toutes périodes confondues."
+          />
+          <KpiTile
+            libelle="Abonnement du mois"
+            valeur={
+              partage.abonnementRestantDu === null
+                ? "Sur devis"
+                : formatGnf(partage.abonnementRestantDu)
+            }
+            mono={partage.abonnementRestantDu !== null}
+            note={
+              partage.abonnementRestantDu === null
+                ? "Palier institutionnel — le prix est négocié, pas grillé."
+                : "Reste dû, déjà net des crédits si vous êtes en déduction."
+            }
+          />
+        </div>
+      )}
+    </section>
   );
 }

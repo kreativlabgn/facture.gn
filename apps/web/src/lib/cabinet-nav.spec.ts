@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   CABINET_NAV,
   CABINET_NAV_GROUPS,
-  CABINET_TABS,
   cabinetPageTitle,
   canInviteMembers,
   canRequestMandate,
@@ -10,7 +9,6 @@ import {
   canManagePractice,
   isCabinetNavActive,
   practiceRoleLabel,
-  resolveCabinetTab,
   visibleCabinetGroups,
 } from "./cabinet-nav";
 
@@ -153,38 +151,5 @@ describe("cabinet-nav — titre de la page", () => {
 
   it("une route hors navigation n'invente aucun titre", () => {
     expect(cabinetPageTitle("/cabinet/inconnu")).toBeNull();
-  });
-});
-
-describe("cabinet-nav — onglets de la console (?tab=)", () => {
-  it("reconnaît les deux onglets déclarés", () => {
-    expect(resolveCabinetTab("portefeuille")).toBe("portefeuille");
-    expect(resolveCabinetTab("structure")).toBe("structure");
-  });
-
-  // `?tab=` vient de l'URL, donc de n'importe où — un lien fabriqué, un favori
-  // périmé, une coquille de frappe. Rendre un écran vide dans ces cas ferait
-  // croire à une panne là où il n'y a qu'une valeur inconnue.
-  it("toute valeur inconnue retombe sur le portefeuille", () => {
-    expect(resolveCabinetTab("facturation-service")).toBe("portefeuille");
-    expect(resolveCabinetTab("")).toBe("portefeuille");
-    expect(resolveCabinetTab(undefined)).toBe("portefeuille");
-    expect(resolveCabinetTab("__proto__")).toBe("portefeuille");
-  });
-
-  // `?tab=a&tab=b` : Next rend un tableau. Comparé tel quel à une chaîne, il
-  // n'égalerait jamais rien — le repli couvrirait le cas, mais par accident.
-  it("prend la première valeur quand le paramètre est répété", () => {
-    expect(resolveCabinetTab(["structure", "portefeuille"])).toBe("structure");
-    expect(resolveCabinetTab([])).toBe("portefeuille");
-  });
-
-  // Le libellé est ce que l'utilisateur lit ; la clé est ce qui circule dans
-  // l'URL. Figer les clés ici, c'est refuser qu'un reformulage du libellé casse
-  // les liens déjà envoyés ou mis en favori.
-  it("les clés d'URL sont figées et sûres dans une URL", () => {
-    expect(CABINET_TABS.map((onglet) => onglet.cle)).toEqual(["portefeuille", "structure"]);
-    // Minuscules ASCII sans accent ni espace : rien qui demande un encodage.
-    expect(CABINET_TABS.every((onglet) => /^[a-z]+$/.test(onglet.cle))).toBe(true);
   });
 });

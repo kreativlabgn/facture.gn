@@ -4,13 +4,18 @@ import { resolveActivePractice } from "@/lib/active-practice";
 import { chargerConsoleCabinet, type ClientSousMandat } from "@/lib/cabinet";
 import { formatDate, formatGnf } from "@/lib/format";
 import { requireSessionToken } from "@/lib/session";
-import { ButtonLink, Card, EmptyState } from "@/components/ui";
+import { ButtonLink, Card, EmptyState, KpiTile } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Entreprises suivies — facture.gn" };
 
 // Le portefeuille complet du cabinet, sorti de la vue d'ensemble : passé une
 // dizaine de clients, une table de 200 lignes n'a rien à faire sur un écran
-// d'accueil qui doit d'abord répondre « comment va le cabinet ».
+// d'accueil qui doit d'abord répondre « comment va le cabinet ». C'est
+// désormais la SEULE table de portefeuille de l'espace cabinet — l'ancienne
+// vue d'ensemble en portait une seconde, avec des colonnes différentes
+// (Encaissé/Encours/Écritures), retirée le 2026-09-16 (voir
+// docs/plans/2026-09-16-cabinet-vue-ensemble-dedup.md) : ces colonnes sont
+// reprises ci-dessous pour qu'aucune information ne disparaisse avec elle.
 //
 // Ce que le cabinet peut faire CHEZ le client (MandateGrantedRole) — distinct
 // du rang du collaborateur DANS la structure (PracticeMemberRole).
@@ -55,13 +60,13 @@ export default async function CabinetOrganizationsPage() {
       <EnTete />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Chiffre libelle="Entreprises" valeur={String(clients.length)} />
-        <Chiffre
+        <KpiTile libelle="Entreprises" valeur={String(clients.length)} />
+        <KpiTile
           libelle="Factures émises"
           valeur={totauxPartiels ? "—" : String(facturesTotal)}
           mono
         />
-        <Chiffre
+        <KpiTile
           libelle="Volume facturé"
           valeur={formatGnf(volumeTotal)}
           mono
@@ -70,15 +75,24 @@ export default async function CabinetOrganizationsPage() {
         />
       </div>
 
+      {/* L'encours est un MAJORANT : une facture partiellement réglée y pèse
+          pour son montant plein, GET /invoices ne rendant pas la part déjà
+          payée. Le dire ici plutôt que de laisser lire un solde exact. */}
+      <p className="text-right text-xs text-white/75">
+        L&apos;encours compte les factures partiellement réglées en entier.
+      </p>
+
       <Card>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-sm">
+          <table className="w-full min-w-[920px] text-sm">
             <thead>
               <tr className="border-b border-navy-50 text-left">
                 <Th>Entreprise</Th>
                 <Th>Accès accordé</Th>
                 <Th align="right">Factures</Th>
                 <Th align="right">Volume</Th>
+                <Th align="right">Encaissé</Th>
+                <Th align="right">Encours</Th>
                 <Th align="right" />
               </tr>
             </thead>
@@ -109,7 +123,7 @@ function EnTete() {
 }
 
 function LigneClient({ client }: { client: ClientSousMandat }) {
-  const { mandat, facturesEmises, volume, indisponible } = client;
+  const { mandat, facturesEmises, volume, encaisse, encours, indisponible } = client;
 
   return (
     <tr>
@@ -135,45 +149,39 @@ function LigneClient({ client }: { client: ClientSousMandat }) {
           formatGnf(volume)
         )}
       </td>
+      <td className="px-5 py-4 text-right font-mono tabular-nums text-navy-950">
+        {indisponible ? <span className="text-amber-text">indisponible</span> : formatGnf(encaisse)}
+      </td>
+      <td className="px-5 py-4 text-right font-mono font-bold tabular-nums text-navy-950">
+        {indisponible ? <span className="font-normal text-amber-text">—</span> : formatGnf(encours)}
+      </td>
       <td className="px-5 py-4 text-right">
-        <Link
-          href={`/cabinet/organizations/${mandat.organization.id}`}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium text-navy-600 transition hover:bg-navy-50 hover:text-navy-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
-        >
-          Ouvrir
-        </Link>
+        <div className="flex items-center justify-end gap-1">
+          <Link
+            href={`/cabinet/organizations/${mandat.organization.id}`}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-navy-600 transition hover:bg-navy-50 hover:text-navy-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
+          >
+            Ouvrir
+          </Link>
+          {/* Le FEC (Fichier des Écritures Comptables, format OHADA) passe par
+              un Route Handler : un <a href> ne peut pas porter d'en-tête
+              Authorization, et le token ne doit de toute façon jamais atteindre
+              le navigateur.
+
+              prefetch={false} : sans lui, Next préchargerait la route au
+              survol — c'est-à-dire génèrerait l'export comptable complet d'un
+              client parce que la souris est passée sur la ligne. */}
+          <Link
+            prefetch={false}
+            href={`/cabinet/organizations/${mandat.organization.id}/fec`}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-navy-600 transition hover:bg-navy-50 hover:text-navy-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-950"
+            aria-label={`Télécharger le FEC de ${mandat.organization.name}`}
+          >
+            FEC
+          </Link>
+        </div>
       </td>
     </tr>
-  );
-}
-
-function Chiffre({
-  libelle,
-  valeur,
-  note,
-  mono = false,
-  alerte = false,
-}: {
-  libelle: string;
-  valeur: string;
-  note?: string;
-  mono?: boolean;
-  alerte?: boolean;
-}) {
-  return (
-    <Card>
-      <div className="p-5">
-        <p className="text-xs font-semibold tracking-wide text-navy-600 uppercase">{libelle}</p>
-        <p
-          className={`mt-1 text-xl font-bold text-navy-950 ${mono ? "font-mono tabular-nums" : "font-display"}`}
-        >
-          {valeur}
-        </p>
-        {note ? (
-          <p className={`mt-1 text-xs ${alerte ? "text-amber-text" : "text-navy-600"}`}>{note}</p>
-        ) : null}
-      </div>
-    </Card>
   );
 }
 
