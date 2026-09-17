@@ -808,6 +808,20 @@ export class OrganizationsService {
     }
   }
 
+  // Plan 2026-09-16 (OCR multicanal), clarification 7 — bascule DÉDIÉE, jamais
+  // mêlée à update() (réservé à l'identité légale, voir son commentaire).
+  // Défaut OFF posé par le schéma (whatsapp_ocr_enabled) : seule cette
+  // méthode peut faire passer une organisation à true — jamais deviné,
+  // jamais implicite (même discipline que saisieRegime, ADR-108).
+  async setWhatsappOcrEnabled(organizationId: string, enabled: boolean) {
+    const scoped = organizationScopedClient(this.prisma, organizationId);
+    await scoped.organization.findFirstOrThrow({ where: { id: organizationId } });
+    return scoped.organization.update({
+      where: { id: organizationId },
+      data: { whatsappOcrEnabled: enabled },
+    });
+  }
+
   // A4, ADR-025 — simple délégation, OrganizationSigningKeyService (@Global(),
   // certification.module.ts) porte toute la logique métier (idempotence,
   // jamais rétroactif).

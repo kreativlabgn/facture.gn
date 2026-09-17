@@ -5,6 +5,7 @@ import { requireSessionToken } from "@/lib/session";
 import { getOrganization, TrustApiError } from "@/lib/trust-api";
 import { Card, EmptyState } from "@/components/ui";
 import { OrganizationForm } from "./OrganizationForm";
+import { WhatsappOcrChannelForm } from "./WhatsappOcrChannelForm";
 
 export const metadata: Metadata = { title: "Fiche de l'organisation — facture.gn" };
 
@@ -54,6 +55,19 @@ export default async function FicheOrganisationPage() {
       <Card>
         <div className="p-6">
           <OrganizationForm organization={organization} />
+        </div>
+      </Card>
+
+      <Card>
+        <div className="p-6">
+          <h2 className="font-display text-base font-semibold text-navy-950">Saisie par WhatsApp</h2>
+          <p className="mt-1 max-w-prose text-sm text-navy-600">
+            Envoyez une photo, une note vocale ou un message texte à notre numéro WhatsApp pour créer
+            un brouillon de facture. Le numéro sera communiqué après activation.
+          </p>
+          <div className="mt-4">
+            <WhatsappOcrChannelForm organization={organization} />
+          </div>
         </div>
       </Card>
     </div>

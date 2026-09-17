@@ -4,6 +4,8 @@ import { OcrValidationService } from "./ocr-validation.service";
 import { UnconfiguredOcrVisionProvider, type OcrVisionProvider } from "./ocr-vision.provider";
 import { OcrVisionService } from "./ocr-vision.service";
 import type { ScanDocumentDto } from "./dto/scan-document.dto";
+import type { ScanAudioDto } from "./dto/scan-audio.dto";
+import { OCR_PIPELINE_JOBS } from "./ocr-pipeline.constants";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const USER = "user-1";
@@ -15,6 +17,14 @@ const COMMANDE: ScanDocumentDto = {
   imageSha256: SHA,
   storageKey: "scans/2026/09/carnet-0042.jpg",
   mimeType: "image/jpeg",
+};
+
+const AUDIO_SHA = "b".repeat(64);
+const COMMANDE_AUDIO: ScanAudioDto = {
+  organizationId: ORG,
+  audioSha256: AUDIO_SHA,
+  storageKey: "audio-notes/2026/09/note-0001.ogg",
+  mimeType: "audio/ogg",
 };
 
 // Sortie de modèle conforme : carnet HT_FIRST, TVA 18 %.
@@ -41,8 +51,19 @@ function document(overrides: Record<string, unknown> = {}) {
     id: DOC_ID,
     organizationId: ORG,
     uploadedByUserId: USER,
+    // IMAGE_SCAN par défaut (@default du schéma) : chaque test qui ne parle
+    // pas explicitement d'AUDIO_PWA/WHATSAPP_* reste sur le chemin photo
+    // historique, emissionChannel: "pwa".
+    source: "IMAGE_SCAN",
     imageSha256: SHA,
     storageKey: COMMANDE.storageKey,
+    audioSha256: null,
+    textBrut: null,
+    whatsappMessageId: null,
+    // Jamais posé hors WHATSAPP_TEXT/WHATSAPP_VOICE (plan 2026-09-16, étape 2)
+    // — chaque test qui ne parle pas explicitement de WhatsApp reste sur le
+    // repli historique (extraction.customer seul).
+    customerPhone: null,
     status: "RECEIVED",
     invoiceId: null,
     reviewFindings: null,
@@ -65,6 +86,10 @@ function fakePrisma(overrides: Record<string, unknown> = {}) {
     ocrDocument: {
       create: vi.fn().mockResolvedValue(document()),
       findFirst: vi.fn().mockResolvedValue(document()),
+      // whatsappMessageId est UNIQUE GLOBAL (pas de scope organisation) — la
+      // relecture idempotente de enregistrerWhatsapp() passe par findUnique,
+      // jamais findFirst (voir ocr-vision.service.ts).
+      findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       // Rend ce qu'on lui a demandé d'écrire, fusionné au document.
       update: vi.fn(async ({ data }: any) => document(data)),
@@ -86,15 +111,23 @@ function fakeProvider(sortie: unknown = SORTIE_CONFORME): OcrVisionProvider & { 
   return { extraire: vi.fn().mockResolvedValue(INFERENCE(sortie)) };
 }
 
+// La file ocr-pipeline (plan 2026-09-16) : jamais un vrai Redis en test
+// unitaire, seulement de quoi vérifier CE qui a été enfilé.
+function fakeQueue() {
+  return { add: vi.fn().mockResolvedValue({ id: "job-1" }) };
+}
+
 describe("OcrVisionService (ADR-122)", () => {
   let prisma: any;
   let provider: ReturnType<typeof fakeProvider>;
+  let queue: ReturnType<typeof fakeQueue>;
   let service: OcrVisionService;
 
   beforeEach(() => {
     prisma = fakePrisma();
     provider = fakeProvider();
-    service = new OcrVisionService(prisma, new OcrValidationService(), provider);
+    queue = fakeQueue();
+    service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never);
   });
 
   // ── Chemin nominal : conforme → brouillon lié ─────────────────────────────
@@ -176,7 +209,7 @@ describe("OcrVisionService (ADR-122)", () => {
 
   it("bascule en DRAFT_PENDING_MANUAL_REVIEW sur un centime d'écart, sans créer de brouillon", async () => {
     provider = fakeProvider(SORTIE_ECART);
-    service = new OcrVisionService(prisma, new OcrValidationService(), provider);
+    service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never);
 
     const resultat = await service.scanner(COMMANDE, ORG, USER);
 
@@ -212,7 +245,7 @@ describe("OcrVisionService (ADR-122)", () => {
 
   it("rejette une sortie de modèle hors contrat, en persistant la raison", async () => {
     provider = fakeProvider({ lines: "n'importe quoi" });
-    service = new OcrVisionService(prisma, new OcrValidationService(), provider);
+    service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never);
 
     const resultat = await service.scanner(COMMANDE, ORG, USER);
 
@@ -332,6 +365,318 @@ describe("OcrVisionService (ADR-122)", () => {
     expect(prisma.ocrDocument.findMany.mock.calls[1][0].where).toEqual({
       organizationId: ORG,
       status: "DRAFT_PENDING_MANUAL_REVIEW",
+    });
+  });
+
+  // ── recevoirAudio() : AUDIO_PWA, asynchrone (plan 2026-09-16) ─────────────
+
+  describe("recevoirAudio()", () => {
+    it("enregistre le document avec source AUDIO_PWA, enfile TRANSCRIBE_AND_EXTRACT, et n'appelle AUCUN provider de façon synchrone", async () => {
+      prisma.ocrDocument.create.mockResolvedValue(
+        document({ source: "AUDIO_PWA", audioSha256: AUDIO_SHA, storageKey: COMMANDE_AUDIO.storageKey, imageSha256: null }),
+      );
+
+      const resultat = await service.recevoirAudio(COMMANDE_AUDIO, ORG, USER);
+
+      expect(prisma.ocrDocument.create).toHaveBeenCalledWith({
+        data: {
+          organizationId: ORG,
+          uploadedByUserId: USER,
+          source: "AUDIO_PWA",
+          audioSha256: AUDIO_SHA,
+          storageKey: COMMANDE_AUDIO.storageKey,
+        },
+      });
+      expect(queue.add).toHaveBeenCalledWith(
+        OCR_PIPELINE_JOBS.TRANSCRIBE_AND_EXTRACT,
+        { documentId: DOC_ID, organizationId: ORG, mimeType: "audio/ogg" },
+        expect.any(Object),
+      );
+      expect(provider.extraire).not.toHaveBeenCalled();
+      expect(resultat.status).toBe("RECEIVED");
+      expect(resultat.documentId).toBe(DOC_ID);
+    });
+
+    it("rejeu du même audioSha256 déjà tranché (non RECEIVED) → idempotent, pas de second enregistrement ni enfilement", async () => {
+      prisma.ocrDocument.create.mockRejectedValue(collisionRls());
+      prisma.ocrDocument.findFirst.mockResolvedValue(
+        document({ source: "AUDIO_PWA", audioSha256: AUDIO_SHA, status: "AUTO_INSERTED", invoiceId: "inv-audio-1" }),
+      );
+
+      const resultat = await service.recevoirAudio(COMMANDE_AUDIO, ORG, USER);
+
+      expect(resultat.status).toBe("AUTO_INSERTED");
+      expect(resultat.invoiceId).toBe("inv-audio-1");
+      expect(queue.add).not.toHaveBeenCalled();
+      expect(prisma.ocrDocument.findFirst).toHaveBeenCalledWith({ where: { organizationId: ORG, audioSha256: AUDIO_SHA } });
+    });
+
+    it("rejeu d'un document audio resté RECEIVED (l'enfilement précédent n'a jamais abouti) → réenfile", async () => {
+      prisma.ocrDocument.create.mockRejectedValue(collisionRls());
+      prisma.ocrDocument.findFirst.mockResolvedValue(
+        document({ source: "AUDIO_PWA", audioSha256: AUDIO_SHA, status: "RECEIVED" }),
+      );
+
+      const resultat = await service.recevoirAudio(COMMANDE_AUDIO, ORG, USER);
+
+      expect(resultat.status).toBe("RECEIVED");
+      expect(queue.add).toHaveBeenCalledTimes(1);
+    });
+
+    it("échec d'enfilement (Redis injoignable) → ServiceUnavailableException synchrone, rejouable", async () => {
+      prisma.ocrDocument.create.mockResolvedValue(
+        document({ source: "AUDIO_PWA", audioSha256: AUDIO_SHA, storageKey: COMMANDE_AUDIO.storageKey }),
+      );
+      queue.add.mockRejectedValue(new Error("ECONNREFUSED"));
+
+      await expect(service.recevoirAudio(COMMANDE_AUDIO, ORG, USER)).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("relaie une collision sans ligne visible plutôt que de la masquer", async () => {
+      prisma.ocrDocument.create.mockRejectedValue(collisionRls());
+      prisma.ocrDocument.findFirst.mockResolvedValue(null);
+
+      await expect(service.recevoirAudio(COMMANDE_AUDIO, ORG, USER)).rejects.toMatchObject({ code: "P2002" });
+    });
+  });
+
+  // ── traiter() : emissionChannel selon la source du document ───────────────
+
+  describe("traiter() — emissionChannelForSource", () => {
+    it("pose emissionChannel: \"pwa\" pour un document IMAGE_SCAN (comportement historique inchangé)", async () => {
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "IMAGE_SCAN" }));
+
+      await service.traiter(DOC_ID, ORG, INFERENCE(SORTIE_CONFORME));
+
+      expect(prisma.invoice.create.mock.calls[0][0].data.emissionChannel).toBe("pwa");
+    });
+
+    it("pose emissionChannel: \"pwa\" pour un document AUDIO_PWA", async () => {
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "AUDIO_PWA" }));
+
+      await service.traiter(DOC_ID, ORG, INFERENCE(SORTIE_CONFORME));
+
+      expect(prisma.invoice.create.mock.calls[0][0].data.emissionChannel).toBe("pwa");
+    });
+
+    it("pose emissionChannel: \"whatsapp\" pour un document WHATSAPP_TEXT ou WHATSAPP_VOICE", async () => {
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "WHATSAPP_TEXT" }));
+      await service.traiter(DOC_ID, ORG, INFERENCE(SORTIE_CONFORME));
+      expect(prisma.invoice.create.mock.calls[0][0].data.emissionChannel).toBe("whatsapp");
+
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "WHATSAPP_VOICE", invoiceId: null }));
+      await service.traiter(DOC_ID, ORG, INFERENCE(SORTIE_CONFORME));
+      expect(prisma.invoice.create.mock.calls[1][0].data.emissionChannel).toBe("whatsapp");
+    });
+  });
+
+  // ── traiter() : résolution client WhatsApp (plan 2026-09-16, étape 2) ─────
+  //
+  // document.customerPhone (le numéro de l'expéditeur WhatsApp, jamais posé
+  // hors WHATSAPP_TEXT/WHATSAPP_VOICE) est un REPLI, jamais une priorité : un
+  // client explicitement dicté par le modèle (nom, NIF) reste la source la
+  // plus fiable de QUI est facturé — le numéro identifie le membre qui a
+  // envoyé le message, pas nécessairement l'acheteur.
+  describe("traiter() — résolution client via le numéro WhatsApp (repli, jamais prioritaire)", () => {
+    function fakeCustomers() {
+      return {
+        resolveByPhone: vi.fn().mockResolvedValue({ id: "cust-whatsapp-1", name: "Client +224620000000", phone: "+224620000000" }),
+      };
+    }
+
+    it("résout le client via resolveByPhone quand l'extraction n'en déclare aucun", async () => {
+      const customers = fakeCustomers();
+      service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never, customers as never);
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "WHATSAPP_TEXT", customerPhone: "+224620000000" }));
+      provider.extraire.mockResolvedValueOnce(INFERENCE({ ...SORTIE_CONFORME, customer: undefined }));
+
+      await service.traiter(DOC_ID, ORG, INFERENCE({ ...SORTIE_CONFORME, customer: undefined }));
+
+      expect(customers.resolveByPhone).toHaveBeenCalledWith(ORG, "+224620000000");
+      expect(prisma.invoice.create.mock.calls[0][0].data.customerId).toBe("cust-whatsapp-1");
+      expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+    });
+
+    it("laisse la priorité au client explicitement déclaré par le modèle — jamais écrasé par le numéro de l'expéditeur", async () => {
+      const customers = fakeCustomers();
+      service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never, customers as never);
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "WHATSAPP_TEXT", customerPhone: "+224620000000" }));
+
+      await service.traiter(DOC_ID, ORG, INFERENCE(SORTIE_CONFORME));
+
+      expect(customers.resolveByPhone).not.toHaveBeenCalled();
+      expect(prisma.customer.findFirst).toHaveBeenCalledWith({
+        where: { organizationId: ORG, nif: "123456789" },
+        select: { id: true },
+      });
+    });
+
+    it("n'appelle jamais resolveByPhone pour IMAGE_SCAN/AUDIO_PWA (customerPhone toujours null)", async () => {
+      const customers = fakeCustomers();
+      service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never, customers as never);
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "IMAGE_SCAN", customerPhone: null }));
+
+      await service.traiter(DOC_ID, ORG, INFERENCE(SORTIE_CONFORME));
+
+      expect(customers.resolveByPhone).not.toHaveBeenCalled();
+    });
+
+    it("reste correct sans CustomersService injecté (dépendance optionnelle) — retombe sur le repli existant", async () => {
+      // `service` du beforeEach global, construit SANS customers.
+      prisma.ocrDocument.findFirst.mockResolvedValue(document({ source: "WHATSAPP_TEXT", customerPhone: "+224620000000" }));
+
+      const resultat = await service.traiter(DOC_ID, ORG, INFERENCE({ ...SORTIE_CONFORME, customer: undefined }));
+
+      expect(resultat.status).toBe("AUTO_INSERTED");
+      expect(prisma.invoice.create.mock.calls[0][0].data.customerId).toBeNull();
+    });
+  });
+
+  // ── recevoirMessageWhatsapp() : WHATSAPP_TEXT/WHATSAPP_VOICE (plan 2026-09-16, étape 2) ──
+
+  describe("recevoirMessageWhatsapp()", () => {
+    const WHATSAPP_MESSAGE_ID = "wamid.HBgLMjI0NjIwMDAwMDAVAgARGBI5QTk0";
+    const PHONE = "+224620000000";
+
+    it("enregistre le document avec source WHATSAPP_TEXT, textBrut posé directement, et enfile EXTRACT_FROM_TEXT", async () => {
+      prisma.ocrDocument.create.mockResolvedValue(
+        document({
+          source: "WHATSAPP_TEXT",
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          textBrut: "Facture pour Amadou, 2 sacs de riz à 500000 GNF",
+          imageSha256: null,
+        }),
+      );
+
+      const resultat = await service.recevoirMessageWhatsapp({
+        organizationId: ORG,
+        uploadedByUserId: USER,
+        whatsappMessageId: WHATSAPP_MESSAGE_ID,
+        customerPhone: PHONE,
+        kind: "text",
+        texte: "Facture pour Amadou, 2 sacs de riz à 500000 GNF",
+      });
+
+      expect(prisma.ocrDocument.create).toHaveBeenCalledWith({
+        data: {
+          organizationId: ORG,
+          uploadedByUserId: USER,
+          source: "WHATSAPP_TEXT",
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          textBrut: "Facture pour Amadou, 2 sacs de riz à 500000 GNF",
+        },
+      });
+      expect(queue.add).toHaveBeenCalledWith(
+        OCR_PIPELINE_JOBS.EXTRACT_FROM_TEXT,
+        { documentId: DOC_ID, organizationId: ORG, mimeType: undefined },
+        expect.any(Object),
+      );
+      expect(provider.extraire).not.toHaveBeenCalled();
+      expect(resultat.status).toBe("RECEIVED");
+      expect(resultat.documentId).toBe(DOC_ID);
+    });
+
+    it("enregistre le document avec source WHATSAPP_VOICE, storageKey posé, et enfile TRANSCRIBE_AND_EXTRACT", async () => {
+      prisma.ocrDocument.create.mockResolvedValue(
+        document({
+          source: "WHATSAPP_VOICE",
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          storageKey: "whatsapp-media/2026/09/audio-0001.ogg",
+          imageSha256: null,
+        }),
+      );
+
+      await service.recevoirMessageWhatsapp({
+        organizationId: ORG,
+        uploadedByUserId: USER,
+        whatsappMessageId: WHATSAPP_MESSAGE_ID,
+        customerPhone: PHONE,
+        kind: "audio",
+        storageKey: "whatsapp-media/2026/09/audio-0001.ogg",
+        mimeType: "audio/ogg",
+      });
+
+      expect(prisma.ocrDocument.create).toHaveBeenCalledWith({
+        data: {
+          organizationId: ORG,
+          uploadedByUserId: USER,
+          source: "WHATSAPP_VOICE",
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          storageKey: "whatsapp-media/2026/09/audio-0001.ogg",
+        },
+      });
+      expect(queue.add).toHaveBeenCalledWith(
+        OCR_PIPELINE_JOBS.TRANSCRIBE_AND_EXTRACT,
+        { documentId: DOC_ID, organizationId: ORG, mimeType: "audio/ogg" },
+        expect.any(Object),
+      );
+    });
+
+    it("idempotent sur whatsappMessageId : un rejeu rend le MÊME document, sans second enfilement", async () => {
+      prisma.ocrDocument.create.mockRejectedValue(collisionRls());
+      prisma.ocrDocument.findUnique.mockResolvedValue(
+        document({
+          source: "WHATSAPP_TEXT",
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          status: "AUTO_INSERTED",
+          invoiceId: "inv-whatsapp-1",
+        }),
+      );
+
+      const resultat = await service.recevoirMessageWhatsapp({
+        organizationId: ORG,
+        uploadedByUserId: USER,
+        whatsappMessageId: WHATSAPP_MESSAGE_ID,
+        customerPhone: PHONE,
+        kind: "text",
+        texte: "Facture pour Amadou, 2 sacs de riz à 500000 GNF",
+      });
+
+      expect(resultat.status).toBe("AUTO_INSERTED");
+      expect(resultat.invoiceId).toBe("inv-whatsapp-1");
+      expect(queue.add).not.toHaveBeenCalled();
+      // Relecture GLOBALE (jamais scopée organisation) : whatsapp_message_id
+      // est l'espace d'identifiants de Meta, unique hors de toute organisation.
+      expect(prisma.ocrDocument.findUnique).toHaveBeenCalledWith({ where: { whatsappMessageId: WHATSAPP_MESSAGE_ID } });
+    });
+
+    it("échec d'enfilement (Redis injoignable) → ServiceUnavailableException synchrone", async () => {
+      prisma.ocrDocument.create.mockResolvedValue(
+        document({ source: "WHATSAPP_TEXT", whatsappMessageId: WHATSAPP_MESSAGE_ID, customerPhone: PHONE }),
+      );
+      queue.add.mockRejectedValue(new Error("ECONNREFUSED"));
+
+      await expect(
+        service.recevoirMessageWhatsapp({
+          organizationId: ORG,
+          uploadedByUserId: USER,
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          kind: "text",
+          texte: "Facture pour Amadou, 2 sacs de riz à 500000 GNF",
+        }),
+      ).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("relaie une collision sans ligne visible plutôt que de la masquer", async () => {
+      prisma.ocrDocument.create.mockRejectedValue(collisionRls());
+      prisma.ocrDocument.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.recevoirMessageWhatsapp({
+          organizationId: ORG,
+          uploadedByUserId: USER,
+          whatsappMessageId: WHATSAPP_MESSAGE_ID,
+          customerPhone: PHONE,
+          kind: "text",
+          texte: "Facture pour Amadou, 2 sacs de riz à 500000 GNF",
+        }),
+      ).rejects.toMatchObject({ code: "P2002" });
     });
   });
 });

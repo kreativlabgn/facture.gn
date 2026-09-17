@@ -75,6 +75,29 @@ describe("OrganizationsController — POST /organizations/:id/commercial-tier (H
   });
 });
 
+describe("OrganizationsController — POST /organizations/:id/whatsapp-ocr-channel (plan 2026-09-16, OCR multicanal, clarification 7)", () => {
+  it("restreint la route à owner/admin, résolue via idSource \"organization\"", () => {
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, OrganizationsController.prototype.setWhatsappOcrChannel)).toEqual([
+      "owner",
+      "admin",
+    ]);
+    expect(
+      reflector.get(ORGANIZATION_ID_SOURCE_KEY, OrganizationsController.prototype.setWhatsappOcrChannel),
+    ).toBe("organization");
+  });
+
+  it("délègue au service avec l'id d'organisation du paramètre d'URL et le booléen demandé", async () => {
+    const service = { setWhatsappOcrEnabled: vi.fn().mockResolvedValue({ id: "org-1", whatsappOcrEnabled: true }) };
+    const controller = new OrganizationsController(service as any, { inviteToOrganization: vi.fn(), listPendingForOrganization: vi.fn(), revokeForOrganization: vi.fn() } as any);
+
+    const result = await controller.setWhatsappOcrChannel("org-1", { enabled: true });
+
+    expect(service.setWhatsappOcrEnabled).toHaveBeenCalledWith("org-1", true);
+    expect(result.whatsappOcrEnabled).toBe(true);
+  });
+});
+
 describe("OrganizationsController — POST /organizations/:id/signing-key/revoke (A4, ADR-025)", () => {
   it("restreint la route à owner/admin", () => {
     const reflector = new Reflector();

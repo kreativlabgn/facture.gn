@@ -156,6 +156,12 @@ export interface OrganizationDetail {
   rccm: string | null;
   commercialTier: string;
   dgiVerificationStatus: string;
+  // Plan 2026-09-16 (OCR multicanal vocal/WhatsApp), clarification 7 — déjà
+  // exposé tel quel par GET /organizations/:id (OrganizationsService.findOneDetail()
+  // ne pose aucun `select`, la ligne Organization entière est sérialisée) :
+  // seul le typage manquait ici, même situation que disputeStatus sur
+  // InvoiceListItem ci-dessous.
+  whatsappOcrEnabled: boolean;
 }
 
 // Première route @Patch du service (voir update-organization.dto.ts).
@@ -189,6 +195,32 @@ export async function updateOrganization(
         : body?.fieldErrors
           ? Object.values(body.fieldErrors).flat().map(String).join(" · ")
           : body?.formErrors?.join(", ");
+    throw new TrustApiError(message || "Modification impossible", response.status);
+  }
+  return response.json();
+}
+
+// POST /organizations/:id/whatsapp-ocr-channel — transition NOMMÉE (plan
+// 2026-09-16, clarification 7), pas un PATCH : même patron que
+// upgradeCommercialTier côté trust-api (organizations.controller.ts), jamais
+// noyée dans updateOrganization ci-dessus, qui ne porte que l'identité légale.
+export async function setWhatsappOcrChannel(
+  token: string,
+  organizationId: string,
+  enabled: boolean,
+): Promise<OrganizationDetail> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/whatsapp-ocr-channel`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message.join(", ") : body?.message;
     throw new TrustApiError(message || "Modification impossible", response.status);
   }
   return response.json();

@@ -9,8 +9,8 @@ describe("listInvoicesQuerySchema (Lot D)", () => {
     expect(parsed.emissionChannel).toBeUndefined();
   });
 
-  it("accepte les 4 canaux valides", () => {
-    for (const channel of ["pwa", "ussd", "agent_terrain", "api"] as const) {
+  it("accepte les 5 canaux valides — whatsapp ajouté par le plan 2026-09-16 (OCR multicanal)", () => {
+    for (const channel of ["pwa", "ussd", "agent_terrain", "api", "whatsapp"] as const) {
       expect(listInvoicesQuerySchema.parse({ organizationId: ORG_ID, emissionChannel: channel }).emissionChannel).toBe(
         channel,
       );

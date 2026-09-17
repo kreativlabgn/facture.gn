@@ -1,7 +1,8 @@
 # Infra + apps pour le développement / la CI locale.
 #
-#   docker compose up -d              # Postgres + Redis seuls (on lance les apps via `pnpm dev`)
-#   docker compose --profile full up  # + trust-api + money-api + web (images buildées)
+#   docker compose up -d              # Postgres + Redis + MinIO seuls (on lance les apps via `pnpm dev`)
+#   docker compose --profile full up  # + trust-api + money-api + web (images buildées) + provisionnement
+#                                      # du bucket MinIO (job `minio-mc-init`, s'exécute une fois et sort)
 #
 # Le profil `full` lit les secrets depuis apps/<svc>/.env (à créer depuis
 # .env.example). Mots de passe d'infra triviaux : dev uniquement — les secrets
@@ -36,6 +37,77 @@ services:
       timeout: 5s
       retries: 5
 
+  # Stockage objet — plan 2026-09-16 (OCR multicanal), relais média WhatsApp.
+  # Décision fondateur : MinIO auto-hébergé, conforme DAT/ADR-013 (WORM +
+  # object lock 10 ans à la cible PRODUCTION — hors périmètre ici, ceci est
+  # l'instance de DÉVELOPPEMENT, sans object lock). Identifiants triviaux :
+  # dev uniquement, même posture que POSTGRES_PASSWORD ci-dessus.
+  #
+  # Image : quay.io/minio/minio, PAS docker.io/minio/minio. Vérifié par essai
+  # direct (`docker pull`) au moment d'écrire ce fichier : docker.io/minio/minio
+  # ET docker.io/minio/mc renvoient tous deux "pull access denied... may
+  # require 'docker login'" — MinIO a restreint l'accès anonyme à ses images
+  # Docker Hub (règle commerciale AGPL, pas une panne réseau locale : un pull
+  # docker.io/alpine de contrôle a réussi au même moment). quay.io/minio/minio
+  # et quay.io/minio/mc restent librement accessibles et sont les images
+  # miroirs officielles recommandées par MinIO pour cet usage.
+  #
+  # Healthcheck : l'image quay.io/minio/minio ne contient NI curl, NI wget, NI
+  # grep (vérifié par inspection du système de fichiers de l'image) — un
+  # `curl -f http://localhost:9000/minio/health/live` recopié depuis la doc
+  # MinIO générique échouerait silencieusement (CMD introuvable = échec
+  # immédiat classé "unhealthy", jamais un warning explicite). L'image
+  # contient en revanche bash (qui EST /bin/sh dans cette image), avec le
+  # support intégré /dev/tcp — le test ci-dessous ouvre une connexion TCP vers
+  # /minio/health/live, envoie une requête HTTP/1.1 minimale et vérifie
+  # "200" sur la ligne de statut, sans dépendre d'un binaire externe. Testé
+  # manuellement (docker compose up + polling `docker inspect .State.Health`)
+  # avant d'être posé ici : passe à "healthy" en ~6-9 s après le démarrage.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-01-16T16-07-38Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000" # API S3
+      - "9001:9001" # Console web
+    volumes:
+      - facture_gn_miniodata:/data
+    healthcheck:
+      test: >
+        exec 3<>/dev/tcp/127.0.0.1/9000 &&
+        printf 'GET /minio/health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+        read -r status <&3 &&
+        [[ $$status == *' 200 '* ]]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Provisionnement du bucket au démarrage. Hypothèse documentée (pas vérifiable
+  # au moment d'écrire ceci) : `whatsapp-media-relay.service.ts`
+  # (backend-developer, en parallèle) n'existe pas encore dans l'arbre de travail
+  # — aucune création de bucket idempotente côté code à constater ni à éviter de
+  # dupliquer. `mc mb --ignore-existing` est lui-même idempotent (testé : un
+  # second passage sur un bucket déjà présent réussit toujours, code 0) — même
+  # si le code applicatif finit par gérer aussi la création du bucket (ex.
+  # `CreateBucketCommand` avec capture d'un "BucketAlreadyOwnedByYou"), cette
+  # étape reste sans effet de bord à garder en filet de sécurité pour le profil
+  # `full` (image buildée, pas `pnpm dev`). À retirer si backend-developer
+  # confirme que son code la rend redondante.
+  minio-mc-init:
+    profiles: ["full"]
+    image: quay.io/minio/mc:RELEASE.2024-01-13T08-44-48Z
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - >
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/ocr-media
+
   trust-api:
     profiles: ["full"]
     build:
@@ -54,11 +126,21 @@ services:
       RETENTION_ENABLED: "false"
       # Lot E1 — registre Merkle en opt-in ("true" pour armer).
       MERKLE_ANCHOR_ENABLED: "false"
+      # Plan 2026-09-16 (OCR multicanal) — stockage objet MinIO, service
+      # `minio` ci-dessus. Identifiants = MINIO_ROOT_USER/MINIO_ROOT_PASSWORD
+      # du service `minio` (dev uniquement). Voir
+      # docs/runbooks/whatsapp-ocr-channel.md §4.
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_BUCKET: ocr-media
       PORT: 3000
     ports: ["3000:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      minio-mc-init: { condition: service_completed_successfully }
 
   money-api:
     profiles: ["full"]
@@ -93,3 +175,4 @@ services:
 volumes:
   facture_gn_pgdata:
   facture_gn_redisdata:
+  facture_gn_miniodata:

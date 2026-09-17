@@ -2,7 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import { PaymentLinkNotificationService } from "./payment-link-notification.service";
 import { PaymentReminderService } from "./payment-reminder.service";
 import { SmsStubProvider } from "./sms-stub.provider";
-import { WhatsAppStubProvider } from "./whatsapp-stub.provider";
+import { whatsappProviderFromEnv } from "./sovereign-whatsapp-send.provider";
 import { SMS_PROVIDER, WHATSAPP_PROVIDER } from "./notifications.tokens";
 
 // @Global() — même précédent que CertificationModule/MoneyClientModule :
@@ -21,7 +21,13 @@ import { SMS_PROVIDER, WHATSAPP_PROVIDER } from "./notifications.tokens";
     PaymentLinkNotificationService,
     PaymentReminderService,
     { provide: SMS_PROVIDER, useClass: SmsStubProvider },
-    { provide: WHATSAPP_PROVIDER, useClass: WhatsAppStubProvider },
+    // Plan 2026-09-16 (OCR multicanal), clarification 8 — useFactory plutôt
+    // qu'un useClass figé sur le stub : WHATSAPP_ACCESS_TOKEN/
+    // WHATSAPP_PHONE_NUMBER_ID présents → connecteur Graph API réel
+    // (SovereignWhatsAppSendProvider), absents → WhatsAppStubProvider
+    // INCHANGÉ (dev/test). Même discipline exacte que ocrVisionProviderFromEnv()/
+    // sttProviderFromEnv() (ai/).
+    { provide: WHATSAPP_PROVIDER, useFactory: whatsappProviderFromEnv },
   ],
   exports: [PaymentLinkNotificationService, PaymentReminderService, SMS_PROVIDER, WHATSAPP_PROVIDER],
 })

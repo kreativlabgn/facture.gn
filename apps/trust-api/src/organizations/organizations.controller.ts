@@ -27,6 +27,10 @@ import {
   upgradeCommercialTierSchema,
   type UpgradeCommercialTierDto,
 } from "./dto/upgrade-commercial-tier.dto";
+import {
+  setWhatsappOcrChannelSchema,
+  type SetWhatsappOcrChannelDto,
+} from "./dto/set-whatsapp-ocr-channel.dto";
 import { OrganizationsService } from "./organizations.service";
 
 @ApiTags("organizations")
@@ -217,6 +221,23 @@ export class OrganizationsController {
     @Body(new ZodValidationPipe(upgradeCommercialTierSchema)) dto: UpgradeCommercialTierDto,
   ) {
     return this.organizationsService.upgradeCommercialTier(organizationId, dto.tier);
+  }
+
+  // Plan 2026-09-16 (OCR multicanal), clarification 7 — transition NOMMÉE,
+  // même patron que /commercial-tier ci-dessus : jamais un champ noyé dans
+  // PATCH /organizations/:id (identité légale). owner/admin seulement : c'est
+  // la même autorité que celle qui active un canal de saisie *620#/agent
+  // terrain ailleurs dans ce dépôt — jamais un caissier ou un comptable
+  // interne, qui n'ont pas à décider d'ouvrir une nouvelle surface publique
+  // pour leur organisation.
+  @Post(":id/whatsapp-ocr-channel")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("organization")
+  setWhatsappOcrChannel(
+    @Param("id") organizationId: string,
+    @Body(new ZodValidationPipe(setWhatsappOcrChannelSchema)) dto: SetWhatsappOcrChannelDto,
+  ) {
+    return this.organizationsService.setWhatsappOcrEnabled(organizationId, dto.enabled);
   }
 
   // A4, ADR-025 — self-service owner/admin, jamais un workflow d'approbation

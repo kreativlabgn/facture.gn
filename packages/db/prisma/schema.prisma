@@ -29,7 +29,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // url       : connexion runtime. En prod (ADR-120) = pooler Supabase en mode
   //             transaction (port 6543, ?pgbouncer=true → Prisma désactive les
   //             prepared statements). En local / CI = Postgres nu.
@@ -210,6 +210,11 @@ enum EmissionChannel {
   ussd
   agent_terrain
   api
+  // Plan 2026-09-16 (OCR multicanal) — posée par emissionChannelForSource()
+  // pour WHATSAPP_VOICE/WHATSAPP_TEXT uniquement. Non couplée à
+  // Payment.collectionChannel : ce lot ne construit aucune collecte de
+  // paiement par WhatsApp, même précédent que `api` ci-dessus.
+  whatsapp
 }
 
 // Une seule valeur aujourd'hui (C5) — enum plutôt que String brute pour rester
@@ -470,9 +475,9 @@ model ApiKey {
   revokedByUserId String?           @map("revoked_by_user_id")
   lastUsedAt      DateTime?         @map("last_used_at")
 
-  organization  Organization @relation(fields: [organizationId], references: [id])
-  createdByUser User         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id])
-  revokedByUser User?        @relation("ApiKeyRevoker", fields: [revokedByUserId], references: [id])
+  organization       Organization        @relation(fields: [organizationId], references: [id])
+  createdByUser      User                @relation("ApiKeyCreator", fields: [createdByUserId], references: [id])
+  revokedByUser      User?               @relation("ApiKeyRevoker", fields: [revokedByUserId], references: [id])
   // ADR-107 — les dépôts PDP faits AVEC cette clé. Même intention que
   // createdByUserId juste au-dessus : sur une organisation branchée à plusieurs
   // connecteurs (ERP comptable + caisse), savoir LEQUEL a déposé quoi est la
@@ -641,6 +646,10 @@ model Organization {
   preferredLanguage            PreferredLanguage     @default(fr) @map("preferred_language")
   chiffreAffairesBrutDeclare   BigInt                @default(0) @map("chiffre_affaires_brut_declare")
   paymentLinkAutoSend          Boolean               @default(true) @map("payment_link_auto_send")
+  // Opt-in explicite (plan 2026-09-16, OCR multicanal) — défaut OFF : sans
+  // bascule consciente owner/admin, aucun message WhatsApp entrant n'est
+  // traité pour cette organisation, même si l'expéditeur est un membre vérifié.
+  whatsappOcrEnabled           Boolean               @default(false) @map("whatsapp_ocr_enabled")
   commercialTier               CommercialTier        @default(freemium) @map("commercial_tier")
   createdAt                    DateTime              @default(now()) @map("created_at")
   // Nullable : seules les organisations inscrites via le Chemin B (assisté, B5)
@@ -661,12 +670,12 @@ model Organization {
   creditLimitApprovalThreshold BigInt?               @map("credit_limit_approval_threshold")
 
   // G3, ADR-091 — état d'escalade courant, jamais recalculé rétroactivement.
-  commissionBypassLevel CommissionBypassLevel @default(none) @map("commission_bypass_level")
+  commissionBypassLevel                     CommissionBypassLevel @default(none) @map("commission_bypass_level")
   // G3, ADR-091 — Niveau 2 : seuil de preuve photo/GPS/signature abaissé pour
   // CETTE organisation uniquement. Nullable : null = pas d'override, retombe
   // sur CASH_PROOF_THRESHOLD_GNF_CENTIMES (même précédent que
   // creditLimitApprovalThreshold ci-dessus, pas de CONFIG_PARAMETER générique).
-  commissionBypassProofThresholdOverrideGnf BigInt? @map("commission_bypass_proof_threshold_override_gnf")
+  commissionBypassProofThresholdOverrideGnf BigInt?               @map("commission_bypass_proof_threshold_override_gnf")
 
   invoices              Invoice[]
   sequences             InvoiceSequence[]
@@ -742,19 +751,19 @@ model OrganizationSigningKey {
 // (resolvedAt, revokedAt...). Nommage aligné ADR-107 : sans rapport avec
 // OrganizationRole.field_agent (personnel de la PME).
 model AssistedSession {
-  id                String   @id @default(uuid())
-  commercialAgentUserId String   @map("commercial_agent_user_id")
-  organizationId    String   @map("organization_id")
-  consentRecordedAt DateTime @map("consent_recorded_at")
+  id                    String    @id @default(uuid())
+  commercialAgentUserId String    @map("commercial_agent_user_id")
+  organizationId        String    @map("organization_id")
+  consentRecordedAt     DateTime  @map("consent_recorded_at")
   // Security Audit 2026-08-23, finding #8 — jusqu'ici aucun champ d'expiration ni
   // de révocation : un agent conservait indéfiniment la capacité d'émettre de
   // vraies factures certifiées au nom de l'organisation, même après la fin de sa
   // mission. TTL de 90 jours arbitraire (aucune spec ADR/Backlog ne fixe de durée),
   // ajustable en un point unique (voir ASSISTED_SESSION_TTL_MS). revokedAt permet
   // en plus une révocation manuelle immédiate par un owner/admin de l'organisation.
-  expiresAt DateTime? @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt             DateTime? @map("expires_at")
+  revokedAt             DateTime? @map("revoked_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
 
   commercialAgent User         @relation(fields: [commercialAgentUserId], references: [id])
   organization    Organization @relation(fields: [organizationId], references: [id])
@@ -911,25 +920,25 @@ model Device {
 // lisible sans conversion. Le pack commercial (100 SMS pour 30 000 GNF) reste
 // une façon de VENDRE, pas une unité de compte.
 model CreditTransaction {
-  id             String                @id @default(uuid())
-  organizationId String                @map("organization_id")
-  type           CreditTransactionType
+  id                   String                @id @default(uuid())
+  organizationId       String                @map("organization_id")
+  type                 CreditTransactionType
   // Signé : positif pour un achat ou un remboursement, négatif pour une
   // consommation. La somme de la colonne EST le solde — aucune règle de signe
   // à réappliquer à la lecture, aucune erreur d'interprétation possible.
-  amountCentimes BigInt                @map("amount_centimes")
+  amountCentimes       BigInt                @map("amount_centimes")
   // Solde APRÈS ce mouvement, figé. Rend chaque ligne du relevé lisible seule,
   // et permet de détecter une dérive du solde dénormalisé sans rejouer tout
   // l'historique.
-  balanceAfterCentimes BigInt           @map("balance_after_centimes")
+  balanceAfterCentimes BigInt                @map("balance_after_centimes")
   // Ce qui a été consommé ou vendu, en clair : « Relance SMS facture FG-… »,
   // « Pack 100 SMS ». Jamais un code technique — c'est un relevé de compte.
-  label          String
+  label                String
   // Rattachement facultatif à la facture qui a déclenché la consommation.
-  invoiceId      String?               @map("invoice_id")
+  invoiceId            String?               @map("invoice_id")
   // Qui a fait le mouvement. Null pour une consommation automatique.
-  actorId        String?               @map("actor_id")
-  createdAt      DateTime              @default(now()) @map("created_at")
+  actorId              String?               @map("actor_id")
+  createdAt            DateTime              @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [organizationId], references: [id])
   invoice      Invoice?     @relation(fields: [invoiceId], references: [id])
@@ -1034,10 +1043,10 @@ enum ProductType {
 // informatif pour une résolution manuelle éventuelle (aucun ProductsService.merge()
 // n'existe : le Backlog ne demande la fusion QUE pour les clients, E4).
 model Product {
-  id             String  @id @default(uuid())
-  organizationId String  @map("organization_id")
-  name           String
-  description    String?
+  id                   String      @id @default(uuid())
+  organizationId       String      @map("organization_id")
+  name                 String
+  description          String?
   // Catalogue produit/service (2026-09-16) — enum PRISMA, PAS un type
   // TypeScript local : contrairement au type de mouvement de ProductStock
   // (jamais persisté), celui-ci EST une colonne (product.type), donc doit
@@ -1054,7 +1063,7 @@ model Product {
   // ProductStock existent) parce que c'est strictement plus simple, ne
   // demande aucun test de garde séparé, et couvre aussi bien le cas "jamais
   // eu de stock" que "en a eu puis plus" sans distinction à maintenir.
-  type ProductType
+  type                 ProductType
   // Prix de vente, centimes GNF — même convention que costPrice ci-dessous et
   // InvoiceLine.unitPrice (jamais une unité flottante). Nullable : une partie
   // des services PME sont "sur devis" (prix variable, connu seulement à
@@ -1063,15 +1072,15 @@ model Product {
   // toute confusion avec le territoire E6/ADR-084 (coût d'achat, jamais
   // montré à un client) : les deux champs cohabitent sur la même ligne sans
   // jamais se confondre au moment de la lecture du schéma.
-  salePrice BigInt? @map("sale_price")
+  salePrice            BigInt?     @map("sale_price")
   // Retrait du catalogue affiché sans suppression définitive — Product est
   // référencé par InvoiceLine (FK historique, onDelete: SetNull) : un produit
   // discontinué reste attaché à l'historique de facturation déjà émis,
   // "éditer" doit donc pouvoir le retirer de la liste active sans le détruire.
-  isActive             Boolean @default(true) @map("is_active")
-  taxExemptionCategory String? @map("tax_exemption_category")
-  costPrice            BigInt? @map("cost_price")
-  possibleDuplicateOf  String? @map("possible_duplicate_of")
+  isActive             Boolean     @default(true) @map("is_active")
+  taxExemptionCategory String?     @map("tax_exemption_category")
+  costPrice            BigInt?     @map("cost_price")
+  possibleDuplicateOf  String?     @map("possible_duplicate_of")
 
   organization  Organization   @relation(fields: [organizationId], references: [id])
   stocks        ProductStock[]
@@ -1146,8 +1155,8 @@ model Customer {
   // F16, ADR-105 — sans ce marquage, le portail Niveau 2 (J1/J2) n'a
   // structurellement aucune facture à présenter à un DAF. Réservé admin/owner
   // (CustomersService.flagPublicEntity()), même trio restreint que merge() (E4).
-  isPublicEntity       Boolean @default(false) @map("is_public_entity")
-  publicBuyerAccountId String? @map("public_buyer_account_id")
+  isPublicEntity          Boolean @default(false) @map("is_public_entity")
+  publicBuyerAccountId    String? @map("public_buyer_account_id")
   // Security Audit 2026-08-23, finding #13 — flagPublicEntity() posait jusqu'ici
   // isPublicEntity/publicBuyerAccountId sur la seule initiative de la PME, sans
   // aucun accord du compte acheteur public ciblé (qui peut être un compte réel et
@@ -1208,8 +1217,8 @@ enum PublicBuyerAccountVerificationStatus {
 model PublicBuyerAccount {
   id                 String                               @id @default(uuid())
   name               String
-  verificationStatus PublicBuyerAccountVerificationStatus  @default(pending) @map("verification_status")
-  createdAt          DateTime                              @default(now()) @map("created_at")
+  verificationStatus PublicBuyerAccountVerificationStatus @default(pending) @map("verification_status")
+  createdAt          DateTime                             @default(now()) @map("created_at")
 
   members   PublicBuyerAccountMember[]
   customers Customer[]
@@ -1349,9 +1358,9 @@ model Invoice {
   financedAt          DateTime?         @map("financed_at")
   financedByPartner   FinancialPartner? @relation(fields: [financedByPartnerId], references: [id])
 
-  hash         String?
-  previousHash String? @map("previous_hash")
-  signature    Bytes?
+  hash          String?
+  previousHash  String?            @map("previous_hash")
+  signature     Bytes?
   // E1 (ADR-115) — tranche Merkle à laquelle le hash de cette facture est
   // rattaché. Assignée UNE seule fois par MerkleAnchorSealService ; un trigger
   // (invoice_anchor_batch_id_write_once) rejette toute ré-assignation d'une
@@ -1365,7 +1374,7 @@ model Invoice {
   // différemment). Non-null = signée avec la clé racine propre à l'organisation
   // référencée. Ne JAMAIS migrer une facture existante vers l'autre valeur —
   // un système de confiance ne peut jamais invalider une certification déjà émise.
-  signingKeyId String? @map("signing_key_id")
+  signingKeyId  String?            @map("signing_key_id")
 
   issuedAt  DateTime? @map("issued_at")
   createdAt DateTime  @default(now()) @map("created_at")
@@ -1381,34 +1390,34 @@ model Invoice {
   etaxReceiptNumber String?                 @map("etax_receipt_number")
   etaxTransmittedAt DateTime?               @map("etax_transmitted_at")
 
-  organization  Organization            @relation(fields: [organizationId], references: [id])
-  branch        Branch?                 @relation(fields: [branchId], references: [id])
-  customer      Customer?               @relation(fields: [customerId], references: [id])
-  signingKey    OrganizationSigningKey? @relation(fields: [signingKeyId], references: [id])
-  convertedFrom Invoice?                @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
-  convertedInto Invoice[]               @relation("InvoiceConversion")
-  lines         InvoiceLine[]
-  events        InvoiceEvent[]
-  payments      Payment[]
-  creditNotes   CreditNote[]
-  refunds       Refund[]
-  bankTransactionsMatched BankTransaction[]
-  creditTransactions      CreditTransaction[]
+  organization                Organization            @relation(fields: [organizationId], references: [id])
+  branch                      Branch?                 @relation(fields: [branchId], references: [id])
+  customer                    Customer?               @relation(fields: [customerId], references: [id])
+  signingKey                  OrganizationSigningKey? @relation(fields: [signingKeyId], references: [id])
+  convertedFrom               Invoice?                @relation("InvoiceConversion", fields: [convertedToInvoiceId], references: [id])
+  convertedInto               Invoice[]               @relation("InvoiceConversion")
+  lines                       InvoiceLine[]
+  events                      InvoiceEvent[]
+  payments                    Payment[]
+  creditNotes                 CreditNote[]
+  refunds                     Refund[]
+  bankTransactionsMatched     BankTransaction[]
+  creditTransactions          CreditTransaction[]
   // Le document ERP UNIQUE dont cette facture répond (flux e-invoicing B2B/B2G).
   // Relation nommée depuis ADR-107 tranche 3 : PdpRawTransaction pointe désormais
   // DEUX fois vers Invoice (ce lien-ci, et le rattachement au Z de caisse
   // ci-dessous), Prisma exige donc de les distinguer explicitement. Le nom ne
   // change AUCUN nom de contrainte SQL — la FK reste
   // pdp_raw_transaction_invoice_id_fkey.
-  pdpRawTransaction       PdpRawTransaction?  @relation("PdpDocumentInvoice")
+  pdpRawTransaction           PdpRawTransaction?      @relation("PdpDocumentInvoice")
   // Les micro-ventes de caisse (flux e-reporting B2C) que CETTE facture de
   // synthèse consolide. N→1, jamais 1→1 : un Z de caisse compile par construction
   // des dizaines à des milliers de tickets. C'est la piste d'audit DESCENDANTE —
   // d'un Z certifié vers les tickets bruts qui le composent.
-  pdpConsolidatedTransactions PdpRawTransaction[] @relation("PdpConsolidatedInvoice")
+  pdpConsolidatedTransactions PdpRawTransaction[]     @relation("PdpConsolidatedInvoice")
   // ADR-122 — le document papier scanné dont CE brouillon est issu. 1→1 comme
   // pdpRawTransaction : une facture ne répond que d'un seul scan.
-  ocrDocument OcrDocument? @relation("OcrDocumentInvoice")
+  ocrDocument                 OcrDocument?            @relation("OcrDocumentInvoice")
 
   @@unique([organizationId, number])
   // Même forme que @@unique([organizationId, number]) juste au-dessus, et pour la
@@ -1446,28 +1455,28 @@ model Invoice {
 // (proof/ref ensemble) ET (proof ⟹ anchored). Table CROSS-ORGANISATION → hors
 // RLS (comme payment_webhook).
 model MerkleAnchorBatch {
-  id           String             @id @default(uuid())
+  id             String             @id @default(uuid())
   // Borne haute EXCLUSIVE réelle de la tranche : toute facture issuedAt < asOf
   // non encore rattachée y est incluse. Une tranche peut couvrir plusieurs
   // heures (retardataires, downtime). asOf @unique — un scellement par borne.
-  asOf         DateTime           @unique @map("as_of")
+  asOf           DateTime           @unique @map("as_of")
   // Min(issuedAt) des factures de la tranche : la période réellement engagée.
-  coverageFrom DateTime           @map("coverage_from")
-  merkleRoot   String             @map("merkle_root")
+  coverageFrom   DateTime           @map("coverage_from")
+  merkleRoot     String             @map("merkle_root")
   // Chaînage. previousRoot @unique : la chaîne ne peut pas FORKER (deux tranches
   // partageant un prédécesseur) même si deux runs de scellement concurrents
   // d'asOf différents lisent la même dernière tranche — le second insert échoue
   // (P2002), ses factures repartent au run suivant. "GENESIS" pour la 1re.
-  previousRoot String             @unique @map("previous_root")
-  leafCount    Int                @map("leaf_count")
-  anchorStatus MerkleAnchorStatus @default(pending) @map("anchor_status")
-  anchorProof  String?            @map("anchor_proof")
-  anchorRef    String?            @map("anchor_ref")
-  anchoredAt   DateTime?          @map("anchored_at")
+  previousRoot   String             @unique @map("previous_root")
+  leafCount      Int                @map("leaf_count")
+  anchorStatus   MerkleAnchorStatus @default(pending) @map("anchor_status")
+  anchorProof    String?            @map("anchor_proof")
+  anchorRef      String?            @map("anchor_ref")
+  anchoredAt     DateTime?          @map("anchored_at")
   // Nombre d'appels au seam pour cette tranche (par le flush). Alerter sur
   // pending + attempts élevé plutôt qu'un seuil temporel flou.
-  anchorAttempts Int              @default(0) @map("anchor_attempts")
-  createdAt    DateTime           @default(now()) @map("created_at")
+  anchorAttempts Int                @default(0) @map("anchor_attempts")
+  createdAt      DateTime           @default(now()) @map("created_at")
 
   invoices Invoice[]
 
@@ -1578,12 +1587,12 @@ model Payment {
 // par l'opérateur au moment de l'ouverture (journal d'audit G4), jamais
 // recalculé après coup.
 model CommissionBypassCase {
-  id               String                     @id @default(uuid())
-  organizationId   String                     @map("organization_id")
-  status           CommissionBypassCaseStatus @default(pending)
-  detectedPatterns Json                       @map("detected_patterns")
-  createdAt        DateTime                   @default(now()) @map("created_at")
-  resolvedAt       DateTime?                  @map("resolved_at")
+  id                   String                     @id @default(uuid())
+  organizationId       String                     @map("organization_id")
+  status               CommissionBypassCaseStatus @default(pending)
+  detectedPatterns     Json                       @map("detected_patterns")
+  createdAt            DateTime                   @default(now()) @map("created_at")
+  resolvedAt           DateTime?                  @map("resolved_at")
   // Revue dev-domain-model-reviewer : resolveCase() est une décision humaine
   // discrétionnaire (dismiss/restrict) sur un dossier de fraude potentielle —
   // même nature que CreditLimitChangeRequest.resolvedByUserId (E5), jamais
@@ -1592,7 +1601,7 @@ model CommissionBypassCase {
   // fournie par l'outil interne appelant, jamais validée contre une table —
   // traçabilité "qui" en plus du "pourquoi" (detectedPatterns), sans les
   // garanties d'intégrité référentielle qu'une vraie FK offrirait.
-  resolvedByOperatorId String? @map("resolved_by_operator_id")
+  resolvedByOperatorId String?                    @map("resolved_by_operator_id")
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
@@ -1706,20 +1715,20 @@ enum RefundStatus {
 // recordCashPayment()/recordBankTransferPayment(), C1/C3) : "completed" dès la
 // création, jamais "pending".
 model Refund {
-  id           String       @id @default(uuid())
-  creditNoteId String       @map("credit_note_id")
-  invoiceId    String       @map("invoice_id")
-  amount       BigInt // centimes GNF
-  method       RefundMethod
-  providerRef  String?      @map("provider_ref")
-  status       RefundStatus @default(pending)
+  id             String       @id @default(uuid())
+  creditNoteId   String       @map("credit_note_id")
+  invoiceId      String       @map("invoice_id")
+  amount         BigInt // centimes GNF
+  method         RefundMethod
+  providerRef    String?      @map("provider_ref")
+  status         RefundStatus @default(pending)
   // Security Audit 2026-08-23, finding #2 — même pattern que Payment.idempotencyKey :
   // sans contrainte unique, deux requêtes concurrentes (double clic, retry réseau)
   // passaient toutes deux la garde anti-sur-remboursement avant qu'aucune n'ait
   // committé, produisant un sur-remboursement réel.
-  idempotencyKey String @unique @map("idempotency_key")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  completedAt  DateTime?    @map("completed_at")
+  idempotencyKey String       @unique @map("idempotency_key")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  completedAt    DateTime?    @map("completed_at")
 
   creditNote CreditNote @relation(fields: [creditNoteId], references: [id])
   invoice    Invoice    @relation(fields: [invoiceId], references: [id])
@@ -2070,21 +2079,21 @@ model UssdSession {
 // transverses (viaOps = true, requestedByUserId = null) → table CROSS-ORG, hors
 // RLS (comme merkle_anchor_batch / payment_webhook, cf. rls-rollout.md).
 model DataRightsRequest {
-  id                 String                    @id @default(uuid())
-  kind               DataRightsRequestKind
-  outcome            DataRightsRequestOutcome
+  id                  String                   @id @default(uuid())
+  kind                DataRightsRequestKind
+  outcome             DataRightsRequestOutcome
   // HMAC-SHA256(pepper, msisdn normalisé), hex — JAMAIS le numéro en clair.
   // Nullable : une anonymisation rejouée sur un client déjà anonymisé n'a plus
   // de téléphone à hacher (no-op idempotent). Jamais de chaîne sentinelle.
-  subjectPhoneHash   String?                   @map("subject_phone_hash")
+  subjectPhoneHash    String?                  @map("subject_phone_hash")
   // null = déclenché par l'ops plateforme (clé interne), pas un utilisateur.
-  requestedByUserId  String?                   @map("requested_by_user_id")
-  viaOps             Boolean                   @default(false) @map("via_ops")
+  requestedByUserId   String?                  @map("requested_by_user_id")
+  viaOps              Boolean                  @default(false) @map("via_ops")
   // null = demande transverse (toutes organisations) via le chemin ops.
-  organizationId     String?                   @map("organization_id")
+  organizationId      String?                  @map("organization_id")
   affectedCustomerIds String[]                 @map("affected_customer_ids")
-  note               String?
-  createdAt          DateTime                  @default(now()) @map("created_at")
+  note                String?
+  createdAt           DateTime                 @default(now()) @map("created_at")
 
   @@index([subjectPhoneHash])
   @@map("data_rights_request")
@@ -2221,7 +2230,7 @@ model PdpRawTransaction {
   // certificationId, lui, n'arrive qu'à l'émission réussie.
   // @unique sur invoiceId : une facture ne répond QUE d'un document ERP — la base
   // refuse qu'un second dépôt s'accroche à la même.
-  invoiceId       String? @unique @map("invoice_id")
+  invoiceId String? @unique @map("invoice_id")
 
   // ADR-107, tranche 3 — le Z de caisse qui a AGRÉGÉ cette micro-vente (flux
   // e-reporting B2C). Colonne DISTINCTE d'invoiceId juste au-dessus, et cette
@@ -2250,13 +2259,13 @@ model PdpRawTransaction {
   receivedAt  DateTime  @default(now()) @map("received_at")
   processedAt DateTime? @map("processed_at")
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  apiKey       ApiKey       @relation(fields: [apiKeyId], references: [id], onDelete: Restrict)
-  invoice      Invoice?     @relation("PdpDocumentInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  apiKey              ApiKey       @relation(fields: [apiKeyId], references: [id], onDelete: Restrict)
+  invoice             Invoice?     @relation("PdpDocumentInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
   // onDelete: Restrict comme les trois autres — un Z de caisse certifié ne se
   // supprime pas, et s'il le pouvait il n'emporterait jamais la trace des tickets
   // qui le composent.
-  consolidatedInvoice Invoice? @relation("PdpConsolidatedInvoice", fields: [consolidatedInvoiceId], references: [id], onDelete: Restrict)
+  consolidatedInvoice Invoice?     @relation("PdpConsolidatedInvoice", fields: [consolidatedInvoiceId], references: [id], onDelete: Restrict)
 
   // L'index d'idempotence. Composite avec organizationId, jamais un @unique seul
   // sur clientUniqueId : ce dernier interdirait à deux PME d'utiliser la même
@@ -2341,10 +2350,43 @@ model OcrDocument {
   // (ou failli produire) une facture ne disparaît pas avec le compte.
   uploadedByUserId String @map("uploaded_by_user_id")
 
-  // Empreinte SHA-256 (hex minuscule) des octets de l'image. Clé d'idempotence.
-  imageSha256 String @map("image_sha256")
-  // Clé de l'objet dans le stockage (jamais les octets en base).
-  storageKey String @map("storage_key")
+  // Canal d'origine du document (plan 2026-09-16, OCR multicanal). IMAGE_SCAN
+  // = valeur historique, @default pour compat rétroactive de toutes les
+  // lignes existantes. Détermine emissionChannelForSource() et si textBrut /
+  // audioSha256 / whatsappMessageId sont pertinents.
+  source OcrDocumentSource @default(IMAGE_SCAN)
+
+  // Empreinte SHA-256 (hex minuscule) des octets de l'image. Clé
+  // d'idempotence pour IMAGE_SCAN. Nullable depuis le plan 2026-09-16 :
+  // WHATSAPP_TEXT n'a ni image ni storageKey (le texte est dans textBrut
+  // directement) — Postgres autorise plusieurs NULL sur un index unique,
+  // même précédent que nif/etaxNumber/rccm sur Organization.
+  imageSha256 String? @map("image_sha256")
+  // Clé de l'objet dans le stockage (jamais les octets en base). Nullable
+  // pour la même raison qu'imageSha256 ci-dessus.
+  storageKey  String? @map("storage_key")
+
+  // Idempotence AUDIO_PWA — même statut déclaratif qu'imageSha256, jamais
+  // renommé/réutilisé : "image" dans le nom mentirait pour un fichier audio.
+  audioSha256       String? @map("audio_sha256")
+  // Transcription brute (STT) ou texte WhatsApp tel quel — jamais pour
+  // IMAGE_SCAN. Alimente OcrReviewAlert quand la source est vocale.
+  textBrut          String? @map("text_brut")
+  // Idempotence WHATSAPP_TEXT/WHATSAPP_VOICE — le wamid Meta, GLOBALEMENT
+  // unique (espace d'identifiants de Meta, pas le nôtre) : pas composite avec
+  // organizationId, contrairement à audioSha256/imageSha256.
+  whatsappMessageId String? @unique @map("whatsapp_message_id")
+  // Numéro de l'expéditeur WhatsApp (msisdn +224XXXXXXXXX), posé UNIQUEMENT
+  // pour WHATSAPP_TEXT/WHATSAPP_VOICE (plan 2026-09-16, étape 2 — jamais pour
+  // IMAGE_SCAN/AUDIO_PWA). Repli de résolution client : quand l'extraction ne
+  // déclare aucun `customer`, ce numéro résout un Customer via
+  // resolveByPhone() (customers.service.ts, ADR-106) — jamais un champ
+  // `buyerPhone` dans ocrExtractionSchema (contrainte fondatrice inchangée,
+  // clarification 6 du plan). C'est le numéro du MEMBRE qui a dicté le
+  // message (identité déjà vérifiée par le webhook), pas nécessairement celui
+  // de l'acheteur facturé — voir OcrVisionService.traiter() pour la règle de
+  // priorité exacte face à un client explicitement déclaré par le modèle.
+  customerPhone String? @map("customer_phone")
 
   status OcrDocumentStatus @default(RECEIVED)
 
@@ -2360,12 +2402,12 @@ model OcrDocument {
   // Projection des totaux LUS par le modèle, en centimes GNF (ADR-014). Nulls
   // tant qu'aucune extraction n'existe. Ce sont les montants CONSTATÉS sur le
   // papier — pas ceux d'une facture certifiée, qui n'existe pas encore.
-  totalHtCentimes  BigInt? @map("total_ht_centimes")
-  totalVatCentimes BigInt? @map("total_vat_centimes")
-  totalTtcCentimes BigInt? @map("total_ttc_centimes")
+  totalHtCentimes  BigInt?       @map("total_ht_centimes")
+  totalVatCentimes BigInt?       @map("total_vat_centimes")
+  totalTtcCentimes BigInt?       @map("total_ttc_centimes")
   // ADR-108 — le régime que le modèle a reconnu sur le document (prix unitaires
   // HT ou TTC). Nullable : inconnu avant extraction.
-  saisieRegime SaisieRegime? @map("saisie_regime")
+  saisieRegime     SaisieRegime? @map("saisie_regime")
 
   // Les écarts relevés par OcrValidationService quand status =
   // DRAFT_PENDING_MANUAL_REVIEW : liste [{ code, chemin, attendu, constate }]
@@ -2389,11 +2431,25 @@ model OcrDocument {
   invoice      Invoice?     @relation("OcrDocumentInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, imageSha256])
+  @@unique([organizationId, audioSha256])
   // La bannette de relecture : « les scans de cette organisation qui attendent
   // une main humaine ». Composite dans cet ordre — RLS filtre d'abord sur
   // organization_id.
   @@index([organizationId, status])
   @@map("ocr_document")
+}
+
+// Plan 2026-09-16 (OCR multicanal) — canal d'entrée du document. IMAGE_SCAN =
+// carnet à souche photographié (ADR-122, seule valeur avant ce plan). AUDIO_PWA
+// = note vocale dictée dans la PWA. WHATSAPP_VOICE/WHATSAPP_TEXT = message
+// WhatsApp entrant (voix ou texte) reçu par le webhook Meta. Détermine
+// emissionChannelForSource() (ai/ocr-document-source.ts) : jamais deviné, un
+// document sait toujours d'où il vient.
+enum OcrDocumentSource {
+  IMAGE_SCAN
+  AUDIO_PWA
+  WHATSAPP_VOICE
+  WHATSAPP_TEXT
 }
 
 // RECEIVED = image reçue, le modèle n'a pas encore rendu (ou a rendu et la

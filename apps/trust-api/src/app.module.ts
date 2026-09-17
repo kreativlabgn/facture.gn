@@ -45,6 +45,7 @@ import { DataRightsModule } from "./data-rights/data-rights.module";
 import { BankReconciliationModule } from "./bank-reconciliation/bank-reconciliation.module";
 import { PendingMemberInvitesModule } from "./pending-member-invites/pending-member-invites.module";
 import { PdpModule } from "./pdp/pdp.module";
+import { WhatsAppModule } from "./whatsapp/whatsapp.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { RolesGuard } from "./common/rbac/roles.guard";
@@ -115,6 +116,11 @@ import { RolesGuard } from "./common/rbac/roles.guard";
     // qu'une convention de lecture.
     PdpModule,
     AiModule,
+    // Plan 2026-09-16 (OCR multicanal), étape 2 — webhook WhatsApp entrant
+    // (Meta Cloud API). Placé en DERNIER, après AiModule dont il prolonge le
+    // Hub Vision : aucune dépendance de module explicite au-delà d'AiModule
+    // lui-même (PRISMA_CLIENT/WHATSAPP_PROVIDER viennent de modules @Global).
+    WhatsAppModule,
   ],
   providers: [
     // Ordre significatif : ThrottlerGuard s'exécute en premier (rejette avant même

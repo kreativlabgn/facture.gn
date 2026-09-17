@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Badge } from "@/components/ui";
 
 // Alerte de relecture du Hub Vision (ADR-122) — affichée quand le serveur a
 // basculé un scan en DRAFT_PENDING_MANUAL_REVIEW : la double-garde a relevé au
@@ -23,6 +24,31 @@ import type { ReactNode } from "react";
 // trust-api). Ils sont affichés AVEC leurs centimes — formatGnf() les tronque
 // au GNF, et « 234 000 GNF » contre « 234 000 GNF » ne montrerait pas l'écart
 // d'un centime qui a précisément déclenché cette alerte.
+
+// Plan 2026-09-16 (OCR multicanal vocal/WhatsApp) — mirroir de
+// OcrDocument.source (packages/db/prisma/schema.prisma). IMAGE_SCAN est
+// l'origine historique (photo de carnet) : elle ne porte aucun badge, aucun
+// texte brut cité, l'alerte reste identique à ce qu'elle a toujours été.
+export type OcrDocumentSource = "IMAGE_SCAN" | "AUDIO_PWA" | "WHATSAPP_VOICE" | "WHATSAPP_TEXT";
+
+// AUDIO_PWA et WHATSAPP_VOICE sont deux CANAUX pour la même NATURE de contenu
+// (une transcription de voix) — même libellé de badge et même mot pour le
+// bloc cité. WHATSAPP_TEXT est un message tapé, jamais transcrit : le badge
+// et le texte d'accompagnement le disent explicitement, pour ne jamais
+// laisser croire qu'un modèle de transcription a pu se tromper sur un texte
+// qui n'a jamais été audio. IMAGE_SCAN est absent des deux tables : c'est ce
+// qui garde le composant inchangé pour cette source (et l'absence de `source`).
+const BADGE_PAR_SOURCE: Partial<Record<OcrDocumentSource, string>> = {
+  AUDIO_PWA: "Source : note vocale",
+  WHATSAPP_VOICE: "Source : note vocale",
+  WHATSAPP_TEXT: "Source : WhatsApp",
+};
+
+const LIBELLE_TEXTE_BRUT_PAR_SOURCE: Partial<Record<OcrDocumentSource, string>> = {
+  AUDIO_PWA: "Lecture du modèle",
+  WHATSAPP_VOICE: "Lecture du modèle",
+  WHATSAPP_TEXT: "Message reçu",
+};
 
 export type OcrFindingCode = "LIGNE_TOTAL" | "SOMME_LIGNES" | "TOTAL_TTC" | "TVA_REGIME";
 
@@ -89,12 +115,20 @@ function IconeRelecture() {
 export function OcrReviewAlert({
   findings,
   action,
+  source,
+  textBrut,
 }: {
   findings: OcrFinding[];
   /** Bouton ou lien vers la saisie manuelle du brouillon, s'il y a lieu. */
   action?: ReactNode;
+  /** Absent ou "IMAGE_SCAN" : aucun changement visuel (comportement historique). */
+  source?: OcrDocumentSource;
+  /** Transcription (vocal) ou message tel quel (WhatsApp texte). Ignoré si `source` n'a pas de badge associé. */
+  textBrut?: string | null;
 }) {
   const pluriel = findings.length > 1;
+  const badge = source ? BADGE_PAR_SOURCE[source] : undefined;
+  const libelleTexteBrut = source ? LIBELLE_TEXTE_BRUT_PAR_SOURCE[source] : undefined;
 
   return (
     <section
@@ -114,6 +148,21 @@ export function OcrReviewAlert({
           </p>
         </div>
       </div>
+
+      {badge ? (
+        <div className="mt-3">
+          <Badge tone="navy">{badge}</Badge>
+        </div>
+      ) : null}
+
+      {libelleTexteBrut && textBrut ? (
+        <div className="mt-3">
+          <p className="font-mono text-[11px] font-bold tracking-wide text-navy-600 uppercase">{libelleTexteBrut}</p>
+          <blockquote className="mt-1.5 rounded-xl bg-navy-950 p-4 font-mono text-xs leading-relaxed text-white">
+            {textBrut}
+          </blockquote>
+        </div>
+      ) : null}
 
       <ul className="mt-4 divide-y divide-navy-100 border-t border-navy-100">
         {findings.map((ecart, index) => (
