@@ -30,6 +30,7 @@ import {
 } from "./InvoiceActions";
 
 export const metadata: Metadata = { title: "Facture — facture.gn" };
+const TELEMO_PORTAL_URL = (process.env.NEXT_PUBLIC_TELEMO_PORTAL_URL ?? "https://telemo.gov.gn").replace(/\/+$/, "");
 
 // Écran de détail d'une facture. Jusqu'ici la coquille listait les factures
 // sans jamais permettre d'en ouvrir une : onze routes de trust-api étaient
@@ -241,7 +242,19 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
           />
           <Ligne libelle="Créée le" valeur={formatDate(invoice.createdAt)} />
           {invoice.referenceMarche ? (
-            <Ligne libelle="Référence marché" valeur={invoice.referenceMarche} mono />
+            <div className="space-y-1">
+              <span className="block text-xs font-semibold tracking-wide text-navy-600 uppercase">
+                Référence marché (Telemo)
+              </span>
+              <a
+                href={`${TELEMO_PORTAL_URL}/${encodeURIComponent(invoice.referenceMarche)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block font-mono text-sm font-bold text-navy-800 underline decoration-navy-200 underline-offset-4 transition-colors hover:text-navy-950"
+              >
+                {invoice.referenceMarche} ↗
+              </a>
+            </div>
           ) : null}
           {invoice.quoteValidUntil ? (
             <Ligne libelle="Devis valable jusqu'au" valeur={formatDate(invoice.quoteValidUntil)} />

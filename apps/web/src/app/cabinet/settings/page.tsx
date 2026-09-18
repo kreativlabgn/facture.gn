@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import { resolveActivePractice } from "@/lib/active-practice";
-import { canManagePractice, PRACTICE_TYPE_LABELS, practiceRoleLabel } from "@/lib/cabinet-nav";
+import {
+  canManagePractice,
+  modeLabel,
+  palierLabel,
+  PRACTICE_TYPE_LABELS,
+  practiceRoleLabel,
+} from "@/lib/cabinet-nav";
 import { chargerPartageHonoraires, type PartageHonoraires } from "@/lib/cabinet";
 import { formatGnf } from "@/lib/format";
 import { requireSessionToken } from "@/lib/session";
 import { Badge, Card, DataField, EmptyState, KpiTile } from "@/components/ui";
-import { ModeReversementForm, PalierForm, modeLabel, palierLabel } from "./ReglagesForms";
+import { ModeReversementForm, PalierForm } from "./ReglagesForms";
 
 export const metadata: Metadata = { title: "Paramètres du cabinet — facture.gn" };
 

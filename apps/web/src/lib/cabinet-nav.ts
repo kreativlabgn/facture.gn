@@ -78,6 +78,33 @@ export function practiceRoleLabel(role: string): string {
   return PRACTICE_ROLE_LABELS[role as PracticeRole] ?? role;
 }
 
+// Conditions commerciales du cabinet (palier partenaire, mode de reversement,
+// H3/ADR-071). Rappatriées ici depuis ReglagesForms.tsx (écran
+// /cabinet/settings) : ce sont de simples lookups purs, mais ReglagesForms.tsx
+// porte "use client" (les formulaires y utilisent useActionState) — un module
+// client ne peut pas être appelé depuis un composant serveur, même pour une
+// fonction sans aucun état. page.tsx (serveur) et ReglagesForms.tsx (client)
+// importent donc tous deux ces deux fonctions d'ici.
+export const PARTNER_TIER_LABELS: Record<string, string> = {
+  partner_free: "Partenaire — gratuit",
+  partner_starter: "Partenaire — Starter",
+  partner_pro: "Partenaire — Pro",
+  partner_institutional: "Partenaire — Institutionnel",
+};
+
+export const SETTLEMENT_MODE_LABELS: Record<string, string> = {
+  payout: "Versement direct",
+  subscription_deduction: "Déduction sur l'abonnement",
+};
+
+export function palierLabel(tier: string): string {
+  return PARTNER_TIER_LABELS[tier] ?? tier;
+}
+
+export function modeLabel(mode: string): string {
+  return SETTLEMENT_MODE_LABELS[mode] ?? mode;
+}
+
 // Miroir d'assertPracticeMember. DEMANDER un mandat n'engage rien : c'est
 // l'organisation qui accepte, explicitement, et qui révoque quand elle veut.
 // Le scope d'accountant_external porte `mandate:request` (ADR-068/078) —

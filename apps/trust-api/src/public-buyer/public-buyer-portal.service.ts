@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PrismaClient } from "@facture-gn/db";
 import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
@@ -143,6 +143,90 @@ export class PublicBuyerPortalService {
       });
 
       return updated;
+    });
+  }
+
+  // L'objection est une transition métier du dossier acheteur public, pas une
+  // permission organisationnelle : le DAF est autorisé par son compte public.
+  // La transaction rend le gel de la cessibilité et sa trace indivisibles.
+  async registerObjection(invoiceId: string, reason: string, requesterUserId: string) {
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId } });
+    if (!invoice) {
+      throw new ForbiddenException(
+        `Facture ${invoiceId} n'est rattachée à aucune entité publique — pas une facture B2G`,
+      );
+    }
+
+    const scoped = organizationScopedClient(this.prisma, invoice.organizationId);
+    const customer = invoice.customerId
+      ? await scoped.customer.findFirst({
+          where: { id: invoice.customerId, organizationId: invoice.organizationId },
+        })
+      : null;
+    const publicBuyerAccountId = customer?.publicBuyerAccountId;
+    if (!publicBuyerAccountId) {
+      throw new ForbiddenException(
+        `Facture ${invoiceId} n'est rattachée à aucune entité publique — pas une facture B2G`,
+      );
+    }
+
+    const membership = await this.prisma.publicBuyerAccountMember.findFirst({
+      where: { publicBuyerAccountId, userId: requesterUserId },
+    });
+    if (!membership) {
+      throw new ForbiddenException("Aucun accès à ce compte acheteur public");
+    }
+
+    const publicBuyerAccount = await this.prisma.publicBuyerAccount.findUniqueOrThrow({
+      where: { id: publicBuyerAccountId },
+    });
+    if (publicBuyerAccount.verificationStatus !== "verified" || !customer.isPublicEntityConfirmed) {
+      throw new ForbiddenException("Le compte acheteur public ou son rattachement n'est pas vérifié");
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await setOrganizationScope(tx, invoice.organizationId);
+
+      const existingCase = await tx.b2GCase.findUnique({ where: { invoiceId } });
+      if (!existingCase) {
+        throw new NotFoundException("Aucun dossier B2G public n'est associé à cette facture.");
+      }
+
+      // Le financement ne porte pas de drapeau persistant `isFinanceable` :
+      // financeableInvoiceWhere() exclut toute facture dont disputeStatus vaut
+      // `disputed`. La contestation est donc le verrou de vérité du Capital Layer.
+      if (invoice.disputeStatus === "disputed") {
+        return {
+          success: true,
+          caseNumber: existingCase.caseNumber,
+          status: existingCase.status,
+          message: "Objection déjà enregistrée. Financement toujours gelé.",
+        };
+      }
+
+      const updated = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: { disputeStatus: "disputed" },
+      });
+      await tx.invoiceEvent.create({
+        data: {
+          invoiceId,
+          type: "dispute_raised",
+          actorId: requesterUserId,
+          metadata: { reason },
+        },
+      });
+      const updatedCase = await tx.b2GCase.update({
+        where: { invoiceId },
+        data: { status: "OBJECTION_GEL_LITIGE" },
+      });
+      return {
+        success: true,
+        caseNumber: updatedCase.caseNumber,
+        status: updatedCase.status,
+        message: "Objection enregistrée. Financement gelé.",
+        invoice: updated,
+      };
     });
   }
 

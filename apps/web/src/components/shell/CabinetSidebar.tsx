@@ -159,11 +159,6 @@ export function CabinetSidebar({
             Fermer la session
           </button>
         </form>
-        {/* Dire pourquoi il n'y a pas de raccourci, plutôt que de laisser
-            chercher : sans cette ligne, l'absence passe pour un oubli. */}
-        <p className="px-3 pt-2 pb-1 text-xs text-white/45">
-          Votre commerce est un espace séparé — il se rejoint en rouvrant une session.
-        </p>
       </div>
     </div>
   );

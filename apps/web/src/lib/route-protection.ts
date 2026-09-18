@@ -5,7 +5,7 @@
 // /daf — console de l'acheteur public. Route de premier niveau au même titre
 // que /cabinet : son occupant n'est membre d'aucune organisation PME, ni
 // /dashboard ni /cabinet ne le concerne.
-export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/nouveau-cabinet", "/daf", "/demo"];
+export const PROTECTED_PREFIXES = ["/dashboard", "/cabinet", "/onboarding", "/nouveau-cabinet", "/daf", "/demo", "/admin"];
 
 // Point d'ancrage local fictif : new URL() résout `value` exactement comme le
 // ferait un navigateur (contre-oblique normalisée en séparateur de chemin,

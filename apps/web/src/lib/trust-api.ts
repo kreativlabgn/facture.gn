@@ -144,6 +144,34 @@ export async function createOrganization(
   return response.json();
 }
 
+export interface CreateAssistedOrganizationInput {
+  organizationName: string;
+  regimeFiscal: "normal_tva" | "tpu" | "normal_sans_tva" | "non_assujetti_association";
+  legalForm: "commercial" | "association";
+  merchantName: string;
+  msisdn?: string;
+  consentRecorded: true;
+}
+
+// POST /organizations/assisted — réservé à l'identité agent terrain vérifiée
+// côté trust-api; le marchand devient owner de la nouvelle organisation.
+export async function createAssistedOrganization(
+  token: string,
+  input: CreateAssistedOrganizationInput,
+): Promise<OrganizationSummary> {
+  const response = await authenticatedFetch("/organizations/assisted", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+    throw new TrustApiError(message ?? "Enrôlement du marchand impossible", response.status);
+  }
+  return response.json();
+}
+
 // Mirroir de GET /organizations/:id — champs affichés sur la page paramètres
 // uniquement (pas un mirroir exhaustif du modèle Organization complet).
 export interface OrganizationDetail {
@@ -1528,6 +1556,35 @@ export async function validateLiquidation(token: string, invoiceId: string): Pro
     // « compte non vérifié » et « rattachement non confirmé », trois refus que
     // le DAF doit pouvoir lire. Les reformuler ici les rendrait indistincts.
     throw new TrustApiError(body?.message ?? "Validation impossible", response.status);
+  }
+  return response.json();
+}
+
+export interface PublicBuyerObjectionResult {
+  success: true;
+  caseNumber: string;
+  status: string;
+  message: string;
+}
+
+export async function registerObjection(
+  token: string,
+  invoiceId: string,
+  reason: string,
+): Promise<PublicBuyerObjectionResult> {
+  const response = await authenticatedFetch(
+    `/public-buyer/invoices/${encodeURIComponent(invoiceId)}/objection`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+    throw new TrustApiError(message ?? "Enregistrement de l'objection impossible", response.status);
   }
   return response.json();
 }

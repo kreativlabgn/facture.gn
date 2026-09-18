@@ -79,6 +79,15 @@ enum LegalForm {
   association
 }
 
+enum B2GCaseStatus {
+  BROUILLON
+  TRANSMIS
+  SERVICE_FAIT_VALIDE
+  CREANCE_CERTIFIEE
+  OBJECTION_GEL_LITIGE
+  PAYEE
+}
+
 enum RegistrationSource {
   organic
   apip
@@ -702,6 +711,9 @@ model Organization {
   pdpRawTransactions    PdpRawTransaction[]
   pdpReportingSequences PdpReportingSequence[]
   ocrDocuments          OcrDocument[]
+  b2gCases              B2GCase[]
+  telemoAwards          TelemoAward[]
+  ocaecgLicense         OcaecgLicense?             @relation("CabinetOcaecg")
 
   @@map("organization")
 }
@@ -1418,6 +1430,7 @@ model Invoice {
   // ADR-122 — le document papier scanné dont CE brouillon est issu. 1→1 comme
   // pdpRawTransaction : une facture ne répond que d'un seul scan.
   ocrDocument                 OcrDocument?            @relation("OcrDocumentInvoice")
+  b2gCase                     B2GCase?
 
   @@unique([organizationId, number])
   // Même forme que @@unique([organizationId, number]) juste au-dessus, et pour la
@@ -1439,6 +1452,52 @@ model Invoice {
   // (faible sélectivité, filtré en post-scan sur un jeu déjà minuscule).
   @@index([organizationId, totalTtc, issuedAt])
   @@map("invoice")
+}
+
+model TelemoAward {
+  id               String    @id @default(uuid())
+  telemoAwardId    String    @unique @map("telemo_award_id")
+  telemoContractId String    @map("telemo_contract_id")
+  supplierNif      String    @map("supplier_nif")
+  amountCentimes   String    @map("amount_centimes")
+  status           String    @default("ACTIVE")
+  lastSyncedAt     DateTime  @default(now()) @map("last_synced_at")
+  organizationId   String?   @map("organization_id")
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  b2gCases     B2GCase[]
+
+  @@index([supplierNif, status])
+  @@index([organizationId])
+  @@map("telemo_award")
+}
+
+model B2GCase {
+  id             String        @id @default(uuid())
+  caseNumber     String        @unique @map("case_number")
+  status         B2GCaseStatus @default(BROUILLON)
+  telemoAwardId  String        @map("telemo_award_id")
+  telemoAward    TelemoAward   @relation(fields: [telemoAwardId], references: [id])
+  organizationId String        @map("organization_id")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  invoiceId      String?       @unique @map("invoice_id")
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id])
+  dafSignature   String?       @map("daf_signature")
+  validatedAt    DateTime?     @map("validated_at")
+
+  @@index([organizationId, status])
+  @@map("b2g_case")
+}
+
+model OcaecgLicense {
+  id            String        @id @default(uuid())
+  licenseNumber String        @unique @map("license_number")
+  firmName      String        @map("firm_name")
+  isActive      Boolean       @default(true) @map("is_active")
+  cabinetId     String?       @unique @map("cabinet_id")
+  cabinet       Organization? @relation("CabinetOcaecg", fields: [cabinetId], references: [id])
+
+  @@map("ocaecg_license")
 }
 
 // E1 (ADR-115 provisoire) — registre des racines de Merkle des factures, CHAÎNÉ

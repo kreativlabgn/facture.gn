@@ -8,6 +8,8 @@ import {
   canRevokeMandate,
   canManagePractice,
   isCabinetNavActive,
+  modeLabel,
+  palierLabel,
   practiceRoleLabel,
   visibleCabinetGroups,
 } from "./cabinet-nav";
@@ -58,6 +60,19 @@ describe("cabinet-nav — droits, miroir des gardes serveur", () => {
   it("affiche le rôle en français, et le laisse brut s'il est inconnu", () => {
     expect(practiceRoleLabel("practice_admin")).toBe("Administrateur du cabinet");
     expect(practiceRoleLabel("role_inconnu")).toBe("role_inconnu");
+  });
+
+  // Régression : ces deux fonctions vivaient dans ReglagesForms.tsx ("use
+  // client"), inappelables depuis page.tsx (composant serveur) — erreur
+  // runtime « Attempted to call ... from the server but ... is on the client ».
+  it("affiche le palier partenaire en français, et le laisse brut s'il est inconnu", () => {
+    expect(palierLabel("partner_pro")).toBe("Partenaire — Pro");
+    expect(palierLabel("palier_inconnu")).toBe("palier_inconnu");
+  });
+
+  it("affiche le mode de reversement en français, et le laisse brut s'il est inconnu", () => {
+    expect(modeLabel("subscription_deduction")).toBe("Déduction sur l'abonnement");
+    expect(modeLabel("mode_inconnu")).toBe("mode_inconnu");
   });
 });
 
