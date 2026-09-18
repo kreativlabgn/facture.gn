@@ -6,6 +6,7 @@ import { enrolFieldMerchant } from './actions';
 interface FieldOnboardingInput {
   commerceName: string;
   merchantPhone: string;
+  consentAttested: boolean;
 }
 
 export default function FieldOfficerPage() {
@@ -22,6 +23,7 @@ export default function FieldOfficerPage() {
     const data: FieldOnboardingInput = {
       commerceName: String(formData.get('commerceName') ?? '').trim(),
       merchantPhone: String(formData.get('merchantPhone') ?? '').trim(),
+      consentAttested: formData.get('consentAttested') === 'on',
     };
 
     if (!data.commerceName || !/^\d{9}$/.test(data.merchantPhone)) {
@@ -29,9 +31,19 @@ export default function FieldOfficerPage() {
       return;
     }
 
+    // Ce compte n'est pas ouvert par le marchand lui-même : c'est l'agent qui
+    // saisit à sa place. consentAttested est donc la seule trace qu'un
+    // consentement a réellement été recueilli avant l'enrôlement — sans elle,
+    // trust-api enregistrerait une preuve légale de consentement (L/2016/037,
+    // AssistedSession.consentRecordedAt) que personne n'a jamais donnée.
+    if (!data.consentAttested) {
+      setErrorMessage("Confirmez avoir recueilli le consentement du marchand avant de continuer.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const result = await enrolFieldMerchant(data.commerceName, data.merchantPhone);
+      const result = await enrolFieldMerchant(data.commerceName, data.merchantPhone, data.consentAttested);
       if ('error' in result) {
         setErrorMessage(result.error);
         return;
@@ -94,10 +106,24 @@ export default function FieldOfficerPage() {
             />
           </div>
 
+          <div className="flex items-start gap-2 rounded-md border border-navy-200 bg-navy-50 p-3">
+            <input
+              id="consentAttested"
+              name="consentAttested"
+              type="checkbox"
+              required
+              className="mt-0.5 size-4 shrink-0 accent-navy-950"
+            />
+            <label htmlFor="consentAttested" className="text-xs leading-relaxed text-navy-800">
+              Je certifie avoir lu au marchand la notice d&apos;information et recueilli son
+              accord oral pour créer ce compte en son nom (L/2016/037).
+            </label>
+          </div>
+
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-md bg-yellow p-2.5 text-sm font-semibold text-navy-950 transition-colors hover:bg-yellow/90 disabled:opacity-50"
+            className="w-full rounded-md border border-navy-950 bg-yellow p-2.5 text-sm font-semibold text-navy-950 transition-colors hover:bg-yellow/90 disabled:opacity-50"
           >
             {isSubmitting ? 'Immatriculation en cours...' : 'Enrôler le marchand'}
           </button>
