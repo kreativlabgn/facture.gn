@@ -14,17 +14,22 @@ type Feedback = { success: boolean; message: string } | null;
 export default function DafVerificationZone({ invoice }: DafVerificationZoneProps) {
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [actionCompleted, setActionCompleted] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [objectionReason, setObjectionReason] = useState("");
 
   const reference = invoice.referenceMarche ?? invoice.number ?? invoice.id;
   const objectionReady = objectionReason.trim().length >= 10;
-  const isClosed = invoice.validatedByAdministration || invoice.disputeStatus === "disputed";
+  const isClosed =
+    actionCompleted || invoice.validatedByAdministration || invoice.disputeStatus === "disputed";
 
   function handleValidate() {
     setFeedback(null);
     startTransition(async () => {
       const result = await validerLiquidationAction({ invoiceId: invoice.id });
+      if (result.success) {
+        setActionCompleted(true);
+      }
       setFeedback(
         result.success ? { success: true, message: result.message } : { success: false, message: result.error },
       );
@@ -42,6 +47,9 @@ export default function DafVerificationZone({ invoice }: DafVerificationZoneProp
     setFeedback(null);
     startTransition(async () => {
       const result = await leverObjectionAction({ invoiceId: invoice.id, reason });
+      if (result.success) {
+        setActionCompleted(true);
+      }
       setFeedback(
         result.success ? { success: true, message: result.message } : { success: false, message: result.error },
       );
@@ -68,6 +76,7 @@ export default function DafVerificationZone({ invoice }: DafVerificationZoneProp
               : "border-amber-200 bg-amber-bg text-amber-text"
           }`}
           role={feedback.success ? "status" : "alert"}
+          aria-live={feedback.success ? "polite" : "assertive"}
         >
           {feedback.message}
         </div>
@@ -99,18 +108,22 @@ export default function DafVerificationZone({ invoice }: DafVerificationZoneProp
             className="w-full max-w-md rounded-lg border border-navy-200 bg-white p-6 shadow-lg"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="objection-title"
-            aria-describedby="objection-description"
+            aria-labelledby={`objection-title-${invoice.id}`}
+            aria-describedby={`objection-description-${invoice.id}`}
           >
-            <h4 id="objection-title" className="font-display text-lg font-semibold text-navy-950">
+            <h4 id={`objection-title-${invoice.id}`} className="font-display text-lg font-semibold text-navy-950">
               Enregistrer une objection
             </h4>
-            <p id="objection-description" className="mt-1 text-sm text-navy-600">
+            <p id={`objection-description-${invoice.id}`} className="mt-1 text-sm text-navy-600">
               Décrivez le motif du litige. La créance ne pourra plus être proposée au financement tant que le litige est ouvert.
             </p>
 
             <div className="mt-4 rounded-md border border-amber-200 bg-amber-bg p-3 text-xs font-medium text-amber-text">
               Cette action gèle immédiatement la cessibilité de la créance.
+            </div>
+
+            <div aria-live="polite" className="sr-only">
+              {feedback?.message}
             </div>
 
             <form onSubmit={handleObjectionSubmit} className="mt-4 space-y-4">

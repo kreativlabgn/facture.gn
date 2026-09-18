@@ -15,8 +15,9 @@ const STATUS_LABELS: Record<string, { label: string; glyph: string; tone: BadgeT
 };
 
 const DISPUTE_LABELS: Record<string, { label: string; glyph: string; tone: BadgeTone }> = {
-  disputed: { label: "Contestée", glyph: "●", tone: "red" },
-  resolved: { label: "Litige résolu", glyph: "●", tone: "green" },
+  none: { label: "Saine", glyph: "●", tone: "green" },
+  disputed: { label: "Contestée", glyph: "●", tone: "amber" },
+  resolved: { label: "Résolue", glyph: "●", tone: "blue" },
 };
 
 export function StatusPill({ status }: { status: string }) {
@@ -48,12 +49,11 @@ export function DocumentTypeBadge({ documentType }: { documentType: string }) {
   return <Badge tone="blue">Devis</Badge>;
 }
 
-// dispute_status "none" n'affiche jamais de pastille — un litige inexistant
-// n'est pas une information, jamais un faux signal neutre à côté du statut.
+// Chantier 4 (DAF/B2G) — "none" affiche désormais une pastille « Saine »
+// plutôt que rien : sur l'écran DAF, une facture sans litige à côté d'une
+// facture contestée doit se lire d'un coup d'œil, sans avoir à distinguer
+// « rien affiché » de « pas encore chargé ».
 export function DisputeStatusPill({ disputeStatus }: { disputeStatus: string }) {
-  if (disputeStatus === "none") {
-    return null;
-  }
   const entry = DISPUTE_LABELS[disputeStatus] ?? { label: disputeStatus, glyph: "○", tone: "navy" as const };
   return (
     <Badge tone={entry.tone}>
