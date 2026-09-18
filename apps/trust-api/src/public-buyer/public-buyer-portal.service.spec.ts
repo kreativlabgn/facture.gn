@@ -10,6 +10,7 @@ function createFakePrisma(
     invoice?: any;
     customer?: any;
     publicBuyerAccount?: any;
+    b2GCase?: any;
   } = {},
 ) {
   const tx = {
@@ -17,10 +18,28 @@ function createFakePrisma(
       update: vi.fn().mockResolvedValue({
         id: "inv-1",
         validatedByAdministration: true,
+        disputeStatus: "disputed",
       }),
     },
     invoiceEvent: {
       create: vi.fn().mockResolvedValue({ id: "evt-1", type: "liquidation_validated" }),
+    },
+    // Dossier B2G rattaché à la facture (Chantier 4, Telemo/B2G) — présent par
+    // défaut (BROUILLON), voir le test dédié à son absence.
+    b2GCase: {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "case-1",
+        caseNumber: "B2G-2026-000001",
+        status: "TRANSMIS",
+        invoiceId: "inv-1",
+      }),
+      update: vi.fn().mockResolvedValue({
+        id: "case-1",
+        caseNumber: "B2G-2026-000001",
+        status: "OBJECTION_GEL_LITIGE",
+        invoiceId: "inv-1",
+      }),
+      ...overrides.b2GCase,
     },
     // setOrganizationScope(tx, ...) pose le GUC en première ligne de la
     // transaction : le vrai client transactionnel porte $executeRaw, le faux
@@ -273,6 +292,133 @@ describe("PublicBuyerPortalService — validation de liquidation (J1, ADR-080/08
     const result = await service.validateLiquidation("inv-1", REQUESTER_USER_ID);
 
     expect(result).not.toHaveProperty("customer");
+  });
+});
+
+describe("PublicBuyerPortalService.registerObjection — objection DAF (Chantier 4, Telemo/B2G)", () => {
+  // Même chaîne d'autorisation inline que validateLiquidation() — l'objection
+  // est l'autre transition du même dossier B2G, portée par le même acteur.
+  it("répond comme pour une facture non-B2G sur un invoiceId inexistant — jamais un 500, jamais un oracle", async () => {
+    const prisma = createFakePrisma({
+      invoice: { findUniqueOrThrow: vi.fn().mockResolvedValue(null) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(
+      service.registerObjection("inv-inconnue", "Marchandise jamais livrée", REQUESTER_USER_ID),
+    ).rejects.toThrow(/B2G|entité publique/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse un appelant qui n'est PAS membre du public_buyer_account propriétaire du client de la facture (IDOR)", async () => {
+    const prisma = createFakePrisma({
+      publicBuyerAccountMember: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(
+      service.registerObjection("inv-1", "Marchandise jamais livrée", OTHER_PBA_MEMBER_USER_ID),
+    ).rejects.toThrow(/aucun accès|accès/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse une facture dont le client n'a pas de publicBuyerAccountId (pas une facture B2G)", async () => {
+    const prisma = createFakePrisma({
+      customer: { findUnique: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: null }) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(
+      service.registerObjection("inv-1", "Marchandise jamais livrée", REQUESTER_USER_ID),
+    ).rejects.toThrow(/B2G|entité publique/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse via un PublicBuyerAccount non vérifié — même garde que validateLiquidation (finding #1 CRITIQUE)", async () => {
+    const prisma = createFakePrisma({
+      publicBuyerAccount: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "pba-1", verificationStatus: "pending" }) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(
+      service.registerObjection("inv-1", "Marchandise jamais livrée", REQUESTER_USER_ID),
+    ).rejects.toThrow(/vérifié/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse tant que le lien client<->compte acheteur public n'a pas été confirmé (finding #13)", async () => {
+    const prisma = createFakePrisma({
+      customer: {
+        findUnique: vi.fn().mockResolvedValue({ id: "cust-1", organizationId: "org-fournisseur", publicBuyerAccountId: "pba-1", isPublicEntityConfirmed: false }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(
+      service.registerObjection("inv-1", "Marchandise jamais livrée", REQUESTER_USER_ID),
+    ).rejects.toThrow(/vérifié/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuse une facture sans dossier B2G rattaché", async () => {
+    const prisma = createFakePrisma({
+      b2GCase: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    await expect(
+      service.registerObjection("inv-1", "Marchandise jamais livrée", REQUESTER_USER_ID),
+    ).rejects.toThrow(/dossier B2G/i);
+    expect(prisma.__tx.invoice.update).not.toHaveBeenCalled();
+  });
+
+  it("gèle le financement : disputeStatus=disputed, InvoiceEvent dispute_raised avec le motif, dossier en OBJECTION_GEL_LITIGE", async () => {
+    const prisma = createFakePrisma();
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    const result = await service.registerObjection("inv-1", "Marchandise jamais livrée", REQUESTER_USER_ID);
+
+    expect(prisma.__tx.invoice.update).toHaveBeenCalledWith({
+      where: { id: "inv-1" },
+      data: { disputeStatus: "disputed" },
+    });
+    expect(prisma.__tx.invoiceEvent.create).toHaveBeenCalledWith({
+      data: {
+        invoiceId: "inv-1",
+        type: "dispute_raised",
+        actorId: REQUESTER_USER_ID,
+        metadata: { reason: "Marchandise jamais livrée" },
+      },
+    });
+    expect(prisma.__tx.b2GCase.update).toHaveBeenCalledWith({
+      where: { invoiceId: "inv-1" },
+      data: { status: "OBJECTION_GEL_LITIGE" },
+    });
+    expect(result).toMatchObject({ success: true, status: "OBJECTION_GEL_LITIGE" });
+  });
+
+  // Aucun mécanisme de "réouverture" : une facture déjà contestée reste gelée,
+  // un second appel ne doit ni la re-geler ni dupliquer la trace d'audit — même
+  // discipline d'idempotence que validateLiquidation() ci-dessus.
+  it("est idempotent — une facture déjà contestée n'écrit rien de plus", async () => {
+    const prisma = createFakePrisma({
+      invoice: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "inv-1",
+          organizationId: "org-fournisseur",
+          status: "issued",
+          disputeStatus: "disputed",
+          customerId: "cust-1",
+        }),
+      },
+    });
+    const service = new PublicBuyerPortalService(prisma as any);
+
+    const result = await service.registerObjection("inv-1", "Marchandise jamais livrée", REQUESTER_USER_ID);
+
+    expect(prisma.__tx.invoice.update).not.toHaveBeenCalled();
+    expect(prisma.__tx.b2GCase.update).not.toHaveBeenCalled();
+    expect(result.message).toMatch(/déjà enregistrée/i);
   });
 });
 
