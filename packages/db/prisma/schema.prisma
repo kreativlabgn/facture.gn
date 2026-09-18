@@ -359,6 +359,10 @@ model User {
   // exclusivement via un endpoint interne dédié (CommercialAgentAuthGuard, secret
   // propre — jamais confondu avec MONEY_API_INTERNAL_KEY ni DGI_VERIFICATION_INTERNAL_KEY).
   isCommercialAgent Boolean @default(false) @map("is_commercial_agent")
+  // Console d'exploitation plateforme — distincte des rôles organisationnels
+  // et de l'identité agent terrain. Relu en base à chaque requête ops, jamais
+  // porté comme autorité durable dans le JWT.
+  isPlatformAdmin Boolean @default(false) @map("is_platform_admin")
 
   // Canal USSD *620# (D2, Spec USSD §3) — distinct de passwordHash (PWA/agent).
   // Nullable : créé au premier accès *620# (décision utilisateur), jamais
