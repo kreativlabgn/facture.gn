@@ -7,9 +7,11 @@ packages:
 # dans les dépendances directement bundlées — corrigées à la source plutôt que
 # d'attendre une nouvelle version de @nestjs/swagger qui les référence.
 overrides:
-  multer@<2.2.0: ">=2.2.0"
+  multer@<2.3.0: ">=2.3.0"
   lodash@<4.17.24: ">=4.17.24"
-  js-yaml@<4.3.1: ">=4.3.1"
+  js-yaml@<4.3.2: ">=4.3.2"
+  next@<16.3.3: ">=16.3.3"
+  sharp@<0.35.4: ">=0.35.4"
 allowBuilds:
   '@nestjs/core': true
   '@prisma/client': true
