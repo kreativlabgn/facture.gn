@@ -140,3 +140,52 @@ telles (bandeau explicite) — le branchement au snapshot réel reste à faire.
   forme ; reconstruit clé par clé dans `InfrastructureService.readQueue()`
   plutôt que fait confiance à l'assignabilité structurelle (corrigé le 17/09,
   la version initiale ne compilait pas).
+
+## Amendement du 1er octobre 2026 — RLS des tables B2G et points ouverts de revue
+
+Relecture de la Phase 4 & 5 avant fusion (PR #28). Deux ensembles, de nature différente.
+
+### Corrigé : les trois tables de la décision 2 n'étaient pas dans le registre RLS
+
+`b2g_case` et `telemo_award` (`organization_id`) et `ocaecg_license` (`cabinet_id`) avaient été
+créées par `20260917100000` sans `ROW LEVEL SECURITY`, contrairement à `ocr_document` et à
+toutes les autres tables de tenant. Aucune exception n'était prévue par cet ADR ni par le
+runbook. Migration `20261001090000_rls_b2g_ocaecg_tables` : `ENABLE` + `FORCE`, politique
+`org_isolation` (prédicat dormant inchangé), sans modification de code applicatif — le seul
+appelant, `registerObjection`, pose déjà `setOrganizationScope` avant d'accéder à `b2g_case`.
+Plan : `docs/plans/2026-10-01-rls-tables-b2g.md`. Un test d'exhaustivité
+(`rls-registry.integration.spec.ts`) interdit désormais ce type d'oubli. Sémantique de
+`ocaecg_license` (donnée de tenant ou registre de référence) : isolation retenue par prudence,
+à confirmer avec le produit si un parcours de vérification d'agrément est construit.
+
+### Ouvert : à trancher, non corrigé par cet amendement
+
+1. **Idempotence de `registerObjection`.** `invoice.disputeStatus` est lu avant la
+   transaction : deux appels simultanés peuvent chacun voir « non contesté » et créer deux
+   événements `dispute_raised`. Relire la facture dans la transaction, ou conditionner
+   l'`update` à `disputeStatus != disputed`.
+2. **État du dossier avant gel.** Aucun contrôle de l'état de `B2GCase` (ni de la facture) :
+   un dossier `PAYEE` ou `CREANCE_CERTIFIEE` (créance éventuellement déjà financée) peut passer
+   en `OBJECTION_GEL_LITIGE`. Définir les transitions autorisées.
+3. **Levée d'une objection.** Aucun chemin n'existe (déjà listé hors périmètre) : le gel est
+   définitif. À arbitrer avant toute exposition à de vrais DAF — qui peut lever, avec quelle
+   preuve.
+4. **Borne du motif.** La longueur maximale de `reason` (stocké dans `metadata`) est à
+   vérifier au niveau du DTO.
+5. **Lien inter-tenant par clé étrangère (hors de portée de la RLS).** Mesuré sur Postgres 16
+   sous `facture_app` : une session scopée sur l'organisation A, qui ne voit pas l'attribution
+   de B (0 ligne), peut créer un `b2g_case` de A qui référence `telemo_award.id` de B — le
+   contrôle de clé étrangère s'exécute hors RLS. Conséquence : intégrité inter-tenant non
+   garantie, et l'erreur de clé étrangère (« absent ») contre le succès (« existe ») forme un
+   oracle d'existence pour qui connaît un UUID. Exploitabilité faible (identifiants non
+   devinables, aucun endpoint de création de `B2GCase` aujourd'hui) mais à fermer avant d'en
+   exposer un : vérification applicative que l'attribution appartient à la même organisation,
+   ou contrainte composite `(telemo_award_id, organization_id)` (compliquée par le caractère
+   nullable de `telemo_award.organization_id`).
+
+### Limite à garder en tête
+
+Le prédicat de la politique est **dormant sans scope** (constaté, voir la précision ajoutée à
+`docs/runbooks/rls-rollout.md`) : la RLS protège une session scopée contre un mauvais scope ou
+un filtre applicatif oublié, pas contre une requête qui ne pose aucun scope. Le filtre
+`organizationId` applicatif reste obligatoire.
