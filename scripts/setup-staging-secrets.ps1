@@ -105,6 +105,7 @@ $trustApiSecrets = [ordered]@{
     COMMERCIAL_AGENT_GRANT_INTERNAL_KEY   = (New-HexSecret)
     COMMISSION_BYPASS_REVIEW_INTERNAL_KEY = (New-HexSecret)
     DATA_RIGHTS_INTERNAL_KEY              = (New-HexSecret)
+    CREDITS_INTERNAL_KEY                  = (New-HexSecret)
     DATA_RIGHTS_SUBJECT_HASH_PEPPER       = (New-HexSecret)
     APIP_WEBHOOK_SECRET                   = (New-HexSecret)
 }

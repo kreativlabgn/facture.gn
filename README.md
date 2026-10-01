@@ -69,7 +69,7 @@ variable — les copier en `.env` puis renseigner de vraies valeurs :
 
 | Service | Fichier | Secrets notables |
 |---|---|---|
-| `trust-api` | `apps/trust-api/.env.example` | `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` (RS256), `CERTIFICATION_PRIVATE_KEY` (Ed25519), `CERTIFICATION_MASTER_KEY` (enveloppe AES des clés d'organisation), 5 secrets inter-services **strictement distincts** |
+| `trust-api` | `apps/trust-api/.env.example` | `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` (RS256), `CERTIFICATION_PRIVATE_KEY` (Ed25519), `CERTIFICATION_MASTER_KEY` (enveloppe AES des clés d'organisation), les secrets inter-services `*_INTERNAL_KEY` (un par garde, **strictement distincts**, tous obligatoires au démarrage — voir `docs/runbooks/secrets-management.md`) |
 | `money-api` | `apps/money-api/.env.example` | `MONEY_API_INTERNAL_KEY` (partagé avec trust-api), secrets de webhook par provider |
 | `web` | `apps/web/.env.example` | `TRUST_API_URL` (server-only, jamais `NEXT_PUBLIC_`) |
 | `db` | `packages/db/.env.example` | `DATABASE_URL` |
