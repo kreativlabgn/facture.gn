@@ -75,12 +75,12 @@ l'outillage, ni la forme réelle de l'API BullMQ.
   money-api (`RECONCILIATION_ENABLED`, `MONEY_API_SECRETS.REDIS_URL requiredInProduction`).
 
 ## Découpage
-- [ ] Tâche 1 : `apps/trust-api/src/common/secrets-inventory.spec.ts` (RED) → `.env.example`,
+- [x] Tâche 1 : `apps/trust-api/src/common/secrets-inventory.spec.ts` (RED) → `.env.example`,
       `setup-staging-secrets.ps1`, `fly.toml`, runbook, README (GREEN)
-- [ ] Tâche 2 : `apps/money-api/src/health/redis-health.indicator.spec.ts` (forme réelle, délai
+- [x] Tâche 2 : `apps/money-api/src/health/redis-health.indicator.spec.ts` (forme réelle, délai
       élargi — RED) + `redis-health.indicator.integration.spec.ts` (RED) →
       `redis-health.indicator.ts` (GREEN)
-- [ ] Tâche 3 : revalidation — lint, typecheck, tests (avec Redis et Postgres joignables),
+- [x] Tâche 3 : revalidation — lint, typecheck, tests (avec Redis et Postgres joignables),
       démarrage réel de trust-api et de money-api, `GET /health/ready` sur Redis sain puis coupé
 
 ## Tests à écrire AVANT le code
