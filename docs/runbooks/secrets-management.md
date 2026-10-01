@@ -28,11 +28,19 @@ Familles :
 | Connexion données | `DATABASE_URL`, `REDIS_URL` | fournies par l'infra |
 | JWT (ADR-011) | `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | paire RS256, voir README |
 | Certification (ADR-026) | `CERTIFICATION_PRIVATE_KEY`, `CERTIFICATION_MASTER_KEY` | `openssl rand -hex 32` |
-| Secrets inter-service | `MONEY_API_INTERNAL_KEY`, `DGI_VERIFICATION_INTERNAL_KEY`, `COMMERCIAL_AGENT_GRANT_INTERNAL_KEY`, `COMMISSION_BYPASS_REVIEW_INTERNAL_KEY` | `openssl rand -hex 32`, **une valeur distincte par secret** |
+| Secrets inter-service | `MONEY_API_INTERNAL_KEY`, `DGI_VERIFICATION_INTERNAL_KEY`, `COMMERCIAL_AGENT_GRANT_INTERNAL_KEY`, `COMMISSION_BYPASS_REVIEW_INTERNAL_KEY`, `DATA_RIGHTS_INTERNAL_KEY`, `CREDITS_INTERNAL_KEY` | `openssl rand -hex 32`, **une valeur distincte par secret** |
 | Webhooks partenaires | `APIP_WEBHOOK_SECRET`, `DJOMY_WEBHOOK_STUB_SECRET`, `MONEROO_WEBHOOK_STUB_SECRET` | `openssl rand -hex 32` |
 
 `MONEY_API_INTERNAL_KEY` doit être **identique** entre trust-api et money-api
 (secret partagé) — une seule génération.
+
+Chaque clé `*_INTERNAL_KEY` a un garde qui **plante au démarrage** si la variable
+manque (fail-fast voulu) : une clé oubliée dans l'outillage = un premier
+déploiement qui ne démarre pas. La cohérence entre l'inventaire
+(`apps/trust-api/src/common/secrets.ts`), `.env.example`, `fly.toml`,
+`scripts/setup-staging-secrets.ps1` et ce tableau est **vérifiée par un test**
+(`apps/trust-api/src/common/secrets-inventory.spec.ts`) : ajouter une clé
+interne, c'est l'ajouter à ces cinq endroits.
 
 ## Cible : HashiCorp Vault (DAT §infra)
 

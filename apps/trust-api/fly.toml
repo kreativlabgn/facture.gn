@@ -23,6 +23,7 @@
 #     COMMERCIAL_AGENT_GRANT_INTERNAL_KEY=<hex32> \
 #     COMMISSION_BYPASS_REVIEW_INTERNAL_KEY=<hex32> \
 #     DATA_RIGHTS_INTERNAL_KEY=<hex32> \
+#     CREDITS_INTERNAL_KEY=<hex32> \
 #     DATA_RIGHTS_SUBJECT_HASH_PEPPER=<hex32> \
 #     APIP_WEBHOOK_SECRET=<hex32>
 #   # générateurs : openssl rand -hex 32  |  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
