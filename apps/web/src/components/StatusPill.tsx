@@ -15,8 +15,9 @@ const STATUS_LABELS: Record<string, { label: string; glyph: string; tone: BadgeT
 };
 
 const DISPUTE_LABELS: Record<string, { label: string; glyph: string; tone: BadgeTone }> = {
-  disputed: { label: "Contestée", glyph: "●", tone: "red" },
-  resolved: { label: "Litige résolu", glyph: "●", tone: "green" },
+  none: { label: "Saine", glyph: "●", tone: "green" },
+  disputed: { label: "Contestée", glyph: "●", tone: "amber" },
+  resolved: { label: "Résolue", glyph: "●", tone: "blue" },
 };
 
 export function StatusPill({ status }: { status: string }) {
@@ -36,12 +37,23 @@ export function DuplicateWarningPill() {
   return <Badge tone="amber">● Doublon possible</Badge>;
 }
 
-// dispute_status "none" n'affiche jamais de pastille — un litige inexistant
-// n'est pas une information, jamais un faux signal neutre à côté du statut.
-export function DisputeStatusPill({ disputeStatus }: { disputeStatus: string }) {
-  if (disputeStatus === "none") {
+// ADR-064 — un devis n'est jamais une facture certifiée : ce badge le
+// rappelle partout où une facture et un devis peuvent apparaître côte à côte
+// (liste, détail). `null` pour tout le reste (invoice, proforma) — jamais un
+// signal neutre à côté d'un document qui n'en a pas besoin. Tone `blue`, déjà
+// validé pour un statut "info/partiel" — aucun nouveau token couleur.
+export function DocumentTypeBadge({ documentType }: { documentType: string }) {
+  if (documentType !== "quote") {
     return null;
   }
+  return <Badge tone="blue">Devis</Badge>;
+}
+
+// Chantier 4 (DAF/B2G) — "none" affiche désormais une pastille « Saine »
+// plutôt que rien : sur l'écran DAF, une facture sans litige à côté d'une
+// facture contestée doit se lire d'un coup d'œil, sans avoir à distinguer
+// « rien affiché » de « pas encore chargé ».
+export function DisputeStatusPill({ disputeStatus }: { disputeStatus: string }) {
   const entry = DISPUTE_LABELS[disputeStatus] ?? { label: disputeStatus, glyph: "○", tone: "navy" as const };
   return (
     <Badge tone={entry.tone}>

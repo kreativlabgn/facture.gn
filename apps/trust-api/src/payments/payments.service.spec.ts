@@ -239,6 +239,48 @@ describe("PaymentsService — encaissement cash", () => {
   });
 });
 
+// *620#, capacité 3 (encaissement cash USSD) — plan
+// 2026-09-16-ussd-flash-recherche-encaissement-cash.md, Groupe D.
+describe("PaymentsService — canal de collecte (Payment.collectionChannel, capacité 3 USSD)", () => {
+  it("persiste le collectionChannel fourni explicitement (ussd)", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-channel-ussd", "ussd");
+
+    expect(prisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ collectionChannel: "ussd" }) }),
+    );
+  });
+
+  it("appelé sans 5e argument (tous les appelants HTTP existants) applique le défaut 'pwa', comportement observable inchangé pour eux", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-channel-default");
+
+    expect(prisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ collectionChannel: "pwa" }) }),
+    );
+  });
+
+  it("un paiement déjà existant en base sans collectionChannel (avant ce lot) continue de se lire tel quel lors d'un replay d'idempotence, jamais réécrit rétroactivement", async () => {
+    const prisma = createFakePrisma({ amountDue: 1_500_000n });
+    // Fixture « legacy » — un Payment déjà committé par l'ancien code, avant
+    // l'ajout de la colonne : collectionChannel absent (NULL en base).
+    const legacyPayment = { id: "payment-legacy", invoiceId: "inv-1", amount: 1_500_000n, idempotencyKey: "idem-key-legacy" };
+    prisma.payment.findUnique = vi.fn().mockResolvedValue(legacyPayment);
+    prisma.payment.findFirst = prisma.payment.findUnique;
+    const service = new PaymentsService(prisma as any, createFakePaymentLinkClient() as any, createFakeCommissionBypassEscalation() as any);
+
+    const result = await service.recordCashPayment("inv-1", "org-1", cashDto, "idem-key-legacy", "ussd");
+
+    expect(result).toBe(legacyPayment);
+    expect(result).not.toHaveProperty("collectionChannel", "ussd");
+    expect(prisma.payment.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("PaymentsService — trop-perçu cash (C14)", () => {
   it("accepte un paiement cash supérieur au solde dû et trace l'excédent dans overpaymentAmount", async () => {
     const prisma = createFakePrisma({ amountDue: 1_000_000n });

@@ -12,6 +12,7 @@ describe("permissions — miroir des @Roles() de trust-api", () => {
         "invoices:read",
         "invoices:create",
         "invoices:issue",
+        "invoices:convert",
         "invoices:void",
         "invoices:relance",
         "invoices:financing",

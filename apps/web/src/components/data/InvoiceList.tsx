@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { formatDate, formatGnf } from "@/lib/format";
 import type { InvoiceListItem } from "@/lib/trust-api";
-import { StatusPill } from "@/components/StatusPill";
+import { DocumentTypeBadge, StatusPill } from "@/components/StatusPill";
 import { LifecyclePills } from "@/components/LifecyclePills";
 import { Card } from "@/components/ui";
 
@@ -49,6 +49,7 @@ export function InvoiceList({
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5">
                 <span className="font-mono text-sm font-bold text-navy-950">{formatGnf(invoice.totalTtc)}</span>
                 <StatusPill status={invoice.status} />
+                <DocumentTypeBadge documentType={invoice.documentType} />
                 {/* Le parcours légal se lit À CÔTÉ du statut de document, jamais
                     à sa place : « Payée » et « Déposée » ne répondent pas à la
                     même question. Le retour à la ligne est autorisé — sur un

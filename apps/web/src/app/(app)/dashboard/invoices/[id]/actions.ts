@@ -5,6 +5,7 @@ import { DISBURSEMENT_METHODS } from "@/lib/financing";
 import { requireSessionToken } from "@/lib/session";
 import {
   chooseFinancing,
+  convertToInvoice,
   createCreditNote,
   issueInvoice,
   regeneratePaymentLink,
@@ -15,6 +16,12 @@ import {
 } from "@/lib/trust-api";
 
 export type InvoiceActionState = { error: string } | { ok: string } | null;
+
+// C15/C16, ADR-064 — la conversion d'un proforma/devis en facture. Un état
+// dédié plutôt que `InvoiceActionState` : le composant client a besoin de
+// l'identifiant de la NOUVELLE facture brouillon pour y rediriger, pas
+// seulement d'un message de confirmation générique.
+export type ConvertToInvoiceActionState = { error: string } | { newInvoiceId: string } | null;
 
 // L'arbitrage de financement a besoin d'un état PLUS RICHE que les quatre
 // autres actions : un refus de concurrence (409) n'est pas une erreur que le
@@ -107,6 +114,48 @@ export async function regeneratePaymentLinkAction(
     "Nouveau lien de paiement généré.",
     regeneratePaymentLink,
   );
+}
+
+// ── Conversion en facture (C15/C16, ADR-064) ────────────────────────────────
+//
+// Un proforma ou un devis n'est jamais engageant : ce geste crée une NOUVELLE
+// facture brouillon séparée (mécanisme déjà entièrement testé côté
+// invoices.service.ts) — le document d'origine, lui, passe à "Convertie" et
+// n'est plus jamais modifiable. L'émission de la facture créée reste un geste
+// séparé, via IssueInvoiceForm déjà existant.
+//
+// Ne réutilise PAS executer() : ce helper ne retourne qu'un `{ ok }` statique,
+// insuffisant ici — le composant client a besoin de l'identifiant de la
+// facture nouvellement créée pour y rediriger (même précédent que
+// InvoiceForm.tsx : la Server Action reste pure, jamais de redirect() serveur
+// ici, c'est le composant client qui navigue).
+export async function convertToInvoiceAction(
+  _prev: ConvertToInvoiceActionState,
+  formData: FormData,
+): Promise<ConvertToInvoiceActionState> {
+  const invoiceId = String(formData.get("invoiceId") ?? "").trim();
+  if (!invoiceId) {
+    return { error: "Action impossible : identifiant de facture manquant" };
+  }
+
+  const token = await requireSessionToken();
+  let converted;
+  try {
+    converted = await convertToInvoice(token, invoiceId);
+  } catch (error) {
+    if (error instanceof TrustApiError) {
+      return { error: error.message };
+    }
+    return { error: "Action temporairement indisponible" };
+  }
+
+  // Même trois chemins que executer() : le document d'origine change de
+  // statut (Convertie) et une nouvelle facture brouillon apparaît dans la liste.
+  revalidatePath(`/dashboard/invoices/${invoiceId}`);
+  revalidatePath("/dashboard/invoices");
+  revalidatePath("/dashboard");
+
+  return { newInvoiceId: converted.id };
 }
 
 // ── ARBITRAGE DU RAIL DE FINANCEMENT — ADR-088/089, K4/K5 ───────────────────

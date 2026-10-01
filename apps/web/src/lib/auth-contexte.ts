@@ -120,7 +120,13 @@ export const AUTH_CONTEXTES: Record<EspaceId, AuthContexte> = {
  *  arrive avec `returnTo=/cabinet` ou `/nouveau-cabinet` ; tout le reste est
  *  marchand — le profil majoritaire, et le seul pour qui /dashboard a un sens. */
 export function profilDepuisReturnTo(returnTo: string | undefined): Exclude<EspaceId, "acheteur"> {
-  return returnTo === "/cabinet" || returnTo === "/nouveau-cabinet" || returnTo?.startsWith("/cabinet/")
+  if (!returnTo) {
+    return "marchand";
+  }
+
+  const pathname = returnTo.startsWith("/") ? new URL(returnTo, "https://facture.gn").pathname : returnTo;
+
+  return pathname === "/cabinet" || pathname === "/nouveau-cabinet" || pathname.startsWith("/cabinet/")
     ? "cabinet"
     : "marchand";
 }

@@ -78,4 +78,13 @@ describe("destinationInterne", () => {
     const { destinationInterne } = await import("./route-protection");
     expect(destinationInterne("", "/onboarding")).toBe("/onboarding");
   });
+
+  // Une tabulation est ignorée par l'algorithme d'analyse d'URL (WHATWG) :
+  // "/\t/evil.com" se résout comme "//evil.com", protocol-relative. L'ancien
+  // filtre en regex ne testait que la contre-oblique littérale et aurait
+  // laissé passer cette variante.
+  it("rejette une redirection protocol-relative masquée par une tabulation", async () => {
+    const { destinationInterne } = await import("./route-protection");
+    expect(destinationInterne("/\t/evil.com")).toBe("/dashboard");
+  });
 });

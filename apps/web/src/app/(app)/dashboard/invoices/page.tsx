@@ -3,8 +3,8 @@ import { resolveActiveOrganization } from "@/lib/active-organization";
 import { canEmit } from "@/lib/nav";
 import { requireSessionToken } from "@/lib/session";
 import { listInvoices } from "@/lib/trust-api";
-import { InvoiceList } from "@/components/data/InvoiceList";
 import { ButtonLink } from "@/components/ui";
+import { InvoiceTypeFilter } from "./InvoiceTypeFilter";
 
 export const metadata: Metadata = { title: "Factures — facture.gn" };
 
@@ -38,7 +38,7 @@ export default async function InvoicesPage() {
         ) : null}
       </div>
 
-      <InvoiceList
+      <InvoiceTypeFilter
         invoices={invoices}
         emptyMessage="Aucune facture pour le moment."
         href={(invoice) => `/dashboard/invoices/${invoice.id}`}

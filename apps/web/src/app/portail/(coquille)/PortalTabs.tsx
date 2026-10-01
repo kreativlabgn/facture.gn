@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 // marchand (BottomTabBar) : pas de FAB, pas de tiroir, pas de variante lite —
 // un acheteur consulte et paie, il n'émet rien.
 //
-// Deux rendus d'une seule liste, comme PrimaryNav et BottomTabBar côté
+// Deux rendus d'une seule liste, comme SidebarNavigation et BottomTabBar côté
 // marchand : `bar` en bas sur téléphone (ce portail s'ouvre presque toujours
 // depuis un SMS, donc sur un mobile tenu à une main), `inline` dans l'en-tête
 // sur écran large. Le layout n'en affiche jamais qu'un à la fois — `display:none`

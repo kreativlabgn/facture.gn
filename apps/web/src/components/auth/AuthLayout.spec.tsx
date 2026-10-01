@@ -75,6 +75,8 @@ describe("profilDepuisReturnTo", () => {
   it("reconnaît le tunnel cabinet et retombe sur marchand partout ailleurs", () => {
     expect(profilDepuisReturnTo("/cabinet")).toBe("cabinet");
     expect(profilDepuisReturnTo("/nouveau-cabinet")).toBe("cabinet");
+    expect(profilDepuisReturnTo("/cabinet?tab=structure")).toBe("cabinet");
+    expect(profilDepuisReturnTo("/nouveau-cabinet?source=cta")).toBe("cabinet");
     expect(profilDepuisReturnTo("/cabinet/mandates")).toBe("cabinet");
     expect(profilDepuisReturnTo("/dashboard")).toBe("marchand");
     expect(profilDepuisReturnTo(undefined)).toBe("marchand");

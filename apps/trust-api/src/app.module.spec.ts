@@ -26,6 +26,11 @@ describe("AppModule — graphe de dépendances", () => {
     CREDITS_INTERNAL_KEY: "a".repeat(64),
     DATA_RIGHTS_SUBJECT_HASH_PEPPER: "a".repeat(64),
     APIP_WEBHOOK_SECRET: "a".repeat(64),
+    // Plan 2026-09-16 (OCR multicanal), étape 2 — WhatsAppWebhookAuthGuard et
+    // WhatsAppInboundController échouent au bootstrap sans ces deux secrets
+    // (fail-fast, même posture que APIP_WEBHOOK_SECRET/PartnerWebhookAuthGuard).
+    WHATSAPP_APP_SECRET: "a".repeat(64),
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: "jeton-de-verification-test",
     // Lot J3 — le job de rétention ne s'arme pas pendant le smoke (onModuleInit
     // n'est de toute façon pas appelé par .compile(), ceinture + bretelles).
     RETENTION_ENABLED: "false",

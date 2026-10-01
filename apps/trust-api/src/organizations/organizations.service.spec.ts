@@ -1196,6 +1196,45 @@ describe("OrganizationsService.upgradeCommercialTier (H2, ADR-049)", () => {
   });
 });
 
+describe("OrganizationsService.setWhatsappOcrEnabled (plan 2026-09-16, OCR multicanal, clarification 7)", () => {
+  function createFakePrismaForWhatsappToggle(organization: any) {
+    return auClientScope({
+      organization: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(organization),
+        update: vi.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...organization, ...data })),
+      },
+    });
+  }
+
+  it("écrit exactement le booléen demandé (true), rien d'autre", async () => {
+    const organization = { id: "org-1", whatsappOcrEnabled: false };
+    const prisma = createFakePrismaForWhatsappToggle(organization);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    const result = await service.setWhatsappOcrEnabled("org-1", true);
+
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { whatsappOcrEnabled: true },
+    });
+    expect(result.whatsappOcrEnabled).toBe(true);
+  });
+
+  it("écrit exactement le booléen demandé (false) — désactivation", async () => {
+    const organization = { id: "org-1", whatsappOcrEnabled: true };
+    const prisma = createFakePrismaForWhatsappToggle(organization);
+    const service = new OrganizationsService(prisma as any, createFakeSigningKeyService() as any, createFakePendingMemberInviteService() as any);
+
+    const result = await service.setWhatsappOcrEnabled("org-1", false);
+
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { whatsappOcrEnabled: false },
+    });
+    expect(result.whatsappOcrEnabled).toBe(false);
+  });
+});
+
 describe("OrganizationsService.revokeSigningKey (A4, ADR-025)", () => {
   it("délègue à OrganizationSigningKeyService.revoke()", async () => {
     const prisma = {} as any;

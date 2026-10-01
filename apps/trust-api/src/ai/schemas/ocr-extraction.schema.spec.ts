@@ -118,4 +118,15 @@ describe("ocrExtractionSchema (ADR-122)", () => {
 
     expect(parsed).not.toHaveProperty("organizationId");
   });
+
+  // Régression verrouillant la clarification 1 du plan 2026-09-16 (OCR
+  // multicanal) : le contrat Zod reste UNIQUE, sans buyerPhone. Le numéro
+  // (PWA ou WhatsApp) se résout AVANT d'entrer dans ce contrat, côté service —
+  // jamais une propriété que le modèle, ou quiconque rejoue sa sortie,
+  // contrôlerait.
+  it("élague un buyerPhone glissé dans la sortie du modèle — jamais ajouté au contrat", () => {
+    const parsed = ocrExtractionSchema.parse({ ...LECTURE_VALIDE, buyerPhone: "+224622334455" });
+
+    expect(parsed).not.toHaveProperty("buyerPhone");
+  });
 });

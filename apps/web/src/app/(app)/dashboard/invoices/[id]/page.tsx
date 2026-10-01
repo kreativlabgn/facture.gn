@@ -16,12 +16,13 @@ import {
   type FinancingOptions,
   type InvoiceFullDetail,
 } from "@/lib/trust-api";
-import { DisputeStatusPill, StatusPill } from "@/components/StatusPill";
+import { DisputeStatusPill, DocumentTypeBadge, StatusPill } from "@/components/StatusPill";
 import { LifecyclePills } from "@/components/LifecyclePills";
 import { Card } from "@/components/ui";
 import { ArbitrageMarchandForm } from "./ArbitrageMarchandForm";
 import { AvoirRectificatifForm } from "./AvoirRectificatifForm";
 import {
+  ConvertToInvoiceForm,
   IssueInvoiceForm,
   RegenerateLinkForm,
   SendReminderForm,
@@ -29,6 +30,7 @@ import {
 } from "./InvoiceActions";
 
 export const metadata: Metadata = { title: "Facture — facture.gn" };
+const TELEMO_PORTAL_URL = (process.env.NEXT_PUBLIC_TELEMO_PORTAL_URL ?? "https://telemo.gov.gn").replace(/\/+$/, "");
 
 // Écran de détail d'une facture. Jusqu'ici la coquille listait les factures
 // sans jamais permettre d'en ouvrir une : onze routes de trust-api étaient
@@ -74,7 +76,17 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
   const emise = invoice.issuedAt !== null;
   const soldee = invoice.status === "paid" || invoice.status === "voided";
 
-  const peutEmettre = brouillon && hasPermission(role, "invoices:issue");
+  // ADR-064 — un devis/proforma brouillon ne doit plus jamais afficher
+  // IssueInvoiceForm : issue() le rejette systématiquement en 409 (voir
+  // invoices.service.ts), et ce bouton n'aurait donc mené qu'à une erreur
+  // technique. Seule une VRAIE facture peut être émise directement.
+  const peutEmettre = brouillon && invoice.documentType === "invoice" && hasPermission(role, "invoices:issue");
+  // C15/C16 — la conversion, elle, ne concerne QUE les documents
+  // préliminaires : un proforma ou un devis encore brouillon.
+  const peutConvertir =
+    brouillon &&
+    (invoice.documentType === "proforma" || invoice.documentType === "quote") &&
+    hasPermission(role, "invoices:convert");
   const peutAnnuler =
     (invoice.status === "draft" || invoice.status === "issued") && hasPermission(role, "invoices:void");
   const peutRelancer = emise && !soldee && hasPermission(role, "invoices:relance");
@@ -123,6 +135,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
               {invoice.number ?? "Brouillon"}
             </h1>
             <StatusPill status={invoice.status} />
+            <DocumentTypeBadge documentType={invoice.documentType} />
             <DisputeStatusPill disputeStatus={invoice.disputeStatus} />
           </div>
           {/* Le parcours LÉGAL, à côté du statut de document : « puis-je encore
@@ -167,10 +180,25 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
 
       {!invoice.disputeStatus || invoice.disputeStatus !== "disputed" ? (
         <ProchaineAction
-          titre={brouillon ? "Facture prête à être certifiée" : peutRelancer ? "Règlement à suivre" : soldee ? "Facture clôturée" : "Facture émise"}
+          titre={
+            brouillon
+              ? invoice.documentType !== "invoice"
+                ? "Devis prêt à être converti"
+                : "Facture prête à être certifiée"
+              : peutRelancer
+                ? "Règlement à suivre"
+                : soldee
+                  ? "Facture clôturée"
+                  : "Facture émise"
+          }
           description={
             brouillon
-              ? "Vérifiez les lignes puis émettez la facture pour sceller son numéro et sa preuve."
+              ? // ADR-064 — un devis/proforma brouillon ne doit jamais promettre
+                // une émission ou une certification directe : ce texte reste
+                // celui de la conversion, jamais celui de l'émission.
+                invoice.documentType !== "invoice"
+                ? "Vérifiez les lignes puis convertissez ce devis en facture pour pouvoir l'émettre."
+                : "Vérifiez les lignes puis émettez la facture pour sceller son numéro et sa preuve."
               : peutRelancer
                 ? "Le client n'a pas encore réglé la totalité. Vous pouvez relancer ou régénérer le lien de paiement."
                 : soldee
@@ -214,7 +242,22 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
           />
           <Ligne libelle="Créée le" valeur={formatDate(invoice.createdAt)} />
           {invoice.referenceMarche ? (
-            <Ligne libelle="Référence marché" valeur={invoice.referenceMarche} mono />
+            <div className="space-y-1">
+              <span className="block text-xs font-semibold tracking-wide text-navy-600 uppercase">
+                Référence marché (Telemo)
+              </span>
+              <a
+                href={`${TELEMO_PORTAL_URL}/${encodeURIComponent(invoice.referenceMarche)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block font-mono text-sm font-bold text-navy-800 underline decoration-navy-200 underline-offset-4 transition-colors hover:text-navy-950"
+              >
+                {invoice.referenceMarche} ↗
+              </a>
+            </div>
+          ) : null}
+          {invoice.quoteValidUntil ? (
+            <Ligne libelle="Devis valable jusqu'au" valeur={formatDate(invoice.quoteValidUntil)} />
           ) : null}
           {invoice.validatedByAdministration ? (
             <Ligne libelle="Administration" valeur="Liquidation validée" />
@@ -406,7 +449,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
       ) : null}
 
       {/* ── Actions ────────────────────────────────────────────────────── */}
-      {peutEmettre || peutAnnuler || peutRelancer || emise ? (
+      {peutEmettre || peutConvertir || peutAnnuler || peutRelancer || emise ? (
         <section>
           <h2 className="mb-3 font-display text-lg font-semibold text-navy-950">Actions</h2>
           <div className="flex flex-col gap-4">
@@ -414,6 +457,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<Pa
               <Card>
                 <div className="p-5">
                   <IssueInvoiceForm invoiceId={invoice.id} />
+                </div>
+              </Card>
+            ) : null}
+
+            {peutConvertir ? (
+              <Card>
+                <div className="p-5">
+                  <ConvertToInvoiceForm invoiceId={invoice.id} />
                 </div>
               </Card>
             ) : null}

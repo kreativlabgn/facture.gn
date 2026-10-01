@@ -8,3 +8,4 @@ export { Badge, type BadgeTone } from "./Badge";
 export { Card, CardBody, CardHeader } from "./Card";
 export { DataField, Field, FieldLabel, SelectInput, TextInput } from "./Field";
 export { EmptyState } from "./EmptyState";
+export { KpiTile } from "./KpiTile";

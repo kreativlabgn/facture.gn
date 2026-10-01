@@ -61,10 +61,17 @@ describe("ProductsService.create (E10)", () => {
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    const result = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
+    const result = await service.create({ organizationId: "org-1", name: "Riz 25kg", type: "product" }, "org-1");
 
     expect(prisma.product.create).toHaveBeenCalledWith({
-      data: { organizationId: "org-1", name: "Riz 25kg", possibleDuplicateOf: null },
+      data: {
+        organizationId: "org-1",
+        name: "Riz 25kg",
+        type: "product",
+        description: null,
+        salePrice: null,
+        possibleDuplicateOf: null,
+      },
     });
     expect(result.id).toBe("product-1");
   });
@@ -73,10 +80,50 @@ describe("ProductsService.create (E10)", () => {
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
+    await service.create({ organizationId: "org-1", name: "Riz 25kg", type: "product" }, "org-1");
 
     const createCall = prisma.product.create.mock.calls[0][0];
     expect(createCall.data).not.toHaveProperty("costPrice");
+  });
+
+  it("passe type/description/salePrice fournis tels quels à Prisma", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    await service.create(
+      {
+        organizationId: "org-1",
+        name: "Réparation climatiseur",
+        type: "service",
+        description: "Diagnostic et réparation à domicile",
+        salePrice: 250_000n,
+      },
+      "org-1",
+    );
+
+    expect(prisma.product.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: "org-1",
+        name: "Réparation climatiseur",
+        type: "service",
+        description: "Diagnostic et réparation à domicile",
+        salePrice: 250_000n,
+        possibleDuplicateOf: null,
+      },
+    });
+  });
+
+  it("laisse description/salePrice à null quand absents du DTO (catalogue sur devis)", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    const result: any = await service.create(
+      { organizationId: "org-1", name: "Réparation climatiseur", type: "service" },
+      "org-1",
+    );
+
+    expect(result.description).toBeNull();
+    expect(result.salePrice).toBeNull();
   });
 });
 
@@ -85,13 +132,23 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
+    const result: any = await service.create(
+      { organizationId: "org-1", name: "Riz 25kg", type: "product" },
+      "org-1",
+    );
 
     expect(prisma.product.findFirst).toHaveBeenCalledWith({
       where: { organizationId: "org-1", name: { equals: "Riz 25kg", mode: "insensitive" } },
     });
     expect(prisma.product.create).toHaveBeenCalledWith({
-      data: { organizationId: "org-1", name: "Riz 25kg", possibleDuplicateOf: "product-existant" },
+      data: {
+        organizationId: "org-1",
+        name: "Riz 25kg",
+        type: "product",
+        description: null,
+        salePrice: null,
+        possibleDuplicateOf: "product-existant",
+      },
     });
     expect(result.possibleDuplicateOf).toBe("product-existant");
   });
@@ -100,7 +157,10 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "riz 25kg" }, "org-1");
+    const result: any = await service.create(
+      { organizationId: "org-1", name: "riz 25kg", type: "product" },
+      "org-1",
+    );
 
     // Preuve directe que CE test exerce bien mode: "insensitive" — sans cette assertion,
     // le test passerait même si le service comparait en sensible à la casse et que le
@@ -115,7 +175,10 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma();
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
+    const result: any = await service.create(
+      { organizationId: "org-1", name: "Riz 25kg", type: "product" },
+      "org-1",
+    );
 
     expect(result.possibleDuplicateOf).toBeNull();
   });
@@ -126,10 +189,20 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
+    const result: any = await service.create(
+      { organizationId: "org-1", name: "Riz 25kg", type: "product" },
+      "org-1",
+    );
 
     expect(prisma.product.create).toHaveBeenCalledWith({
-      data: { organizationId: "org-1", name: "Riz 25kg", possibleDuplicateOf: null },
+      data: {
+        organizationId: "org-1",
+        name: "Riz 25kg",
+        type: "product",
+        description: null,
+        salePrice: null,
+        possibleDuplicateOf: null,
+      },
     });
     expect(result.possibleDuplicateOf).toBeNull();
   });
@@ -138,13 +211,23 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    const result: any = await service.create({ organizationId: "org-1", name: "  Riz 25kg  " }, "org-1");
+    const result: any = await service.create(
+      { organizationId: "org-1", name: "  Riz 25kg  ", type: "product" },
+      "org-1",
+    );
 
     expect(prisma.product.findFirst).toHaveBeenCalledWith({
       where: { organizationId: "org-1", name: { equals: "Riz 25kg", mode: "insensitive" } },
     });
     expect(prisma.product.create).toHaveBeenCalledWith({
-      data: { organizationId: "org-1", name: "Riz 25kg", possibleDuplicateOf: "product-existant" },
+      data: {
+        organizationId: "org-1",
+        name: "Riz 25kg",
+        type: "product",
+        description: null,
+        salePrice: null,
+        possibleDuplicateOf: "product-existant",
+      },
     });
     expect(result.possibleDuplicateOf).toBe("product-existant");
   });
@@ -153,7 +236,7 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const prisma = createFakePrisma({ existingMatch: { id: "product-existant", name: "Riz 25kg" } });
     const service = new ProductsService(prisma as any);
 
-    await service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1");
+    await service.create({ organizationId: "org-1", name: "Riz 25kg", type: "product" }, "org-1");
 
     expect(prisma.product.update).not.toHaveBeenCalled();
     expect(prisma.product.delete).not.toHaveBeenCalled();
@@ -226,8 +309,8 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const service = new ProductsService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
-      service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1"),
-      service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1"),
+      service.create({ organizationId: "org-1", name: "Riz 25kg", type: "product" }, "org-1"),
+      service.create({ organizationId: "org-1", name: "Riz 25kg", type: "product" }, "org-1"),
     ]);
 
     expect(products).toHaveLength(2);
@@ -247,8 +330,8 @@ describe("ProductsService.create — dédoublonnage par nom (E3, ADR-038)", () =
     const service = new ProductsService(prisma);
 
     const [resultA, resultB]: any[] = await Promise.all([
-      service.create({ organizationId: "org-1", name: "Riz 25kg" }, "org-1"),
-      service.create({ organizationId: "org-1", name: "Sucre 1kg" }, "org-1"),
+      service.create({ organizationId: "org-1", name: "Riz 25kg", type: "product" }, "org-1"),
+      service.create({ organizationId: "org-1", name: "Sucre 1kg", type: "product" }, "org-1"),
     ]);
 
     expect(products).toHaveLength(2);
@@ -269,6 +352,95 @@ describe("ProductsService.setCostPrice (E6, ADR-084)", () => {
       data: { costPrice: 15_000n },
     });
     expect(result.costPrice).toBe(15_000n);
+  });
+});
+
+// Catalogue produits/services (2026-09-16) — nouveau PATCH /products/:id.
+// Même squelette que OrganizationsService.update() : lecture scopée avant
+// écriture (findFirstOrThrow), spread conditionnel par champ (`undefined` =
+// absent de `data`, `null` = passé tel quel à Prisma pour effacer).
+describe("ProductsService.update (catalogue produits/services)", () => {
+  it("met à jour uniquement le(s) champ(s) fourni(s) — mise à jour partielle du nom seul", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    const result = await service.update("product-1", { name: "Riz 25kg (nouveau)" }, "org-1");
+
+    expect(prisma.product.findFirstOrThrow).toHaveBeenCalledWith({
+      where: { id: "product-1", organizationId: "org-1" },
+    });
+    expect(prisma.product.update).toHaveBeenCalledWith({
+      where: { id: "product-1" },
+      data: { name: "Riz 25kg (nouveau)" },
+    });
+    expect(result.name).toBe("Riz 25kg (nouveau)");
+  });
+
+  it("efface explicitement description et salePrice quand le DTO porte null", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    await service.update("product-1", { description: null, salePrice: null }, "org-1");
+
+    expect(prisma.product.update).toHaveBeenCalledWith({
+      where: { id: "product-1" },
+      data: { description: null, salePrice: null },
+    });
+  });
+
+  it("ne touche pas aux champs absents du DTO (undefined n'apparaît jamais dans data)", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    await service.update("product-1", { isActive: false }, "org-1");
+
+    const updateCall = prisma.product.update.mock.calls[0][0];
+    expect(updateCall.data).toEqual({ isActive: false });
+    expect(updateCall.data).not.toHaveProperty("name");
+    expect(updateCall.data).not.toHaveProperty("description");
+    expect(updateCall.data).not.toHaveProperty("salePrice");
+  });
+
+  it("met à jour plusieurs champs à la fois", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    await service.update(
+      "product-1",
+      { name: "Riz 25kg (nouveau)", description: "Nouvelle description", salePrice: 175_000n, isActive: false },
+      "org-1",
+    );
+
+    expect(prisma.product.update).toHaveBeenCalledWith({
+      where: { id: "product-1" },
+      data: {
+        name: "Riz 25kg (nouveau)",
+        description: "Nouvelle description",
+        salePrice: 175_000n,
+        isActive: false,
+      },
+    });
+  });
+
+  it("refuse (lève) une mise à jour visant un produit hors de l'organisation appelante", async () => {
+    const prisma = createFakePrisma();
+    (prisma.product.findFirstOrThrow as any).mockRejectedValueOnce(new Error("Ressource introuvable"));
+    const service = new ProductsService(prisma as any);
+
+    await expect(service.update("product-autre-org", { name: "Tentative" }, "org-1")).rejects.toThrow();
+    expect(prisma.product.update).not.toHaveBeenCalled();
+  });
+
+  it("ne transmet jamais 'type' à Prisma — immuable après création même si présent sur l'objet appelant", async () => {
+    const prisma = createFakePrisma();
+    const service = new ProductsService(prisma as any);
+
+    // `as any` : UpdateProductDto n'a structurellement pas de champ `type` —
+    // ce cast simule un appelant qui contournerait le typage TypeScript.
+    await service.update("product-1", { name: "Riz 25kg", type: "service" } as any, "org-1");
+
+    const updateCall = prisma.product.update.mock.calls[0][0];
+    expect(updateCall.data).not.toHaveProperty("type");
   });
 });
 

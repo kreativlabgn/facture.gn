@@ -2,10 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireSessionToken } from "@/lib/session";
 import { resolveActiveOrganization } from "@/lib/active-organization";
+import { hasPermission } from "@/lib/permissions";
 import { listProducts, type ProductListItem } from "@/lib/trust-api";
 import { formatGnf } from "@/lib/format";
 import { DuplicateWarningPill } from "@/components/StatusPill";
+import { ButtonLink } from "@/components/ui";
 import { DataTable, type Column } from "@/components/data/DataTable";
+import { PRODUCT_TYPE_LABELS, ProductActiveStatusBadge } from "./ProductBadges";
 
 export const metadata: Metadata = { title: "Produits — facture.gn" };
 
@@ -30,6 +33,11 @@ const COLUMNS: readonly Column<ProductListItem>[] = [
     ),
   },
   {
+    key: "type",
+    header: "Type",
+    cell: (product) => <span className="text-navy-600">{PRODUCT_TYPE_LABELS[product.type] ?? product.type}</span>,
+  },
+  {
     key: "costPrice",
     header: "Coût",
     align: "right",
@@ -39,11 +47,21 @@ const COLUMNS: readonly Column<ProductListItem>[] = [
       <span className="font-mono text-xs text-navy-600">{product.costPrice ? formatGnf(product.costPrice) : "—"}</span>
     ),
   },
+  {
+    key: "status",
+    header: "Statut",
+    // Vide quand actif — c'est l'état normal, il n'a pas besoin de pastille
+    // (voir ProductActiveStatusBadge). Seul un article retiré du catalogue
+    // affiche un signal.
+    cell: (product) => <ProductActiveStatusBadge isActive={product.isActive} />,
+  },
 ];
 
-// UI backlog gap comblé ici — écran liste produits. Pas de formulaire de
-// création (hors périmètre demandé : la création existe déjà côté API —
-// POST /products, E10 — mais aucun écran n'est demandé ici).
+// UI backlog gap comblé ici — écran liste produits, désormais avec un lien de
+// création (docs/plans/2026-09-16-catalogue-produits-services.md). Le bouton
+// reste visible sur mobile (contrairement au CTA équivalent de
+// dashboard/invoices/page.tsx) : la coquille n'a pas de FAB « + Produit » dans
+// la barre basse pour prendre le relais sur petit écran.
 export default async function ProductsPage() {
   const token = await requireSessionToken();
   const { active: organization } = await resolveActiveOrganization(token);
@@ -55,7 +73,14 @@ export default async function ProductsPage() {
 
   return (
     <div>
-      <h1 className="mb-6 font-display text-2xl font-bold text-navy-950">Produits</h1>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-display text-2xl font-bold text-navy-950">Produits</h1>
+        {hasPermission(organization.role, "products:read") ? (
+          <ButtonLink href="/dashboard/products/new" variant="accent">
+            + Nouveau produit
+          </ButtonLink>
+        ) : null}
+      </div>
       <DataTable
         columns={COLUMNS}
         rows={products}

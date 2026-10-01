@@ -24,8 +24,26 @@
 #     COMMISSION_BYPASS_REVIEW_INTERNAL_KEY=<hex32> \
 #     DATA_RIGHTS_INTERNAL_KEY=<hex32> \
 #     DATA_RIGHTS_SUBJECT_HASH_PEPPER=<hex32> \
-#     APIP_WEBHOOK_SECRET=<hex32>
+#     APIP_WEBHOOK_SECRET=<hex32> \
+#     CREDITS_INTERNAL_KEY=<hex32> \
+#     ETAX_API_KEY=<hex32> \
+#     WHATSAPP_APP_SECRET=<hex32> \
+#     WHATSAPP_WEBHOOK_VERIFY_TOKEN=<jeton choisi par vous, saisi aussi dans le tableau de bord Meta> \
+#     WHATSAPP_ACCESS_TOKEN=<jeton Bearer Graph API, tableau de bord Meta> \
+#     WHATSAPP_PHONE_NUMBER_ID=<identifiant du numéro WhatsApp plateforme, tableau de bord Meta> \
+#     REDIS_URL='rediss://default:<token>@<endpoint>.upstash.io:6379' \
+#     OCR_STT_ENDPOINT='https://<hub-stt-souverain>' \
+#     OCR_STT_TOKEN=<hexMin32> \
+#     STORAGE_ENDPOINT='https://<minio-souverain>' \
+#     STORAGE_ACCESS_KEY=<identifiant MinIO> \
+#     STORAGE_SECRET_KEY=<secret MinIO> \
+#     STORAGE_BUCKET='ocr-media'
 #   # générateurs : openssl rand -hex 32  |  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#   # REDIS_URL / OCR_STT_* / STORAGE_* : requiredInProduction: false (secrets.ts) —
+#   # absents, seules les branches vocale/WhatsApp du Hub Vision se dégradent
+#   # prévisiblement (503 métier / message WhatsApp dédié), jamais un refus de
+#   # démarrage de trust-api entier. Liste des NOMS synchronisée avec
+#   # TRUST_API_SECRETS (src/common/secrets.ts) — jamais de valeur réelle ici.
 #
 # MIGRATIONS — premier passage manuel et supervisé (66 migrations, base vierge),
 # JAMAIS auto : voir `[deploy]` plus bas.

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import type { InvoiceStatus, Prisma, PrismaClient } from "@facture-gn/db";
+import type { EmissionChannel, InvoiceStatus, Prisma, PrismaClient } from "@facture-gn/db";
 import { organizationScopedClient, setOrganizationScope } from "@facture-gn/db";
 import { PRISMA_CLIENT } from "../common/prisma.module";
 import { isUniqueConstraintViolation } from "../common/prisma-errors";
@@ -35,11 +35,18 @@ export class PaymentsService {
     private readonly commissionBypassEscalation: CommissionBypassEscalationService,
   ) {}
 
+  // collectionChannel : défaut "pwa" au niveau du PARAMÈTRE (jamais un défaut
+  // de COLONNE, voir migration 20260916100000 — la colonne DB reste NULLABLE
+  // sans DEFAULT) — préserve inchangé le comportement observable de tous les
+  // appelants existants (PaymentsController HTTP, ~40 sites de test) sans
+  // toucher leur signature d'appel. Seul UssdCashCollectionService fournit
+  // "ussd" explicitement (*620#, capacité 3).
   async recordCashPayment(
     invoiceId: string,
     organizationId: string,
     dto: CreatePaymentDto,
     idempotencyKey: string,
+    collectionChannel: EmissionChannel = "pwa",
   ) {
     const existing = await this.findByIdempotencyKey(organizationId, idempotencyKey);
     if (existing) {
@@ -57,6 +64,7 @@ export class PaymentsService {
       platformFeeAmount: 0n,
       gatewayFeeAmount: 0n,
       method: "cash",
+      collectionChannel,
       proofPhotoUrl: dto.proofPhotoUrl,
       proofGpsLat: dto.proofGpsLat,
       proofGpsLng: dto.proofGpsLng,

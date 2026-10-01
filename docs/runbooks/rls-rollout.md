@@ -28,6 +28,18 @@ SQL Supabase (à lire en parallèle de ce runbook, pas à la place).
 | Étape 2 (rôle dédié) | non | `facture_app` (non-propriétaire) | défini par `organizationScopedClient` / `practiceScopedClient` | RLS actif pour les requêtes scopées ; les requêtes non scopées voient tout |
 | Étape 4 (FORCE) | oui | `facture_app` | défini | RLS actif y compris pour le propriétaire ; une requête non scopée ne voit **rien** |
 
+> **Précision vérifiée le 2026-10-01** (Postgres 16, rôle `facture_app` NOBYPASSRLS, table
+> `b2g_case` à deux tenants) : le prédicat `(org IS NULL AND practice IS NULL) OR …` laisse
+> passer toute session qui ne pose **aucun** scope — y compris sous `FORCE` et sous le rôle
+> non-propriétaire. Une requête sans scope voit **toutes** les lignes (2 sur 2) ; avec
+> `app.current_org_id` posé elle ne voit que celles de ce tenant (1 sur 2) ; une chaîne vide
+> compte comme « pas de scope ». La phrase « une requête non scopée ne voit rien » du tableau
+> ci-dessus décrit donc une cible (« fail-closed »), **pas le comportement actuel**. Tant que
+> l'échappement dormant n'est pas retiré, la RLS est une défense en profondeur contre un
+> **mauvais scope**, pas contre un **scope oublié** : le filtre applicatif `organizationId`
+> reste obligatoire. Retirer l'échappement (une fois tout le code scopé) est un chantier
+> distinct, à décider.
+
 ### Scope practice (`app.current_practice_id`)
 
 Depuis `20260905120000_rls_practice_scope`, le prédicat dormant exige que **les
@@ -47,6 +59,40 @@ practiceId)` dans une transaction interactive), exporté par `@facture-gn/db`, s
 le même modèle que `organizationScopedClient`. `mandate` et `revenue_share_credit`
 sont filtrées sur `practice_id` en direct ; `professional_practice` /
 `practice_member` restent **hors RLS** (aucune story ne les expose cross-tenant).
+
+### Registre : quelles tables sont sous RLS, lesquelles ne le sont pas
+
+Règle : **toute table qui porte une colonne de tenant** (`organization_id`,
+`practice_id`, `cabinet_id`, ou toute colonne `…_organization_id` / `…_practice_id` /
+`…_cabinet_id`) est sous `ENABLE` + `FORCE ROW LEVEL SECURITY` avec au moins une
+politique — **dans la migration même qui la crée**. Les seules exceptions sont
+nommées ci-dessous, avec leur raison.
+
+| Table hors RLS | Colonne de tenant | Pourquoi |
+|---|---|---|
+| `data_rights_request` | `organization_id` (nullable) | registre cross-organisation (ADR-E2) |
+| `practice_member` | `practice_id` | « aucune story ne l'expose cross-tenant » (plan `2026-09-05-rls-practice-scope`) |
+| `professional_practice` | — | idem ; aucune colonne de tenant |
+| `payment_webhook`, `merkle_anchor_batch` | — | cross-organisation par conception |
+| `user`, `user_phone`, `revoked_token`, `client_portal_otp`, `partner`, `financial_partner`, `public_buyer_account`, `public_buyer_account_member` | — | registres d'identité / globaux, sans colonne de tenant |
+
+**Cette règle est vérifiée par un test**, pas seulement écrite :
+`apps/trust-api/src/common/rls-registry.integration.spec.ts` interroge `pg_class` et
+`pg_policies` sur une base réelle. Il échoue si une table à colonne de tenant n'est pas
+enrôlée, et aussi si une exception de sa liste `EXCEPTIONS` devient obsolète. Il a été
+écrit après un oubli réel : `b2g_case`, `telemo_award` et `ocaecg_license` (ADR-126) ont
+été créées le 17/09 sans politique et corrigées par `20261001090000_rls_b2g_ocaecg_tables`.
+
+**Ajouter une table à colonne de tenant — liste de contrôle**
+1. Dans **la même migration** que le `CREATE TABLE` : `ENABLE`, `FORCE`, politique
+   `org_isolation FOR ALL` (même prédicat dormant, `USING` **et** `WITH CHECK`), `GRANT …
+   TO facture_app` conditionnel — modèle : `20260911120000_ocr_document` (clé
+   `organization_id`) ou `20261001090000_rls_b2g_ocaecg_tables`.
+2. Le code qui y accède pose `setOrganizationScope` (ou passe par
+   `organizationScopedClient`) **avant** le premier accès.
+3. Si la table doit rester hors RLS (cross-organisation par conception) : l'ajouter à
+   `EXCEPTIONS` dans le test **et** à ce tableau, avec la raison. Le test refuse l'entrée
+   sans table correspondante.
 
 ## Étape 1 — Adopter `organizationScopedClient` dans le code
 
@@ -279,6 +325,12 @@ signale un bug ou un probing).
 - Étape 1 → 0 : les politiques restent en place mais dormantes (rôle
   propriétaire + aucun GUC `app.current_*` défini). Aucun `DROP POLICY`
   nécessaire.
+- Annuler `20261001090000_rls_b2g_ocaecg_tables` (tables B2G) : pour chacune de
+  `b2g_case`, `telemo_award`, `ocaecg_license` — `DROP POLICY org_isolation ON <table>;`
+  puis `ALTER TABLE <table> NO FORCE ROW LEVEL SECURITY;` puis
+  `ALTER TABLE <table> DISABLE ROW LEVEL SECURITY;`. Aucune donnée touchée. Le test
+  d'exhaustivité redeviendra rouge tant que les tables ne sont pas retirées du registre
+  ou ré-enrôlées : c'est voulu.
 - Annuler le scope practice seul (revenir aux politiques par organisation de
   `20260829150000`) : rejouer le corps de cette migration (chaque `CREATE POLICY`
   après `DROP POLICY IF EXISTS`), puis

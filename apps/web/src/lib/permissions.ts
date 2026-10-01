@@ -32,6 +32,7 @@ export type Permission =
   | "invoices:read"
   | "invoices:create"
   | "invoices:issue"
+  | "invoices:convert"
   | "invoices:void"
   | "invoices:relance"
   | "invoices:financing"
@@ -58,6 +59,10 @@ const PERMISSION_ROLES: Record<Permission, readonly OrganizationRole[]> = {
   // brouillon, pas le certifier. L'émission scelle le hash et consomme un
   // numéro de séquence légal — elle est irréversible.
   "invoices:issue": ["owner", "admin", "cashier"],
+  // invoices.controller.ts — POST /invoices/:id/convert-to-invoice, commentaire
+  // du controller : "Même trio que /issue" (owner/admin/cashier) — transforme
+  // un proforma/devis en facture réellement facturable (C15/C16, ADR-064).
+  "invoices:convert": ["owner", "admin", "cashier"],
   // invoices.controller.ts — POST /invoices/:id/void. Le plus étroit des trois :
   // annuler une facture émise touche la séquence légale.
   "invoices:void": ["owner", "admin"],

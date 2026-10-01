@@ -3,7 +3,6 @@ import { Badge, Card, CardBody, EmptyState } from "@/components/ui";
 import { DisputeStatusPill, StatusPill } from "@/components/StatusPill";
 import { formatDate, formatGnf } from "@/lib/format";
 import {
-  canValidateLiquidation,
   liquidationStage,
   LIQUIDATION_STAGE_LABELS,
   referenceDepense,
@@ -11,7 +10,7 @@ import {
 import { requireSessionToken } from "@/lib/session";
 import { listReceivedInvoices, TrustApiError, type PublicBuyerInvoice } from "@/lib/trust-api";
 import { ArbitrageRails } from "./components/ArbitrageRails";
-import { CertifyLiquidationForm } from "./components/CertifyLiquidationForm";
+import DafVerificationZone from "@/components/b2g/DafVerificationZone";
 
 export const metadata: Metadata = { title: "Acheteur public — facture.gn" };
 
@@ -108,26 +107,15 @@ function LigneFacture({ invoice }: { invoice: PublicBuyerInvoice }) {
 
         <ArbitrageRails invoice={invoice} />
 
-        <div className="mt-4 border-t border-navy-100 pt-4">
-          {canValidateLiquidation(invoice) ? (
-            <>
-              <CertifyLiquidationForm
-                invoiceId={invoice.id}
-                reference={`${reference.label} ${reference.value}`}
-              />
-              <p className="mt-2 max-w-2xl text-xs text-navy-600">
-                Le visa reconnaît que la prestation a été exécutée. Il scelle le document et rend la
-                créance éligible au financement. Il ne vaut ni ordonnancement, ni paiement.
-              </p>
-            </>
-          ) : (
-            <p className="text-xs text-navy-600">
-              {invoice.validatedByAdministration
-                ? "Service fait déjà visé — la reconnaissance de dette est enregistrée et n'est pas reprise."
-                : "Aucune créance à reconnaître sur ce document."}
-            </p>
-          )}
-        </div>
+        <DafVerificationZone
+          invoice={{
+            id: invoice.id,
+            number: invoice.number,
+            referenceMarche: invoice.referenceMarche,
+            validatedByAdministration: invoice.validatedByAdministration,
+            disputeStatus: invoice.disputeStatus,
+          }}
+        />
       </CardBody>
     </Card>
   );

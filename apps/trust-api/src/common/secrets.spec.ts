@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { assertSecretsValid, validateSecrets, type SecretSpec } from "./secrets";
+import { assertSecretsValid, TRUST_API_SECRETS, validateSecrets, type SecretSpec } from "./secrets";
 
 const HEX64 = "0123456789abcdef".repeat(4);
 const HEX64_B = "fedcba9876543210".repeat(4);
@@ -104,5 +104,83 @@ describe("assertSecretsValid", () => {
     expect(caught?.message).toContain("KEY manquant");
     expect(caught?.message).toContain("PROD_ONLY manquant");
     expect(caught?.message).toContain("docs/runbooks/secrets-management.md");
+  });
+});
+
+// Plan 2026-09-16 (OCR multicanal), étape 3 — REDIS_URL (oubli corrigé) et
+// l'inventaire de ce lot (OCR_STT_*, WHATSAPP_ACCESS_TOKEN/PHONE_NUMBER_ID,
+// STORAGE_*). Ne réexerce pas assertSecretsValid()/validateSecrets() eux-mêmes
+// (déjà couverts ci-dessus par un SPECS générique) — vérifie que
+// TRUST_API_SECRETS, la VRAIE table utilisée par main.ts, porte les bonnes
+// entrées avec le bon format et le bon niveau d'exigence.
+describe("TRUST_API_SECRETS — inventaire, aucun doublon", () => {
+  it("aucun nom de secret n'apparaît deux fois", () => {
+    const noms = TRUST_API_SECRETS.map((s) => s.name);
+    expect(new Set(noms).size).toBe(noms.length);
+  });
+});
+
+describe("TRUST_API_SECRETS — plan 2026-09-16 (OCR multicanal), étape 3 + REDIS_URL", () => {
+  const NOUVELLES_ENTREES = [
+    "REDIS_URL",
+    "OCR_STT_ENDPOINT",
+    "OCR_STT_TOKEN",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "STORAGE_ENDPOINT",
+    "STORAGE_ACCESS_KEY",
+    "STORAGE_SECRET_KEY",
+    "STORAGE_BUCKET",
+  ] as const;
+
+  it("chaque entrée neuve figure exactement une fois dans l'inventaire", () => {
+    for (const nom of NOUVELLES_ENTREES) {
+      expect(TRUST_API_SECRETS.filter((s) => s.name === nom)).toHaveLength(1);
+    }
+  });
+
+  it("accepte des valeurs bien formées pour chacune, en production", () => {
+    const env = {
+      REDIS_URL: "redis://localhost:6379",
+      OCR_STT_ENDPOINT: "https://stt.facture.gn",
+      // Valeur factice (« deadbeef » ×4 : 32 hexadécimaux, entropie basse). Une
+      // valeur aléatoire déclenchait la règle generic-api-key de gitleaks ; un seul
+      // caractère répété (32 zéros) est refusé par REPEATED_CHAR (gabarit).
+      OCR_STT_TOKEN: "deadbeefdeadbeefdeadbeefdeadbeef",
+      WHATSAPP_ACCESS_TOKEN: "jeton-meta-quelconque",
+      WHATSAPP_PHONE_NUMBER_ID: "1234567890",
+      STORAGE_ENDPOINT: "http://minio:9000",
+      STORAGE_ACCESS_KEY: "minio-access",
+      STORAGE_SECRET_KEY: "minio-secret",
+      STORAGE_BUCKET: "ocr-media",
+    } as NodeJS.ProcessEnv;
+
+    const specs = TRUST_API_SECRETS.filter((s) => (NOUVELLES_ENTREES as readonly string[]).includes(s.name));
+    expect(validateSecrets(env, specs, { production: true })).toEqual([]);
+  });
+
+  it("REDIS_URL — requiredInProduction: true (oubli corrigé : trust-api dépend de Redis pour BullMQ — retention, merkle-anchor, pdp, ocr-pipeline)", () => {
+    const spec = TRUST_API_SECRETS.find((s) => s.name === "REDIS_URL");
+    expect(spec).toMatchObject({ required: false, requiredInProduction: true, format: "redisUrl" });
+  });
+
+  it.each(["OCR_STT_ENDPOINT", "OCR_STT_TOKEN", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET"])(
+    "%s — jamais requiredInProduction (dégradation prévisible et limitée à sa branche, jamais un refus de démarrage de trust-api)",
+    (nom) => {
+      const spec = TRUST_API_SECRETS.find((s) => s.name === nom);
+      expect(spec?.requiredInProduction).toBe(false);
+    },
+  );
+
+  it("signale un format invalide pour REDIS_URL (ex. postgres:// au lieu de redis://)", () => {
+    const specs = TRUST_API_SECRETS.filter((s) => s.name === "REDIS_URL");
+    const problems = validateSecrets({ REDIS_URL: "postgres://nope" } as NodeJS.ProcessEnv, specs, { production: true });
+    expect(problems).toEqual([expect.stringContaining("REDIS_URL au mauvais format")]);
+  });
+
+  it("signale un format invalide pour OCR_STT_TOKEN (moins de 32 caractères hexadécimaux)", () => {
+    const specs = TRUST_API_SECRETS.filter((s) => s.name === "OCR_STT_TOKEN");
+    const problems = validateSecrets({ OCR_STT_TOKEN: "trop-court" } as NodeJS.ProcessEnv, specs, { production: true });
+    expect(problems).toEqual([expect.stringContaining("OCR_STT_TOKEN au mauvais format")]);
   });
 });

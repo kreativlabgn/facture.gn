@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { Roles } from "../common/rbac/roles.decorator";
@@ -9,6 +9,7 @@ import {
   type OrganizationScopedListQueryDto,
 } from "../common/dto/organization-scoped-list-query.dto";
 import { createProductSchema, type CreateProductDto } from "./dto/create-product.dto";
+import { updateProductSchema, type UpdateProductDto } from "./dto/update-product.dto";
 import { setCostPriceSchema, type SetCostPriceDto } from "./dto/set-cost-price.dto";
 import { ProductsService } from "./products.service";
 
@@ -28,6 +29,23 @@ export class ProductsController {
     @CurrentOrganizationId() organizationId: string,
   ) {
     return this.productsService.create(dto, organizationId);
+  }
+
+  // Catalogue produits/services (2026-09-16) — édition générale d'une fiche
+  // produit. Même trio owner/admin et même mécanisme idSource "product" que
+  // setCostPrice()/findOne() ci-dessous (404 masqué hors organisation, déjà
+  // branché dans roles.guard.ts). `type` n'apparaît jamais dans
+  // updateProductSchema : immuable après création, voir update-product.dto.ts.
+  // costPrice reste hors de ce endpoint — exclusivement POST :id/cost-price.
+  @Patch(":id")
+  @Roles("owner", "admin")
+  @OrganizationIdSource("product")
+  update(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateProductSchema)) dto: UpdateProductDto,
+    @CurrentOrganizationId() organizationId: string,
+  ) {
+    return this.productsService.update(id, dto, organizationId);
   }
 
   // E6, ADR-084 — même trio restreint que create() : donnée commerciale

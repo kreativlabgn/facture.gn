@@ -2,34 +2,13 @@
 
 import { useActionState } from "react";
 import { Button, Field, SelectInput } from "@/components/ui";
+import { modeLabel, palierLabel } from "@/lib/cabinet-nav";
 import { PARTNER_TIERS, SETTLEMENT_MODES } from "@/lib/trust-api";
 import {
   changerModeReversementAction,
   changerPalierAction,
   type ReglagesActionState,
 } from "./actions";
-
-// Libellés côté interface. Les valeurs, elles, sont celles de l'enum Prisma —
-// jamais traduites avant l'envoi.
-const PALIER_LABELS: Record<string, string> = {
-  partner_free: "Partenaire — gratuit",
-  partner_starter: "Partenaire — Starter",
-  partner_pro: "Partenaire — Pro",
-  partner_institutional: "Partenaire — Institutionnel",
-};
-
-const MODE_LABELS: Record<string, string> = {
-  payout: "Versement direct",
-  subscription_deduction: "Déduction sur l'abonnement",
-};
-
-export function palierLabel(tier: string): string {
-  return PALIER_LABELS[tier] ?? tier;
-}
-
-export function modeLabel(mode: string): string {
-  return MODE_LABELS[mode] ?? mode;
-}
 
 function Message({ state }: { state: ReglagesActionState }) {
   if (!state) return null;

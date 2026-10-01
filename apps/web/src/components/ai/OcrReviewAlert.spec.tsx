@@ -69,6 +69,84 @@ describe("OcrReviewAlert (ADR-122)", () => {
   });
 });
 
+// Plan 2026-09-16 (OCR multicanal vocal/WhatsApp) — la source ne change RIEN
+// pour la photo (comportement historique), et porte un badge + une citation
+// pour les trois nouveaux canaux d'ingestion.
+describe("OcrReviewAlert — source d'ingestion (plan OCR multicanal)", () => {
+  it("ne change AUCUN nœud DOM quand `source` est absent", () => {
+    const sansProps = renderToStaticMarkup(<OcrReviewAlert findings={[ECART_TVA]} />);
+    const avecSourceUndefined = renderToStaticMarkup(
+      <OcrReviewAlert findings={[ECART_TVA]} source={undefined} textBrut={undefined} />,
+    );
+
+    expect(avecSourceUndefined).toBe(sansProps);
+  });
+
+  it("ne change AUCUN nœud DOM quand `source` vaut IMAGE_SCAN, même avec un textBrut fourni", () => {
+    const sansProps = renderToStaticMarkup(<OcrReviewAlert findings={[ECART_TVA]} />);
+    const avecImageScan = renderToStaticMarkup(
+      <OcrReviewAlert findings={[ECART_TVA]} source="IMAGE_SCAN" textBrut="un texte qui ne doit jamais apparaître" />,
+    );
+
+    expect(avecImageScan).toBe(sansProps);
+  });
+
+  it.each([
+    ["AUDIO_PWA", "Source : note vocale"],
+    ["WHATSAPP_VOICE", "Source : note vocale"],
+    ["WHATSAPP_TEXT", "Source : WhatsApp"],
+  ] as const)("affiche le badge « %s » → « %s »", (source, libelleAttendu) => {
+    const html = renderToStaticMarkup(<OcrReviewAlert findings={[ECART_TVA]} source={source} />);
+
+    expect(html).toContain(libelleAttendu);
+  });
+
+  it.each(["AUDIO_PWA", "WHATSAPP_VOICE"] as const)(
+    "cite la transcription telle quelle sous « Lecture du modèle » pour %s, sans troncature",
+    (source) => {
+      const transcription =
+        "Envoie une facture pour quatre sacs de riz à cinquante mille francs guinéens et un transport à douze mille cinq cents";
+      const html = renderToStaticMarkup(
+        <OcrReviewAlert findings={[ECART_TVA]} source={source} textBrut={transcription} />,
+      );
+
+      expect(html).toContain("Lecture du modèle");
+      expect(html).toContain(transcription);
+    },
+  );
+
+  it("cite le message tel quel sous « Message reçu » pour WHATSAPP_TEXT, sans le confondre avec une transcription", () => {
+    const message = "4 sacs de riz 25kg, 1 bidon huile 20L, transport 12500";
+    const html = renderToStaticMarkup(
+      <OcrReviewAlert findings={[ECART_TVA]} source="WHATSAPP_TEXT" textBrut={message} />,
+    );
+
+    expect(html).toContain("Message reçu");
+    expect(html).toContain(message);
+    expect(html).not.toContain("Lecture du modèle");
+  });
+
+  it("n'affiche aucun bloc citant le texte quand `textBrut` est null ou vide, même avec une source vocale", () => {
+    const htmlNull = renderToStaticMarkup(<OcrReviewAlert findings={[ECART_TVA]} source="AUDIO_PWA" textBrut={null} />);
+    const htmlVide = renderToStaticMarkup(<OcrReviewAlert findings={[ECART_TVA]} source="AUDIO_PWA" textBrut="" />);
+
+    expect(htmlNull).not.toContain("Lecture du modèle");
+    expect(htmlVide).not.toContain("Lecture du modèle");
+    // Le badge de source, lui, reste affiché : l'absence de texte brut ne dit
+    // rien sur la source elle-même.
+    expect(htmlNull).toContain("Source : note vocale");
+  });
+
+  it("ne pose jamais l'Or de marque ni du texte blanc sur jaune, même avec un badge et une citation", () => {
+    const html = renderToStaticMarkup(
+      <OcrReviewAlert findings={[ECART_TVA]} source="WHATSAPP_TEXT" textBrut="message brut" />,
+    );
+
+    expect(html).not.toMatch(/\b(?:bg|text|border)-yellow\b/);
+    expect(html).not.toMatch(/\btext-white\b.*\byellow\b/);
+  });
+});
+
 describe("formatCentimes", () => {
   it("sépare textuellement les centimes, sans flottant", () => {
     expect(formatCentimes("23400001")).toBe("234 000,01 GNF");

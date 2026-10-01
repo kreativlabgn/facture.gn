@@ -34,6 +34,15 @@ import type { ScanDocumentDto } from "./dto/scan-document.dto";
 // défini (packages/db/.env), sa présence ne dit rien de la joignabilité. Le
 // SELECT 1 tranche ; la sonde vit dans beforeAll parce qu'un `await` de plus
 // haut niveau ne compile pas en CommonJS (TS1378).
+//
+// ── FLAKE CONNU SOUS CHARGE COMPLÈTE DE LA SUITE ─────────────────────────────
+// Ce fichier est correct — aucun bug logique. Confirmé vert en isolation ET en
+// run combiné des 5 specs d'intégration Postgres du dépôt ; l'instabilité
+// n'apparaît que quand TOUTE la suite trust-api tourne d'un coup (contention
+// du pool de connexions Postgres local, pas un problème de CI dimensionnée
+// correctement ni de charge normale). Si ce test échoue isolément ou en petit
+// groupe, c'est un vrai bug à corriger — ne pas l'imputer à ce flake sans
+// d'abord le reproduire hors charge complète.
 let baseJoignable = false;
 
 function sha256(contenu: string): string {
@@ -71,6 +80,7 @@ const LECTURE_TVA_FAUSSE = {
 describe("Hub Vision — étanchéité RLS et interception des taxes (Postgres réel)", () => {
   let prisma: PrismaClient;
   let provider: OcrVisionProvider & { extraire: ReturnType<typeof vi.fn> };
+  let queue: { add: ReturnType<typeof vi.fn> };
   let service: OcrVisionService;
   let userId: string;
   let orgA: string;
@@ -98,7 +108,11 @@ describe("Hub Vision — étanchéité RLS et interception des taxes (Postgres r
     orgB = await creerOrganisation("Voisine B (TPU)", "tpu");
 
     provider = { extraire: vi.fn().mockResolvedValue({ modelId: "vision-gn-test", sortie: LECTURE_CONFORME }) };
-    service = new OcrVisionService(prisma, new OcrValidationService(), provider);
+    // La file ocr-pipeline (plan 2026-09-16) n'est PAS exercée par ce test —
+    // il couvre le chemin photo (scanner()/traiter()), synchrone, qui n'enfile
+    // jamais rien. Un faux Queue suffit à satisfaire le constructeur.
+    queue = { add: vi.fn().mockResolvedValue({ id: "job-1" }) };
+    service = new OcrVisionService(prisma, new OcrValidationService(), provider, queue as never);
   });
 
   beforeEach((contexte) => {
@@ -291,5 +305,114 @@ describe("Hub Vision — étanchéité RLS et interception des taxes (Postgres r
     // UN SEUL brouillon, et toutes les réponses le désignent : c'est le verrou
     // FOR UPDATE qui a sérialisé les traitements arrivés en RECEIVED.
     expect(new Set(resultats.map((r) => r.invoiceId))).toEqual(new Set([registres[0].invoiceId]));
+  });
+
+  // ── 6. Idempotence AUDIO_PWA / WHATSAPP_TEXT — nouveaux index uniques
+  // (plan 2026-09-16, OCR multicanal). Complète la section 5 ci-dessus (photo)
+  // pour les deux sources neuves, contre le VRAI Postgres et les VRAIES
+  // contraintes @@unique([organizationId, audioSha256]) / whatsappMessageId
+  // (@unique global) posées par la migration 20260916150000.
+
+  it("l'index unique (organizationId, audioSha256) rejette un doublon brut, indépendamment du repli applicatif du service", async () => {
+    const audioSha256 = sha256("note-vocale-doublon-raw");
+    await prisma.ocrDocument.create({
+      data: { organizationId: orgA, uploadedByUserId: userId, source: "AUDIO_PWA", audioSha256, storageKey: "audio/x.ogg" },
+    });
+
+    await expect(
+      prisma.ocrDocument.create({
+        data: { organizationId: orgA, uploadedByUserId: userId, source: "AUDIO_PWA", audioSha256, storageKey: "audio/y.ogg" },
+      }),
+    ).rejects.toMatchObject({ code: "P2002" });
+
+    // La même empreinte audio chez la voisine B n'entre jamais en collision —
+    // la contrainte est composite avec l'organisation, même précédent qu'imageSha256.
+    await expect(
+      prisma.ocrDocument.create({
+        data: { organizationId: orgB, uploadedByUserId: userId, source: "AUDIO_PWA", audioSha256, storageKey: "audio/z.ogg" },
+      }),
+    ).resolves.toMatchObject({ organizationId: orgB });
+  });
+
+  it("l'index unique GLOBAL sur whatsappMessageId rejette un doublon même à travers deux organisations distinctes", async () => {
+    const whatsappMessageId = `wamid.integration-${randomUUID()}`;
+    await prisma.ocrDocument.create({
+      data: {
+        organizationId: orgA,
+        uploadedByUserId: userId,
+        source: "WHATSAPP_TEXT",
+        whatsappMessageId,
+        customerPhone: "+224620000001",
+        textBrut: "Facture pour Amadou, 1 sac de riz à 500000 GNF",
+      },
+    });
+
+    // Contrairement à audioSha256/imageSha256, whatsappMessageId N'EST PAS
+    // composite avec organizationId (espace d'identifiants de Meta) : la
+    // MÊME valeur chez une AUTRE organisation heurte aussi la contrainte.
+    await expect(
+      prisma.ocrDocument.create({
+        data: {
+          organizationId: orgB,
+          uploadedByUserId: userId,
+          source: "WHATSAPP_TEXT",
+          whatsappMessageId,
+          customerPhone: "+224620000002",
+          textBrut: "Facture pour Fatoumata, 1 sac de riz à 500000 GNF",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("recevoirAudio() : rejeu concurrent du même audioSha256 ne produit qu'UN registre AUDIO_PWA (verrou/contrainte réels)", async () => {
+    const commandeAudio = {
+      organizationId: orgA,
+      audioSha256: sha256("note-vocale-concurrente"),
+      storageKey: "audio/note-vocale-concurrente.ogg",
+      mimeType: "audio/ogg" as const,
+    };
+
+    const resultats = await Promise.all(Array.from({ length: 5 }, () => service.recevoirAudio(commandeAudio, orgA, userId)));
+
+    expect(new Set(resultats.map((r) => r.documentId)).size).toBe(1);
+    const registres = await prisma.ocrDocument.findMany({
+      where: { organizationId: orgA, audioSha256: commandeAudio.audioSha256 },
+    });
+    expect(registres).toHaveLength(1);
+    expect(registres[0].source).toBe("AUDIO_PWA");
+  });
+
+  it("recevoirMessageWhatsapp() : rejeu concurrent du même wamid ne produit qu'UN registre WHATSAPP_TEXT (verrou/contrainte réels)", async () => {
+    const whatsappMessageId = `wamid.integration-concurrent-${randomUUID()}`;
+    const entree = {
+      organizationId: orgA,
+      uploadedByUserId: userId,
+      whatsappMessageId,
+      customerPhone: "+224620000003",
+      kind: "text" as const,
+      texte: "Facture pour Amadou, 1 sac de riz à 500000 GNF",
+    };
+
+    const resultats = await Promise.all(Array.from({ length: 5 }, () => service.recevoirMessageWhatsapp(entree)));
+
+    expect(new Set(resultats.map((r) => r.documentId)).size).toBe(1);
+    const registres = await prisma.ocrDocument.findMany({ where: { whatsappMessageId } });
+    expect(registres).toHaveLength(1);
+    expect(registres[0].organizationId).toBe(orgA);
+  });
+
+  // ── 7. Étanchéité RLS — vérifiée aussi pour les sources neuves, pas
+  // seulement IMAGE_SCAN (blast radius de l'extension du modèle).
+
+  it("une PME ne voit ni ne liste le document AUDIO_PWA/WHATSAPP_TEXT d'une autre organisation", async () => {
+    const docAudioA = await prisma.ocrDocument.findFirstOrThrow({ where: { organizationId: orgA, source: "AUDIO_PWA" } });
+    const docWhatsappA = await prisma.ocrDocument.findFirstOrThrow({ where: { organizationId: orgA, source: "WHATSAPP_TEXT" } });
+
+    await expect(service.findOne(docAudioA.id, orgB)).rejects.toThrow(NotFoundException);
+    await expect(service.findOne(docWhatsappA.id, orgB)).rejects.toThrow(NotFoundException);
+
+    const bannetteB = await service.findAllByOrganization(orgB);
+    expect(bannetteB.map((d) => d.id)).not.toContain(docAudioA.id);
+    expect(bannetteB.map((d) => d.id)).not.toContain(docWhatsappA.id);
   });
 });

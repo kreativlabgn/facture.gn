@@ -144,6 +144,34 @@ export async function createOrganization(
   return response.json();
 }
 
+export interface CreateAssistedOrganizationInput {
+  organizationName: string;
+  regimeFiscal: "normal_tva" | "tpu" | "normal_sans_tva" | "non_assujetti_association";
+  legalForm: "commercial" | "association";
+  merchantName: string;
+  msisdn?: string;
+  consentRecorded: true;
+}
+
+// POST /organizations/assisted — réservé à l'identité agent terrain vérifiée
+// côté trust-api; le marchand devient owner de la nouvelle organisation.
+export async function createAssistedOrganization(
+  token: string,
+  input: CreateAssistedOrganizationInput,
+): Promise<OrganizationSummary> {
+  const response = await authenticatedFetch("/organizations/assisted", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+    throw new TrustApiError(message ?? "Enrôlement du marchand impossible", response.status);
+  }
+  return response.json();
+}
+
 // Mirroir de GET /organizations/:id — champs affichés sur la page paramètres
 // uniquement (pas un mirroir exhaustif du modèle Organization complet).
 export interface OrganizationDetail {
@@ -156,6 +184,12 @@ export interface OrganizationDetail {
   rccm: string | null;
   commercialTier: string;
   dgiVerificationStatus: string;
+  // Plan 2026-09-16 (OCR multicanal vocal/WhatsApp), clarification 7 — déjà
+  // exposé tel quel par GET /organizations/:id (OrganizationsService.findOneDetail()
+  // ne pose aucun `select`, la ligne Organization entière est sérialisée) :
+  // seul le typage manquait ici, même situation que disputeStatus sur
+  // InvoiceListItem ci-dessous.
+  whatsappOcrEnabled: boolean;
 }
 
 // Première route @Patch du service (voir update-organization.dto.ts).
@@ -194,6 +228,32 @@ export async function updateOrganization(
   return response.json();
 }
 
+// POST /organizations/:id/whatsapp-ocr-channel — transition NOMMÉE (plan
+// 2026-09-16, clarification 7), pas un PATCH : même patron que
+// upgradeCommercialTier côté trust-api (organizations.controller.ts), jamais
+// noyée dans updateOrganization ci-dessus, qui ne porte que l'identité légale.
+export async function setWhatsappOcrChannel(
+  token: string,
+  organizationId: string,
+  enabled: boolean,
+): Promise<OrganizationDetail> {
+  const response = await authenticatedFetch(
+    `/organizations/${encodeURIComponent(organizationId)}/whatsapp-ocr-channel`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message.join(", ") : body?.message;
+    throw new TrustApiError(message || "Modification impossible", response.status);
+  }
+  return response.json();
+}
+
 export async function getOrganization(token: string, organizationId: string): Promise<OrganizationDetail> {
   const response = await authenticatedFetch(`/organizations/${encodeURIComponent(organizationId)}`, token);
   if (!response.ok) {
@@ -221,6 +281,12 @@ export interface InvoiceListItem {
   validatedByAdministration: boolean;
   etaxStatus: string | null;
   etaxReceiptNumber: string | null;
+
+  // ADR-064 — "invoice" | "proforma" | "quote". Même situation que
+  // disputeStatus/validatedByAdministration ci-dessus : le champ traverse déjà
+  // l'API, seul le typage manquait. Permet à la liste/au badge de distinguer
+  // un devis d'une facture sans appel réseau supplémentaire.
+  documentType: string;
 }
 
 export async function listInvoices(
@@ -361,17 +427,29 @@ export async function mergeCustomer(
   return response.json();
 }
 
+// Catalogue produits/services (docs/plans/2026-09-16-catalogue-produits-services.md).
+// Deux valeurs seulement, mêmes libellés que ProductType côté schema.prisma —
+// "type" est immuable après création (§3 du plan), jamais accepté par
+// updateProduct() ci-dessous.
+export type ProductType = "product" | "service";
+
 // Champs consommés par la liste produits (dashboard) — mirroir de GET /products
 // (ProductsService.findAllByOrganization). possibleDuplicateOf : UUID brut
 // (même convention que CustomerListItem), utilisé seulement comme signal
 // booléen pour le badge — le nom lisible du candidat n'est résolu que sur
 // l'écran détail (ProductDetail ci-dessous, getProduct()). costPrice en
 // centimes GNF sérialisé string (comme creditLimit), nullable — E6 : la
-// création d'un produit n'est jamais bloquée par l'absence de coût.
+// création d'un produit n'est jamais bloquée par l'absence de coût. salePrice
+// suit la même convention (centimes GNF, string, nullable) — catégorie « sur
+// devis » quand absent, jamais confondu avec costPrice (E6/ADR-084, territoire
+// séparé). isActive : statut réversible, jamais un signal d'erreur.
 export interface ProductListItem {
   id: string;
   name: string;
+  type: ProductType;
   costPrice: string | null;
+  salePrice: string | null;
+  isActive: boolean;
   possibleDuplicateOf: string | null;
 }
 
@@ -400,7 +478,11 @@ export async function listProducts(
 export interface ProductDetail {
   id: string;
   name: string;
+  type: ProductType;
+  description: string | null;
   costPrice: string | null;
+  salePrice: string | null;
+  isActive: boolean;
   possibleDuplicateOf: string | null;
   duplicateOf: { id: string; name: string } | null;
 }
@@ -409,6 +491,67 @@ export async function getProduct(token: string, productId: string): Promise<Prod
   const response = await authenticatedFetch(`/products/${encodeURIComponent(productId)}`, token);
   if (!response.ok) {
     throw new TrustApiError("Impossible de charger ce produit", response.status);
+  }
+  return response.json();
+}
+
+// POST /products — DTO étendu (plan §4a). `type` est le seul champ
+// structurellement requis en plus de `name` : la création n'est pas
+// "minimale", un marchand qui a toute l'information la donne en un seul
+// formulaire. `salePrice` en centimes GNF (string) — la conversion depuis la
+// saisie GNF de l'écran se fait dans le Server Action appelant
+// (products/new/actions.ts), jamais ici, même discipline que
+// CreateInvoiceLineInput.unitPrice. `isActive` n'est volontairement pas de la
+// partie : toujours `true` à la naissance d'une fiche (défaut serveur).
+export interface CreateProductInput {
+  organizationId: string;
+  name: string;
+  type: ProductType;
+  description?: string;
+  salePrice?: string;
+}
+
+export async function createProduct(token: string, input: CreateProductInput): Promise<ProductDetail> {
+  const response = await authenticatedFetch("/products", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new TrustApiError(await messageDErreur(response, "Création du produit impossible"), response.status);
+  }
+  return response.json();
+}
+
+// PATCH /products/:id — nouvelle route (plan §4b). `null` efface un champ
+// (repasse `description`/`salePrice` à vide — un produit "sur devis" à
+// nouveau), `undefined` ne le touche pas, même convention que
+// UpdateOrganizationInput. `type` est absent À DESSEIN : immuable après
+// création, PATCH /products/:id ne l'accepte de toute façon jamais côté
+// trust-api (update-product.dto.ts) — aucun écran d'édition de ce dépôt ne
+// doit donc jamais tenter de l'envoyer.
+export interface UpdateProductInput {
+  name?: string;
+  description?: string | null;
+  salePrice?: string | null;
+  isActive?: boolean;
+}
+
+export async function updateProduct(
+  token: string,
+  productId: string,
+  input: UpdateProductInput,
+): Promise<ProductDetail> {
+  const response = await authenticatedFetch(`/products/${encodeURIComponent(productId)}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    // 404 masqué : identifiant inconnu OU produit d'une autre organisation
+    // rendent le même statut côté trust-api (OrganizationIdSource("product")) —
+    // messageDErreur relaie le message générique tel quel, jamais reformulé.
+    throw new TrustApiError(await messageDErreur(response, "Modification du produit impossible"), response.status);
   }
   return response.json();
 }
@@ -431,6 +574,11 @@ export interface CreateInvoiceInput {
   // vérification automatique côté serveur. Optionnel : une facture sans
   // référence suit exactement le même parcours qu'une facture avec référence.
   referenceMarche?: string;
+  // F, ADR-064 — date de validité d'un devis, purement déclarative (aucun
+  // refine croisé avec documentType côté DTO, même discipline que
+  // referenceMarche). Format "YYYY-MM-DD" tel que rendu par un <input
+  // type="date">, jamais recalculé ici.
+  quoteValidUntil?: string;
 }
 
 export interface InvoiceDetail {
@@ -439,6 +587,15 @@ export interface InvoiceDetail {
   status: string;
   totalTtc: string;
   certificationId: string | null;
+  // POST /invoices/:id/issue renvoie l'enregistrement Invoice complet
+  // (InvoicesService.issue() — meilleur effort, jamais couplé à la
+  // certification déjà committée) : ces deux colonnes sont déjà peuplées à
+  // l'issue de l'émission si la génération du lien a réussi, `null` sinon
+  // (panne Money Context, organisation avec paymentLinkAutoSend=false, Z de
+  // caisse — voir invoices.service.ts). Absentes de createInvoice(), dont la
+  // facture n'a pas encore de lien à ce stade.
+  paymentLinkUrl: string | null;
+  paymentLinkExpiresAt: string | null;
 }
 
 export async function createInvoice(token: string, input: CreateInvoiceInput): Promise<InvoiceDetail> {
@@ -461,6 +618,22 @@ export async function issueInvoice(token: string, invoiceId: string): Promise<In
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new TrustApiError(body?.message ?? "Émission de la facture impossible", response.status);
+  }
+  return response.json();
+}
+
+// C15/C16, ADR-064 — un proforma ou un devis n'est jamais émis directement
+// (issue() les rejette en 409, voir invoices.service.ts) : ce geste crée une
+// NOUVELLE facture brouillon distincte, qui reste elle-même à émettre via
+// IssueInvoiceForm. Même forme que voidInvoice() : POST sans corps, message
+// de trust-api relayé tel quel.
+export async function convertToInvoice(token: string, invoiceId: string): Promise<InvoiceDetail> {
+  const response = await authenticatedFetch(`/invoices/${encodeURIComponent(invoiceId)}/convert-to-invoice`, token, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new TrustApiError(body?.message ?? "Conversion en facture impossible", response.status);
   }
   return response.json();
 }
@@ -531,6 +704,10 @@ export interface InvoiceFullDetail {
   paymentLinkExpiresAt: string | null;
 
   referenceMarche: string | null;
+  // F, ADR-064 — déclaratif, jamais vérifié côté serveur (même discipline que
+  // referenceMarche). `null` pour toute facture — n'a de sens que sur un
+  // document de type devis.
+  quoteValidUntil: string | null;
   issuedAt: string | null;
   createdAt: string;
 
@@ -1379,6 +1556,35 @@ export async function validateLiquidation(token: string, invoiceId: string): Pro
     // « compte non vérifié » et « rattachement non confirmé », trois refus que
     // le DAF doit pouvoir lire. Les reformuler ici les rendrait indistincts.
     throw new TrustApiError(body?.message ?? "Validation impossible", response.status);
+  }
+  return response.json();
+}
+
+export interface PublicBuyerObjectionResult {
+  success: true;
+  caseNumber: string;
+  status: string;
+  message: string;
+}
+
+export async function registerObjection(
+  token: string,
+  invoiceId: string,
+  reason: string,
+): Promise<PublicBuyerObjectionResult> {
+  const response = await authenticatedFetch(
+    `/public-buyer/invoices/${encodeURIComponent(invoiceId)}/objection`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+    throw new TrustApiError(message ?? "Enregistrement de l'objection impossible", response.status);
   }
   return response.json();
 }

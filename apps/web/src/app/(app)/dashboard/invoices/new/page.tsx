@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { requireSessionToken } from "@/lib/session";
 import { resolveActiveOrganization } from "@/lib/active-organization";
-import { listCustomers } from "@/lib/trust-api";
+import { listCustomers, TrustApiError } from "@/lib/trust-api";
+import { EmptyState } from "@/components/ui";
 import { InvoiceForm } from "./InvoiceForm";
 
 export const metadata: Metadata = { title: "Émettre une facture — facture.gn" };
@@ -13,7 +14,23 @@ export default async function NewInvoicePage() {
     return null;
   }
 
-  const customers = await listCustomers(token, organization.id, { take: 100 });
+  // Un rôle sans customers:read (URL atteinte directement, hors des liens que
+  // la coquille propose) se prend un 403 de trust-api — même défense en
+  // profondeur que credits/abonnement/parrainage plutôt qu'une page en erreur.
+  let customers;
+  try {
+    customers = await listCustomers(token, organization.id, { take: 100 });
+  } catch (error) {
+    if (error instanceof TrustApiError && error.status === 403) {
+      return (
+        <EmptyState
+          title="Accès réservé"
+          description="Votre rôle ne permet pas de consulter la liste des clients, nécessaire pour émettre une facture."
+        />
+      );
+    }
+    throw error;
+  }
 
   return (
     <div>

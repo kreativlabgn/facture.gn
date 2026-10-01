@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
+import { EtapeIndicateur } from "@/components/auth/EtapeIndicateur";
 import { requireSessionToken } from "@/lib/session";
 import { TrustApiError, listMyOrganizations, listMyPractices } from "@/lib/trust-api";
 import { OnboardingForm } from "./OnboardingForm";
@@ -32,21 +33,24 @@ export default async function OnboardingPage() {
   }
 
   return (
-    <AuthCard
-      title="Votre organisation"
-      description="Dernière étape avant d'émettre votre première facture. Le régime fiscal détermine la TVA appliquée — il n'est jamais choisi à votre place."
-      footer={
-        practices.length > 0 ? (
-          <>
-            Vous gérez un cabinet ou un CGA ?{" "}
-            <Link href="/cabinet" className="font-semibold text-navy-950 underline underline-offset-2">
-              Accéder à votre espace professionnel
-            </Link>
-          </>
-        ) : null
-      }
-    >
-      <OnboardingForm />
-    </AuthCard>
+    <div className="mx-auto w-full max-w-md">
+      <EtapeIndicateur profil="marchand" etape="structure" />
+      <AuthCard
+        title="Votre organisation"
+        description="Dernière étape avant d'émettre votre première facture. Le régime fiscal détermine la TVA appliquée — il n'est jamais choisi à votre place."
+        footer={
+          practices.length > 0 ? (
+            <>
+              Vous gérez un cabinet ou un CGA ?{" "}
+              <Link href="/cabinet" className="font-semibold text-navy-950 underline underline-offset-2">
+                Accéder à votre espace professionnel
+              </Link>
+            </>
+          ) : null
+        }
+      >
+        <OnboardingForm />
+      </AuthCard>
+    </div>
   );
 }

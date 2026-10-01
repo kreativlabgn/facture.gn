@@ -1,8 +1,9 @@
-import { Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Controller, Get, Param, Post, Query, Body } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser, type CurrentUserPayload } from "../auth/current-user.decorator";
 import { listReceivedInvoicesQuerySchema, type ListReceivedInvoicesQueryDto } from "./dto/list-received-invoices-query.dto";
+import { registerObjectionSchema, type RegisterObjectionDto } from "./dto/register-objection.dto";
 import { PublicBuyerPortalService } from "./public-buyer-portal.service";
 
 // Aucun @Roles()/@OrganizationIdSource ici, sur AUCUNE route de ce controller —
@@ -22,6 +23,15 @@ export class PublicBuyerPortalController {
   @Post("invoices/:invoiceId/validate-liquidation")
   validateLiquidation(@Param("invoiceId") invoiceId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.publicBuyerPortalService.validateLiquidation(invoiceId, user.id);
+  }
+
+  @Post("invoices/:invoiceId/objection")
+  registerObjection(
+    @Param("invoiceId") invoiceId: string,
+    @Body(new ZodValidationPipe(registerObjectionSchema)) dto: RegisterObjectionDto,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.publicBuyerPortalService.registerObjection(invoiceId, dto.reason, user.id);
   }
 
   @Get("invoices")
