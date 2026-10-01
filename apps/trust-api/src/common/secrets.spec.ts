@@ -143,7 +143,10 @@ describe("TRUST_API_SECRETS — plan 2026-09-16 (OCR multicanal), étape 3 + RED
     const env = {
       REDIS_URL: "redis://localhost:6379",
       OCR_STT_ENDPOINT: "https://stt.facture.gn",
-      OCR_STT_TOKEN: "7f3a9c1e5b2d8046f1a9c3e7b5d20648",
+      // Valeur factice (« deadbeef » ×4 : 32 hexadécimaux, entropie basse). Une
+      // valeur aléatoire déclenchait la règle generic-api-key de gitleaks ; un seul
+      // caractère répété (32 zéros) est refusé par REPEATED_CHAR (gabarit).
+      OCR_STT_TOKEN: "deadbeefdeadbeefdeadbeefdeadbeef",
       WHATSAPP_ACCESS_TOKEN: "jeton-meta-quelconque",
       WHATSAPP_PHONE_NUMBER_ID: "1234567890",
       STORAGE_ENDPOINT: "http://minio:9000",
