@@ -7,9 +7,29 @@ packages:
 # dans les dépendances directement bundlées — corrigées à la source plutôt que
 # d'attendre une nouvelle version de @nestjs/swagger qui les référence.
 overrides:
-  multer@<2.2.0: ">=2.2.0"
+  multer@<2.3.0: ">=2.3.0"
   lodash@<4.17.24: ">=4.17.24"
-  js-yaml@<4.3.1: ">=4.3.1"
+  js-yaml@<4.3.2: ">=4.3.2"
+  # GHSA-vcvr-r3jv-pc5j (Next.js, exécution de code à distance dans
+  # next/og ImageResponse, critique, publié le 30/09/2026) : corrigé en 16.3.6.
+  # Aucun usage direct de next/og dans apps/web, mais Next est une dépendance
+  # d'exécution — relevé sans attendre. Caret : on reste sur la ligne 16.x.
+  next@<16.3.6: "^16.3.6"
+  sharp@<0.35.4: ">=0.35.4"
+  # GHSA-6j4f-fj2g-mc7p / GHSA-qhr7-859c-m2p7 (brace-expansion, DoS par récursion
+  # non bornée) et GHSA-qw65-cvwx-89v3 (fast-uri, injection d'autorité via un port
+  # non validé). Outillage seulement (eslint, typescript-eslint, @nestjs/cli) —
+  # aucun chemin d'exécution en production. Une surcharge PAR LIGNE MAJEURE
+  # (caret) : minimatch 3 / 9 / 10 attendent chacun sa propre API de
+  # brace-expansion, un `>=` sans borne casserait l'une des trois.
+  brace-expansion@<1.1.20: "^1.1.20"
+  brace-expansion@>=2.0.0 <2.1.6: "^2.1.6"
+  brace-expansion@>=4.0.0 <5.0.11: "^5.0.11"
+  fast-uri@>=3.0.0 <3.1.7: "^3.1.7"
+  # GHSA-m9gg-hp2v-232j (@grpc/grpc-js, certificats non autorisés présentés comme
+  # autorisés dans certaines configurations TLS) — transitif via @nestjs/terminus
+  # et l'exporter OTLP, publié le 30/09/2026.
+  "@grpc/grpc-js@>=1.14.0 <1.14.5": "^1.14.5"
 allowBuilds:
   '@nestjs/core': true
   '@prisma/client': true
