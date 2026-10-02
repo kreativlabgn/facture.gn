@@ -68,9 +68,13 @@ prisonnier d'une PR de 18 commits.
 - [x] Tâche 1 : `apps/web/package.json`, `package.json`, `pnpm-workspace.yaml`
 - [x] Tâche 2 : `pnpm-lock.yaml` régénéré ; `pnpm install --frozen-lockfile` cohérent
 - [x] Tâche 3 : revalidation — audit-ci (vert), `turbo lint typecheck test` (13/13, trust-api
-      93,38 % de couverture), `turbo build` (4/4). Démarrage réel non rejoué dans ce worktree
-      (pas de `.env` local) — couvert par le smoke test DI `app.module.spec.ts` et par `next
-      build` ; à confirmer en conditions réelles avant fusion si jugé nécessaire.
+      93,38 % de couverture), `turbo build` (4/4), **démarrage réel des 3 services rejoué** le
+      02/10/2026 sur `.env` copiés depuis le clone principal, DB/Redis partagés
+      (`facturegn-postgres-1`/`facturegn-redis-1`) : `trust-api` `/health/live` et `/health/ready`
+      → 200 ; `web` (Next.js 16.3.6) → 200 sur `/`, titre correct ; `money-api` DB `up`, `/health/
+      ready` → 503 sur la sonde Redis (`Cannot read properties of undefined (reading 'ping')`) —
+      **bug préexistant sur `app`, identique au fichier du clone principal, déjà diagnostiqué et
+      corrigé dans la PR #29 (non fusionnée)** : pas une régression de ce correctif.
 
 ## Tests (critère « rouge puis vert »)
 - ROUGE (mesuré avant tout changement) : `audit-ci` échoue sur 12 avis non tolérés.
