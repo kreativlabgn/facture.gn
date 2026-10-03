@@ -3,6 +3,11 @@
 Diagrammes C4 (niveaux 1 et 2) et flux d'authentification. Rendu Mermaid natif sur
 GitHub. Source de vérité métier : `../../../V/DAT-facture-gn.md`.
 
+> **Évolution décidée (ADR-125, 2026-10-03)** : le Money Context (`money-api`) sera retiré au profit
+> d'ORCHEA, orchestration de paiement externalisée dans un autre dépôt. Djomy et Moneroo sont hors
+> contexte ; les rails sont Orange Money et MTN MoMo en direct. **Les diagrammes ci-dessous décrivent
+> l'état actuel du code** ; ils seront redessinés au retrait de `money-api`.
+
 État au 2026-08-29 : `trust-api`, `money-api`, `web`, `packages/db` sont scaffoldés.
 Cert-Engine Rust, Redis/BullMQ, MinIO, Capital/Platform Contexts : cibles DAT non
 encore construites (en pointillés ci-dessous).

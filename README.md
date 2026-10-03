@@ -10,7 +10,7 @@ Infrastructure de facturation certifiée pour les PME de Guinée. Monorepo pnpm 
 | Paquet | Rôle | État |
 |---|---|---|
 | `apps/trust-api` | **Trust Context** — IAM, organisations multi-tenant, facturation core (invoice / proforma / devis / avoir / remboursement), certification (Ed25519, chaînage SHA-256), vérification publique, USSD, portail client, portail acheteur public (B2G), cabinet/CGA, FEC | actif — backlog 77/77 |
-| `apps/money-api` | **Money Context** — orchestrateur de paiement multi-provider (interface `PaymentProvider` unique), circuit breaker Djomy → Moneroo, webhooks normalisés + idempotents | actif — stubs providers (pas de credentials réels) |
+| `apps/money-api` | **Money Context** — orchestrateur de paiement multi-provider (interface `PaymentProvider` unique), circuit breaker Djomy → Moneroo, webhooks normalisés + idempotents | actif — stubs providers (pas de credentials réels) ; **transitoire** : sera retiré au profit d'ORCHEA, orchestration de paiement externalisée (ADR-125) |
 | `apps/web` | PWA Next.js — dashboard PME, page de paiement publique, page de vérification publique, portail client, vue cabinet | actif — périmètre réduit |
 | `packages/db` | Schéma Prisma partagé (Postgres 16), client généré, migrations écrites à la main | actif |
 

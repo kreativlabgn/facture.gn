@@ -11,7 +11,17 @@ sur le process.
 Infrastructure de facturation certifiée pour les PME de Guinée — monorepo pnpm
 workspaces + Turborepo. Trois couches produit : **Trust** (certification
 cryptographique Ed25519 / chaînage SHA-256), **Money** (orchestrateur de paiement
-Djomy → Moneroo), **Capital** (financement, V2, non scaffoldé).
+Djomy → Moneroo, **transitoire** : remplacé par ORCHEA, voir ci-dessous), **Capital**
+(financement, V2, non scaffoldé).
+
+**Paiement : ORCHEA remplace `money-api` (ADR-125, décision du 2026-10-02).** ORCHEA est
+l'orchestration de paiement externalisée, dans un autre dépôt et avec un autre compte
+(`orcheagn/-orchea-payment`). facture.gn ne gère plus le paiement en interne et ne parle jamais à
+un Provider. Djomy et Moneroo sont hors contexte ; les rails sont Orange Money et MTN MoMo en
+direct (Kulu prévu). **`apps/money-api` est gelé : ne pas l'étendre** (ni provider, ni bascule, ni
+réconciliation). Il se retire par parité, selon `docs/plans/2026-10-03-orchea-remplace-money-api.md`.
+Le contrat vit dans le dépôt d'ORCHEA (`docs/integration/facture-gn.md`) : le citer, ne pas le copier.
+Les lignes ci-dessous décrivent le code actuel, qui reste ce qu'il est jusqu'au retrait.
 
 Positionnement non négociable : **tiers de confiance privé certifié, jamais un
 registre ni une autorité d'État**. Ne jamais écrire « officiel », « République de
