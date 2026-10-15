@@ -38,8 +38,8 @@ overrides:
   # configuré) mais le deviendrait derrière un ingress : relevé sans attendre.
   proxy-addr@<2.0.8: "^2.0.8"
   # GHSA-68fv-2mgg-jv7q (source-map-js, déni de service par offsets de sections,
-  # haute, publié le 18/09/2026) — outillage seulement (postcss sous webpack et
-  # next au build, magicast sous la couverture vitest).
+  # haute, publié le 18/09/2026) — build et tests seulement : postcss (CSS de
+  # next et de Tailwind au build, vite sous vitest) et magicast (couverture).
   source-map-js@>=1.0.0 <1.2.2: "^1.2.2"
 allowBuilds:
   '@nestjs/core': true

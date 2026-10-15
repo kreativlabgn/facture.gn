@@ -110,7 +110,7 @@ resteraient rouges ; aucun des trois n'est causé par la PR.
    |---|---|---|---|---|
    | GHSA-cjq9-62q9-8jv4 — SSRF dans l'optimisation d'images | haute | `next` 16.3.6 → corrigé en 16.3.8 | `apps/web > next` | oui — l'optimiseur d'images de Next est actif par défaut (`next.config.ts` ne le désactive pas) |
    | GHSA-jqcg-44mw-7w3h — usurpation d'IP via un sous-réseau de confiance IPv4 mappé IPv6 | critique | `proxy-addr` 2.0.7 → 2.0.8 | `@nestjs/platform-express > express` | non atteignable aujourd'hui (aucun `trust proxy` configuré), mais Express est le serveur HTTP des deux API |
-   | GHSA-68fv-2mgg-jv7q — déni de service par offsets de sections | haute | `source-map-js` 1.2.1 → 1.2.2 | `@nestjs/cli > webpack > … > postcss`, `@vitest/coverage-v8 > magicast` | non — outillage de build et de test |
+   | GHSA-68fv-2mgg-jv7q — déni de service par offsets de sections | haute | `source-map-js` 1.2.1 → 1.2.2 | `next > postcss`, `@tailwindcss/postcss`, `vite > postcss` (vitest), `@vitest/coverage-v8 > magicast` | non — CSS traité au build (`next start` ne lance pas postcss), tests et couverture |
    | GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr — pollution de prototype menant à une exécution de code | critique ×2 | `tinypool` 1.1.1 — **corrigé seulement en 2.1.2** | `vitest > tinypool` | non — pool de workers du lanceur de tests |
    | GHSA-vfj7-8cjw-p6xm — épuisement de pile par motifs imbriqués | haute | `braces` 3.0.3 — **aucune version corrigée** | `@nestjs/cli > chokidar > braces` | non — surveillance de fichiers de `nest start --watch` |
 
