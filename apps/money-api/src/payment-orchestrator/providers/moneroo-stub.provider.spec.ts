@@ -21,12 +21,12 @@ describe("MonerooStubProvider", () => {
   });
 
   it("simule un délai configurable, utilisé par les tests de retry", async () => {
-    const provider = new MonerooStubProvider(30);
+    const provider = new MonerooStubProvider(50);
     const start = Date.now();
 
     await provider.createPaymentLink(request);
 
-    expect(Date.now() - start).toBeGreaterThanOrEqual(30);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(40);
   });
 });
 

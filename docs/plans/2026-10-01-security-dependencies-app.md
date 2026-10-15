@@ -182,7 +182,14 @@ resteraient rouges ; aucun des trois n'est causé par la PR.
       0 × TS2307) ; lint identique avec ou sans `dist/` préexistant (0 erreur, 5 avertissements)
 - [x] Tâche 7 : `.gitleaksignore` (le fichier existait déjà, même format) — `gitleaks git .`
       sur l'historique complet : 493 commits, aucune alerte
-- [ ] Tâche 8 : revalidation complète sur checkout vierge (voir ci-dessous)
+- [x] Tâche 8 (découverte en revalidation) : `moneroo-stub.provider.spec.ts` a échoué une fois
+      (« expected 29 to be greater than or equal to 30 ») sur 6 passes complètes de `turbo test`
+      le 2026-10-15, sans rapport avec cette PR. C'est le jumeau du test Djomy déjà stabilisé par
+      la PR #21 (477e302) : le test exige un écart `Date.now()` d'au moins le délai exact, ce que
+      Node ne garantit pas (non reproduit isolément : 0/25 sous charge CPU). Même correctif que
+      la #21 — délai simulé 50 ms, assertion ≥ 40 ms ; le test échoue toujours si le stub ne
+      temporise pas. Aucun test désactivé.
+- [ ] Tâche 9 : revalidation complète sur checkout vierge (voir ci-dessous)
 
 ### Tests (rouge puis vert)
 - ROUGE mesuré le 2026-10-15 : `audit-ci` (6 avis non tolérés) ; `pnpm turbo typecheck` sur
