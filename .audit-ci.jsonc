@@ -47,6 +47,23 @@
     // deux vecteurs exigent un `browserslist-stats.json` non fiable ou des
     // requêtes pathologiques — la config est statique et in-repo.
     "GHSA-73wf-gq98-2v4g",
-    "GHSA-c83g-rgw3-j3cx"
+    "GHSA-c83g-rgw3-j3cx",
+    // tinypool — pollution de prototype menant à une exécution de code via les
+    // options d'un worker (2 avis critiques, publiés le 05/10/2026). Chaîne
+    // vitest > tinypool : le pool de workers du LANCEUR DE TESTS, dont les options
+    // viennent de vitest.config.ts (statique, in-repo) ; l'exploiter suppose déjà
+    // d'exécuter du code dans le processus de test. Présent sur disque dans les
+    // images (Dockerfile : tout node_modules copié, allègement reporté) mais jamais
+    // chargé par `node dist/main.js`. Corrigé seulement en tinypool 2.1.2, alors que
+    // vitest 2.1.9 exige tinypool ^1 : à lever avec la montée de vitest (chantier
+    // à part, voir docs/plans/2026-10-01-security-dependencies-app.md).
+    "GHSA-5gmw-xhrv-c9v3",
+    "GHSA-85c8-ppgw-ccpr",
+    // braces — épuisement de pile par motifs imbriqués (haute, publié le
+    // 18/09/2026). Chaîne @nestjs/cli > chokidar > braces : surveillance de
+    // fichiers de `nest start --watch` (dev), motifs fixés par le CLI, jamais une
+    // entrée utilisateur. AUCUNE version corrigée publiée à ce jour (<= 3.0.3
+    // vulnérable) : à lever dès qu'elle existe.
+    "GHSA-vfj7-8cjw-p6xm"
   ]
 }

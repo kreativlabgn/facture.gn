@@ -5,3 +5,10 @@
 # matche la forme `clé: "..."`. Valeur de test (UUID de fixture), aucun secret.
 # Commit fd6fc93c du 2026-08-08, version historique du fichier.
 fd6fc93c0256eaac8175b863c748e4f64d323038:apps/trust-api/src/payments/payments.service.spec.ts:generic-api-key:202
+
+# `OCR_STT_TOKEN: "<valeur de test>"` dans le spec de validation des secrets
+# (cas « accepte des valeurs bien formées ») — même règle, même forme. Jeton
+# factice de fixture, présent dans aucun autre fichier ni commit, remplacé par
+# `deadbeef…` dans 6efccbf. Commit 781688d du 2026-09-17 (branche des Phases 4
+# & 5) : la CI récupère toutes les branches, l'alerte rougissait chaque PR.
+781688d996b7d9f561f7cdab0c455d6094a7de22:apps/trust-api/src/common/secrets.spec.ts:generic-api-key:146
