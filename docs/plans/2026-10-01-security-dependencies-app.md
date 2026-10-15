@@ -94,3 +94,113 @@ prisonnier d'une PR de 18 commits.
   régénération (`pnpm install`) ; le reste de la configuration est identique donc sans conflit.
 - Limite : de nouveaux avis peuvent être publiés à tout moment ; ce correctif lève ceux connus
   le 2026-10-01. Le job `security` de la CI (dès qu'elle tourne) et Dependabot prennent le relais.
+
+---
+
+## Compléments du 2026-10-15 — la PR ne passerait toujours pas la CI
+
+Revérification complète de la branche le 2026-10-15 (Node 22, Postgres 16, Redis 7, checkout
+vierge, étapes de `ci.yml` dans l'ordre). Le code de la PR est sain, mais trois jobs
+resteraient rouges ; aucun des trois n'est causé par la PR.
+
+### Constats (mesurés avant tout changement)
+1. **`audit-ci` de nouveau rouge — 6 avis publiés après la PR** (18/09 → 07/10) :
+
+   | Avis | Gravité | Paquet (version) | Chemin | Exposition en exécution |
+   |---|---|---|---|---|
+   | GHSA-cjq9-62q9-8jv4 — SSRF dans l'optimisation d'images | haute | `next` 16.3.6 → corrigé en 16.3.8 | `apps/web > next` | oui — l'optimiseur d'images de Next est actif par défaut (`next.config.ts` ne le désactive pas) |
+   | GHSA-jqcg-44mw-7w3h — usurpation d'IP via un sous-réseau de confiance IPv4 mappé IPv6 | critique | `proxy-addr` 2.0.7 → 2.0.8 | `@nestjs/platform-express > express` | non atteignable aujourd'hui (aucun `trust proxy` configuré), mais Express est le serveur HTTP des deux API |
+   | GHSA-68fv-2mgg-jv7q — déni de service par offsets de sections | haute | `source-map-js` 1.2.1 → 1.2.2 | `@nestjs/cli > webpack > … > postcss`, `@vitest/coverage-v8 > magicast` | non — outillage de build et de test |
+   | GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr — pollution de prototype menant à une exécution de code | critique ×2 | `tinypool` 1.1.1 — **corrigé seulement en 2.1.2** | `vitest > tinypool` | non — pool de workers du lanceur de tests |
+   | GHSA-vfj7-8cjw-p6xm — épuisement de pile par motifs imbriqués | haute | `braces` 3.0.3 — **aucune version corrigée** | `@nestjs/cli > chokidar > braces` | non — surveillance de fichiers de `nest start --watch` |
+
+2. **`typecheck` rouge sur un checkout vierge** (donc en CI) : 14 × TS2307 « Cannot find module
+   '@facture-gn/db' » dans `money-api` et `trust-api`. La PR #17 a fait dépendre `lint` et
+   `typecheck` de `^typecheck` au lieu de `^build` ; or `@facture-gn/db` n'expose que `dist/`
+   (`main`/`types`), qui n'existe qu'après son build. En local le défaut est invisible dès qu'un
+   `dist/` traîne d'un build précédent. Reproduit à l'identique sur `app` (`9afdbe3`). Le lint,
+   lui, passe sans `dist/` mais **change de résultat** : 42 avertissements sans, 5 avec (37
+   `require-await` et apparentés parasites, sur des types non résolus) — un lint type-checked
+   doit voir les vrais types.
+
+3. **gitleaks rouge sur l'historique complet** : 1 alerte `generic-api-key`, valeur de test
+   `OCR_STT_TOKEN` de `apps/trust-api/src/common/secrets.spec.ts` (ligne 146) introduite par
+   `781688d` (branche de la PR #28) et remplacée par `deadbeef…` dans `6efccbf`. La valeur
+   n'apparaît dans aucun autre fichier ni commit (`git log --all -S`). Comme `ci.yml` récupère
+   l'historique complet (`fetch-depth: 0`, toutes les branches), cette alerte rend le job
+   `security` rouge **sur toutes les PR**, et le restera dans l'historique d'`app` une fois la #28
+   fusionnée. Les deux commits propres à cette PR sont sains.
+
+### Clarifications
+- Q : pourquoi des exceptions pour `tinypool` et `braces` plutôt qu'une correction ? →
+  R : `braces` n'a **aucune** version corrigée publiée. `tinypool` n'est corrigé qu'en 2.x,
+  alors que vitest 2.1.9 déclare `tinypool ^1` : forcer une majeure sous vitest, c'est changer
+  le moteur d'exécution des tests sans garantie de compatibilité — même raisonnement que
+  « Monter vitest en 3.x » ci-dessus. La montée de vitest reste le vrai correctif (chantier à
+  part). Les deux paquets sont **présents sur disque** dans les images de production (le
+  Dockerfile copie tout `node_modules`, l'allègement étant reporté) mais **jamais chargés** :
+  les services démarrent par `node dist/main.js`, qui n'importe ni vitest ni `@nestjs/cli`.
+- Q : `next` passe de 16.3.6 à 16.3.8 — même convention ? → R : oui : épinglage exact dans
+  `apps/web/package.json` (avec `eslint-config-next`), surcharge en caret (`^16.3.8`).
+- Q : les surcharges restent-elles dupliquées dans `package.json` et `pnpm-workspace.yaml` ? →
+  R : oui, pour rester textuellement identiques à la PR #28 sur les lignes existantes ; les
+  nouvelles lignes sont ajoutées aux deux endroits.
+- Q : pourquoi `.gitleaksignore` plutôt que l'`[allowlist]` de `.gitleaks.toml` ? → R : une
+  entrée `commits` dans l'allowlist globale exempterait **tout** le commit `781688d` (des
+  dizaines de fichiers) ; l'empreinte `.gitleaksignore` (commit, fichier, règle, ligne) n'exempte
+  que cette alerte. gitleaks la lit à la racine par défaut, sans changer `ci.yml`.
+
+### Solution retenue
+4. `apps/web/package.json` : `next` et `eslint-config-next` 16.3.6 → 16.3.8 ; surcharge
+   `next@<16.3.8: ^16.3.8`.
+5. Surcharges `proxy-addr@<2.0.8: ^2.0.8` et `source-map-js@>=1.0.0 <1.2.2: ^1.2.2` (caret :
+   même ligne majeure), dans `pnpm-workspace.yaml` et `package.json`.
+6. `.audit-ci.jsonc` : exceptions justifiées pour GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr
+   (`tinypool`) et GHSA-vfj7-8cjw-p6xm (`braces`).
+7. `turbo.json` : `lint` et `typecheck` dépendent de `^build`. Coût réel : `apps/web` n'a
+   aucune dépendance interne (rien à construire) ; pour les API, seul `@facture-gn/db` est
+   construit (`tsc`, quelques secondes, mis en cache par turbo).
+8. `.gitleaksignore` : l'empreinte de l'alerte de `781688d`, commentée.
+9. `pnpm-lock.yaml` régénéré, puis vérifié en mode gelé.
+
+### Alternatives écartées
+- **Surcharger `tinypool` en `^2.1.2`** : écarté — majeure imposée sous vitest 2.1.9 (voir
+  clarifications).
+- **Ajouter une étape `pnpm --filter db build` dans `ci.yml`** : écarté — la CI passerait mais
+  `pnpm turbo typecheck` resterait faux pour tout contributeur sur un clone neuf ; c'est le
+  graphe de tâches qui est faux, pas la CI.
+- **Réécrire l'historique pour retirer la valeur de test** : écarté — branches partagées, et la
+  valeur est un jeton de test factice.
+
+### Découpage
+- [x] Tâche 4 : ce complément de plan
+- [x] Tâche 5 : versions et surcharges (`apps/web/package.json`, `package.json`,
+      `pnpm-workspace.yaml`), exceptions `.audit-ci.jsonc`, lockfile régénéré — le lockfile
+      ne change que `next` (et `@next/*`), `eslint-config-next`, `proxy-addr`, `source-map-js` ;
+      `audit-ci` : « Passed pnpm security audit »
+- [x] Tâche 6 : `turbo.json` — `turbo typecheck` vert après `rm -rf packages/db/dist` (5/5,
+      0 × TS2307) ; lint identique avec ou sans `dist/` préexistant (0 erreur, 5 avertissements)
+- [x] Tâche 7 : `.gitleaksignore` (le fichier existait déjà, même format) — `gitleaks git .`
+      sur l'historique complet : 493 commits, aucune alerte
+- [ ] Tâche 8 : revalidation complète sur checkout vierge (voir ci-dessous)
+
+### Tests (rouge puis vert)
+- ROUGE mesuré le 2026-10-15 : `audit-ci` (6 avis non tolérés) ; `pnpm turbo typecheck` sur
+  checkout vierge (14 × TS2307) ; `gitleaks git .` sur l'historique complet (1 alerte).
+- VERT attendu : les trois passent ; puis les étapes de `ci.yml` dans l'ordre sur une base vierge
+  (`db:generate`, `db:migrate:deploy`, `turbo lint`, `turbo typecheck`, `turbo test`), `turbo
+  build`, specs d'intégration de `trust-api` contre Postgres, démarrage réel des 3 services.
+
+### Critères de done
+- `audit-ci`, gitleaks (historique complet) et `pnpm install --frozen-lockfile` verts.
+- Les étapes de `ci.yml` passent **dans l'ordre sur un checkout sans `packages/db/dist`**.
+- Lint identique avec ou sans `dist/` préexistant.
+- `next build` vert en 16.3.8 ; web, trust-api et money-api démarrent et répondent.
+
+### Risques et limites
+- Risque : `next` 16.3.6 → 16.3.8 (patch) — même mitigation que ci-dessus (build, 427 tests web,
+  démarrage réel).
+- Risque : `proxy-addr` 2.0.8 sous Express — correctif de niveau patch ; mitigation : suites
+  money-api et trust-api, démarrage réel des deux API.
+- Limite : les exceptions `tinypool` et `braces` restent des dettes ; à lever avec la montée de
+  vitest et une version corrigée de `braces`.

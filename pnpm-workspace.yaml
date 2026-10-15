@@ -14,7 +14,9 @@ overrides:
   # next/og ImageResponse, critique, publié le 30/09/2026) : corrigé en 16.3.6.
   # Aucun usage direct de next/og dans apps/web, mais Next est une dépendance
   # d'exécution — relevé sans attendre. Caret : on reste sur la ligne 16.x.
-  next@<16.3.6: "^16.3.6"
+  # GHSA-cjq9-62q9-8jv4 (Next.js, SSRF dans l'optimisation d'images, haute,
+  # publié le 07/10/2026) : corrigé en 16.3.8 — l'optimiseur est actif par défaut.
+  next@<16.3.8: "^16.3.8"
   sharp@<0.35.4: ">=0.35.4"
   # GHSA-6j4f-fj2g-mc7p / GHSA-qhr7-859c-m2p7 (brace-expansion, DoS par récursion
   # non bornée) et GHSA-qw65-cvwx-89v3 (fast-uri, injection d'autorité via un port
@@ -30,6 +32,15 @@ overrides:
   # autorisés dans certaines configurations TLS) — transitif via @nestjs/terminus
   # et l'exporter OTLP, publié le 30/09/2026.
   "@grpc/grpc-js@>=1.14.0 <1.14.5": "^1.14.5"
+  # GHSA-jqcg-44mw-7w3h (proxy-addr, usurpation d'IP via un sous-réseau de
+  # confiance IPv4 mappé IPv6, critique, publié le 05/10/2026) — Express, donc le
+  # serveur HTTP des deux API. Non atteignable aujourd'hui (aucun `trust proxy`
+  # configuré) mais le deviendrait derrière un ingress : relevé sans attendre.
+  proxy-addr@<2.0.8: "^2.0.8"
+  # GHSA-68fv-2mgg-jv7q (source-map-js, déni de service par offsets de sections,
+  # haute, publié le 18/09/2026) — outillage seulement (postcss sous webpack et
+  # next au build, magicast sous la couverture vitest).
+  source-map-js@>=1.0.0 <1.2.2: "^1.2.2"
 allowBuilds:
   '@nestjs/core': true
   '@prisma/client': true
