@@ -189,7 +189,27 @@ resteraient rouges ; aucun des trois n'est causé par la PR.
       Node ne garantit pas (non reproduit isolément : 0/25 sous charge CPU). Même correctif que
       la #21 — délai simulé 50 ms, assertion ≥ 40 ms ; le test échoue toujours si le stub ne
       temporise pas. Aucun test désactivé.
-- [ ] Tâche 9 : revalidation complète sur checkout vierge (voir ci-dessous)
+- [x] Tâche 9 : revalidation complète le 2026-10-15 sur un worktree neuf (`git clean -fdx`, sans
+      `packages/db/dist`, base Postgres recréée), Node 22, pnpm 10.34.5 :
+      - `pnpm install --frozen-lockfile` cohérent ;
+      - étapes de `ci.yml` dans l'ordre, **deux passes de suite** : `db:generate`,
+        `db:migrate:deploy` (81 migrations), `turbo lint` (0 erreur, 5 avertissements),
+        `turbo typecheck` (5/5), `turbo test` (5/5 : web 427, money-api 134, trust-api 1 899,
+        couverture tenue) ;
+      - build : db, trust-api, money-api et web (Next.js 16.3.8) verts. Hors CI, il a fallu
+        `NODE_EXTRA_CA_CERTS` pour le proxy TLS du conteneur de vérification (`next/font`
+        télécharge les polices Google au build) ;
+      - `trust-api` avec Postgres joignable (`vitest run` direct, specs d'intégration
+        comprises) : 179 fichiers, 1 937 tests réussis ;
+      - démarrage réel des 3 services compilés : `trust-api` `/health/live` et `/health/ready`
+        → 200 ; web → 200 sur `/` et `/login` ; `money-api` `/health/live` → 200, `/health/ready`
+        → 503 sur la sonde Redis (bug préexistant sur `app`, corrigé par la PR #29, sans conflit
+        avec cette branche) ;
+      - `audit-ci` : « Passed pnpm security audit » ; gitleaks (historique complet, 497
+        commits) : aucune alerte.
+      - Fusion future avec la PR #28 : conflits attendus sur la version de `next` (16.3.6 côté
+        #28, 16.3.8 ici) dans `apps/web/package.json`, `package.json`, `pnpm-workspace.yaml`, et
+        sur `pnpm-lock.yaml` → prendre 16.3.8, puis régénérer le lockfile.
 
 ### Tests (rouge puis vert)
 - ROUGE mesuré le 2026-10-15 : `audit-ci` (6 avis non tolérés) ; `pnpm turbo typecheck` sur
