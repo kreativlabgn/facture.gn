@@ -11,10 +11,10 @@
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["^build"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["^build"]
     },
     "test": {
       "dependsOn": ["^build"]
